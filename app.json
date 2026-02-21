@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "InsuranceNYou",
+    "slug": "iny-concierge",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "insurancenyou",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.insurancenyou.app"
+    },
+    "android": {
+      "package": "com.insurancenyou.app"
+    },
+    "plugins": ["expo-router"]
+  }
+}
