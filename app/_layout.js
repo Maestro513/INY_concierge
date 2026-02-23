@@ -1,9 +1,47 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Text, TextInput } from 'react-native';
+import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { COLORS } from '../constants/theme';
 
+// Set Inter as default font for ALL Text and TextInput components app-wide
+const originalTextRender = Text.render;
+Text.render = function (...args) {
+  const origin = originalTextRender.call(this, ...args);
+  const style = origin.props.style || {};
+  const flatStyle = Array.isArray(style)
+    ? Object.assign({}, ...style.filter(Boolean))
+    : (typeof style === 'object' ? style : {});
+
+  if (!flatStyle.fontFamily) {
+    const weight = flatStyle.fontWeight;
+    let family = 'Inter_400Regular';
+    if (weight === '700' || weight === 'bold') family = 'Inter_700Bold';
+    else if (weight === '600') family = 'Inter_600SemiBold';
+    else if (weight === '500') family = 'Inter_500Medium';
+
+    return {
+      ...origin,
+      props: {
+        ...origin.props,
+        style: [style, { fontFamily: family }],
+      },
+    };
+  }
+  return origin;
+};
+
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  if (!fontsLoaded) return null;
+
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />

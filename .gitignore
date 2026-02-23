@@ -32,6 +32,7 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +40,21 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backend — sensitive / large files
+backend/.env
+backend/venv/
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/pdfs/
+backend/extracted/
+backend/{app,pdfs,extracted}/
+
+# Claude Code
+.claude/

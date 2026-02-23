@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "InsuranceNYou",
+    "name": "Med Concierge",
     "slug": "iny-concierge",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,11 +9,40 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.insurancenyou.app"
+      "bundleIdentifier": "com.insurancenyou.app",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "InsuranceNYou needs speech recognition to understand your questions.",
+        "NSMicrophoneUsageDescription": "InsuranceNYou needs your microphone to answer your questions by voice."
+      }
     },
     "android": {
-      "package": "com.insurancenyou.app"
+      "package": "com.insurancenyou.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ]
     },
-    "plugins": ["expo-router"]
+    "plugins": [
+      "expo-router",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "InsuranceNYou needs your microphone to answer your questions by voice.",
+          "speechRecognitionPermission": "InsuranceNYou needs speech recognition to understand your questions."
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0b4b999b-025c-49c5-bd6f-75a82722f4c4"
+      }
+    }
   }
 }
