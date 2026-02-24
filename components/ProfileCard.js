@@ -3,15 +3,18 @@ import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'rea
 import { COLORS, RADII, SPACING } from '../constants/theme';
 import { API_BASE } from '../constants/api';
 import { SAMPLE_MEMBER, SAMPLE_BENEFITS } from '../constants/data';
+import { useAuth } from '../constants/auth';
 
 export default function ProfileCard({ onViewSOB }) {
+  const { phone } = useAuth();
   const [member, setMember] = useState(SAMPLE_MEMBER);
   const [benefits, setBenefits] = useState(SAMPLE_BENEFITS);
   const [extras, setExtras] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/member/profile`)
+    const params = phone ? `?phone=${encodeURIComponent(phone)}` : '';
+    fetch(`${API_BASE}/api/member/profile${params}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.member) setMember(data.member);

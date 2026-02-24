@@ -3,21 +3,28 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, ActivityIndicator, Sty
 import { COLORS, RADII, SPACING } from '../constants/theme';
 import { API_BASE } from '../constants/api';
 import { SAMPLE_MEMBER, SAMPLE_SOB } from '../constants/data';
+import { useAuth } from '../constants/auth';
 
 export default function SOBModal({ visible, onClose }) {
+  const { phone } = useAuth();
+  const [member, setMember] = useState(SAMPLE_MEMBER);
   const [sob, setSob] = useState(SAMPLE_SOB);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (visible) {
       setLoading(true);
-      fetch(`${API_BASE}/api/member/benefits`)
-        .then((r) => r.json())
-        .then((data) => { if (data.sob) setSob(data.sob); })
-        .catch(() => {})
-        .finally(() => setLoading(false));
+      const params = phone ? `?phone=${encodeURIComponent(phone)}` : '';
+      // Fetch both profile (for plan name) and benefits in parallel
+      Promise.all([
+        fetch(`${API_BASE}/api/member/profile${params}`).then((r) => r.json()).catch(() => null),
+        fetch(`${API_BASE}/api/member/benefits${params}`).then((r) => r.json()).catch(() => null),
+      ]).then(([profileData, benefitsData]) => {
+        if (profileData?.member) setMember(profileData.member);
+        if (benefitsData?.sob) setSob(benefitsData.sob);
+      }).finally(() => setLoading(false));
     }
-  }, [visible]);
+  }, [visible, phone]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -34,7 +41,7 @@ export default function SOBModal({ visible, onClose }) {
               <View style={s.preview}>
                 <Text style={{ fontSize: 48, marginBottom: SPACING.sm }}>📄</Text>
                 <Text style={s.docTitle}>2026 Summary of Benefits</Text>
-                <Text style={s.docSub}>{SAMPLE_MEMBER.planName} — {SAMPLE_MEMBER.planId}</Text>
+                <Text style={s.docSub}>{member.planName} — {member.planId}</Text>
                 <TouchableOpacity style={s.dlBtn} onPress={() => Alert.alert('Download', 'PDF download coming soon.')}><Text style={s.dlText}>⬇ Download PDF</Text></TouchableOpacity>
               </View>
               <Section title="Medical Benefits" items={sob.medical} />

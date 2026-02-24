@@ -3,12 +3,14 @@ import { View, Text, TextInput, TouchableOpacity, Image, StyleSheet, KeyboardAvo
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, RADII, SPACING } from '../constants/theme';
+import { useAuth } from '../constants/auth';
 
 const logo = require('../assets/images/logo.png');
 
 export default function PhoneScreen() {
   const [phone, setPhone] = useState('');
   const router = useRouter();
+  const { setPhone: savePhone } = useAuth();
 
   const formatPhone = (val) => {
     const digits = val.replace(/\D/g, '').slice(0, 10);
@@ -35,7 +37,7 @@ export default function PhoneScreen() {
           <TouchableOpacity style={[s.button, !isValid && { opacity: 0.4 }]} onPress={() => isValid && router.push({ pathname: '/otp', params: { phone } })} disabled={!isValid} activeOpacity={0.8}>
             <Text style={s.buttonText}>Send me a code</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.skipButton} onPress={() => router.replace('/home')} activeOpacity={0.8}>
+          <TouchableOpacity style={s.skipButton} onPress={() => { savePhone(phone || ''); router.replace('/home'); }} activeOpacity={0.8}>
             <Text style={s.skipText}>Skip for now (Admin)</Text>
           </TouchableOpacity>
         </View>

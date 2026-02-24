@@ -3,12 +3,14 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, RADII, SPACING } from '../constants/theme';
+import { useAuth } from '../constants/auth';
 
 export default function OTPScreen() {
   const { phone } = useLocalSearchParams();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const refs = useRef([]);
   const router = useRouter();
+  const { setPhone: savePhone } = useAuth();
 
   const handleChange = (i, v) => {
     if (!/^\d?$/.test(v)) return;
@@ -32,7 +34,7 @@ export default function OTPScreen() {
               <TextInput key={i} ref={(el) => (refs.current[i] = el)} style={[s.otpInput, d ? { borderColor: COLORS.accent } : null]} value={d} onChangeText={(v) => handleChange(i, v)} onKeyPress={({ nativeEvent }) => handleKey(i, nativeEvent.key)} keyboardType="number-pad" maxLength={1} selectTextOnFocus />
             ))}
           </View>
-          <TouchableOpacity style={[s.button, !filled && { opacity: 0.4 }]} onPress={() => filled && router.replace('/home')} disabled={!filled} activeOpacity={0.8}>
+          <TouchableOpacity style={[s.button, !filled && { opacity: 0.4 }]} onPress={() => { if (filled) { savePhone(phone || ''); router.replace('/home'); } }} disabled={!filled} activeOpacity={0.8}>
             <Text style={s.buttonText}>Verify</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ marginTop: SPACING.lg, alignItems: 'center' }} onPress={() => { setOtp(['', '', '', '', '', '']); refs.current[0]?.focus(); }}>
