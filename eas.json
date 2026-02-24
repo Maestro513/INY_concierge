@@ -6,15 +6,11 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "prebuildCommand": "chmod -R u+rw ."
+      "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
-      "prebuildCommand": "chmod -R u+rw ."
+      "distribution": "internal"
     },
-    "production": {
-      "prebuildCommand": "chmod -R u+rw ."
-    }
+    "production": {}
   }
 }
