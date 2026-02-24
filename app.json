@@ -14,6 +14,6 @@
     "android": {
       "package": "com.insurancenyou.app"
     },
-    "plugins": ["expo-router", "@react-native-async-storage/async-storage"]
+    "plugins": ["expo-router"]
   }
 }
