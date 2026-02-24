@@ -1,19 +1,16 @@
 {
   "cli": {
-    "version": ">= 14.0.0"
+    "version": ">= 14.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "prebuildCommand": "chmod -R u+rw ."
+      "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
-      "prebuildCommand": "chmod -R u+rw ."
+      "distribution": "internal"
     },
-    "production": {
-      "prebuildCommand": "chmod -R u+rw ."
-    }
+    "production": {}
   }
 }

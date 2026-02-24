@@ -7,13 +7,31 @@
     "scheme": "insurancenyou",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.insurancenyou.app"
     },
     "android": {
-      "package": "com.insurancenyou.app"
+      "package": "com.insurancenyou.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      }
     },
-    "plugins": ["expo-router"]
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-router"],
+    "extra": {
+      "eas": {
+        "projectId": "0b4b999b-025c-49c5-bd6f-75a82722f4c4"
+      }
+    }
   }
 }
