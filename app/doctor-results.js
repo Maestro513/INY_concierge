@@ -1,18 +1,24 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, RADII, SPACING } from '../constants/theme';
-
-const SAMPLE_DOCTORS = [
-  { id: '1', name: 'Dr. Sarah Chen', specialty: 'Primary Care', distance: '0.8 mi', address: '123 Main St, Suite 200', rating: 4.8, accepting: true },
-  { id: '2', name: 'Dr. Marcus Johnson', specialty: 'Primary Care', distance: '1.2 mi', address: '456 Oak Ave, Floor 3', rating: 4.6, accepting: true },
-  { id: '3', name: 'Dr. Priya Patel', specialty: 'Internal Medicine', distance: '2.1 mi', address: '789 Elm Blvd', rating: 4.9, accepting: false },
-  { id: '4', name: 'Dr. Robert Kim', specialty: 'Family Medicine', distance: '2.5 mi', address: '321 Pine Rd, Suite 100', rating: 4.7, accepting: true },
-];
+import { API_BASE } from '../constants/api';
 
 export default function DoctorResultsScreen() {
   const router = useRouter();
   const { query } = useLocalSearchParams();
+  const [doctors, setDoctors] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const url = query ? `${API_BASE}/api/doctors?query=${encodeURIComponent(query)}` : `${API_BASE}/api/doctors`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => setDoctors(data.doctors || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [query]);
 
   const renderDoctor = ({ item }) => (
     <View style={s.card}>
@@ -40,13 +46,17 @@ export default function DoctorResultsScreen() {
         <Text style={s.title}>Doctors Near You</Text>
       </View>
       {query ? <Text style={s.queryText}>Results for "{query}"</Text> : null}
-      <FlatList
-        data={SAMPLE_DOCTORS}
-        keyExtractor={(item) => item.id}
-        renderItem={renderDoctor}
-        contentContainerStyle={s.list}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <ActivityIndicator size="large" color={COLORS.accent} style={{ marginTop: 40 }} />
+      ) : (
+        <FlatList
+          data={doctors}
+          keyExtractor={(item) => item.id}
+          renderItem={renderDoctor}
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </SafeAreaView>
   );
 }

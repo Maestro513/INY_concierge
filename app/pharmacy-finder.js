@@ -1,17 +1,22 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Linking } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, Linking, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, RADII, SPACING } from '../constants/theme';
-
-const SAMPLE_PHARMACIES = [
-  { id: '1', name: 'CVS Pharmacy', address: '100 Broadway, New York, NY 10005', distance: '0.3 mi', phone: '2125551234', preferred: true, hours: 'Open until 9 PM' },
-  { id: '2', name: 'Walgreens', address: '250 Fulton St, New York, NY 10007', distance: '0.5 mi', phone: '2125555678', preferred: true, hours: 'Open 24 hours' },
-  { id: '3', name: 'Rite Aid', address: '55 Water St, New York, NY 10004', distance: '0.7 mi', phone: '2125559012', preferred: false, hours: 'Open until 8 PM' },
-  { id: '4', name: 'Duane Reade', address: '44 Wall St, New York, NY 10005', distance: '0.9 mi', phone: '2125553456', preferred: true, hours: 'Open until 10 PM' },
-];
+import { API_BASE } from '../constants/api';
 
 export default function PharmacyFinderScreen() {
   const router = useRouter();
+  const [pharmacies, setPharmacies] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/pharmacies`)
+      .then((r) => r.json())
+      .then((data) => setPharmacies(data.pharmacies || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   const renderPharmacy = ({ item }) => (
     <View style={s.card}>
@@ -43,13 +48,17 @@ export default function PharmacyFinderScreen() {
         </TouchableOpacity>
         <Text style={s.title}>Pharmacy Finder</Text>
       </View>
-      <FlatList
-        data={SAMPLE_PHARMACIES}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPharmacy}
-        contentContainerStyle={s.list}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <ActivityIndicator size="large" color={COLORS.accent} style={{ marginTop: 40 }} />
+      ) : (
+        <FlatList
+          data={pharmacies}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPharmacy}
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </SafeAreaView>
   );
 }

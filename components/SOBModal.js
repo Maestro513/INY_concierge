@@ -1,8 +1,24 @@
-import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, Modal, ScrollView, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { COLORS, RADII, SPACING } from '../constants/theme';
+import { API_BASE } from '../constants/api';
 import { SAMPLE_MEMBER, SAMPLE_SOB } from '../constants/data';
 
 export default function SOBModal({ visible, onClose }) {
+  const [sob, setSob] = useState(SAMPLE_SOB);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setLoading(true);
+      fetch(`${API_BASE}/api/member/benefits`)
+        .then((r) => r.json())
+        .then((data) => { if (data.sob) setSob(data.sob); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [visible]);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onClose}>
@@ -11,16 +27,20 @@ export default function SOBModal({ visible, onClose }) {
             <Text style={s.title}>Summary of Benefits</Text>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}><Text style={s.closeX}>✕</Text></TouchableOpacity>
           </View>
-          <ScrollView style={s.scroll} contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-            <View style={s.preview}>
-              <Text style={{ fontSize: 48, marginBottom: SPACING.sm }}>📄</Text>
-              <Text style={s.docTitle}>2026 Summary of Benefits</Text>
-              <Text style={s.docSub}>{SAMPLE_MEMBER.planName} — {SAMPLE_MEMBER.planId}</Text>
-              <TouchableOpacity style={s.dlBtn} onPress={() => Alert.alert('Download', 'PDF download coming soon.')}><Text style={s.dlText}>⬇ Download PDF</Text></TouchableOpacity>
-            </View>
-            <Section title="Medical Benefits" items={SAMPLE_SOB.medical} />
-            <Section title="Prescription Drugs" items={SAMPLE_SOB.drugs} />
-          </ScrollView>
+          {loading ? (
+            <ActivityIndicator size="large" color={COLORS.accent} style={{ marginVertical: 40 }} />
+          ) : (
+            <ScrollView style={s.scroll} contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+              <View style={s.preview}>
+                <Text style={{ fontSize: 48, marginBottom: SPACING.sm }}>📄</Text>
+                <Text style={s.docTitle}>2026 Summary of Benefits</Text>
+                <Text style={s.docSub}>{SAMPLE_MEMBER.planName} — {SAMPLE_MEMBER.planId}</Text>
+                <TouchableOpacity style={s.dlBtn} onPress={() => Alert.alert('Download', 'PDF download coming soon.')}><Text style={s.dlText}>⬇ Download PDF</Text></TouchableOpacity>
+              </View>
+              <Section title="Medical Benefits" items={sob.medical} />
+              <Section title="Prescription Drugs" items={sob.drugs} />
+            </ScrollView>
+          )}
         </View>
       </TouchableOpacity>
     </Modal>

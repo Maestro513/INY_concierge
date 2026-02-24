@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Linking } from 'react-native';
 import { COLORS, RADII, SPACING } from '../constants/theme';
-import { QUICK_QUESTIONS, SAMPLE_ANSWERS, CALL_NUMBER } from '../constants/data';
+import { API_BASE } from '../constants/api';
+import { CALL_NUMBER } from '../constants/data';
+
+const QUICK_QUESTIONS = [
+  "What's my specialist copay?",
+  'Is Eliquis covered?',
+  'Do I have dental?',
+];
 
 export default function VoiceHelp() {
   const [mode, setMode] = useState('idle');
@@ -37,11 +44,35 @@ export default function VoiceHelp() {
     return id;
   }, []);
 
-  const process = (q) => { setMode('thinking'); setQuestion(q); delay(() => { setMode('answer'); setAnswer(SAMPLE_ANSWERS[q] || "Let me look into that."); }, 1500); };
+  const askBackend = async (q) => {
+    setMode('thinking');
+    setQuestion(q);
+    try {
+      const res = await fetch(`${API_BASE}/api/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q }),
+      });
+      const data = await res.json();
+      setMode('answer');
+      setAnswer(data.answer || "I'm not sure about that.");
+    } catch {
+      setMode('answer');
+      setAnswer("Couldn't reach the server. Please try again or call us.");
+    }
+  };
 
   const handleMic = () => {
-    if (mode === 'idle' || mode === 'answer') { setMode('listening'); delay(() => process("What's my specialist copay?"), 2500); }
-    else if (mode === 'listening') process('Is Eliquis covered?');
+    if (mode === 'idle' || mode === 'answer') {
+      setMode('listening');
+      // Simulated voice — picks a random quick question after delay
+      delay(() => {
+        const q = QUICK_QUESTIONS[Math.floor(Math.random() * QUICK_QUESTIONS.length)];
+        askBackend(q);
+      }, 2500);
+    } else if (mode === 'listening') {
+      askBackend('Is Eliquis covered?');
+    }
   };
 
   const status = { idle: 'Tap to ask a question', listening: 'Listening...', thinking: 'Looking that up...', answer: 'Tap to ask another question' };
@@ -49,12 +80,12 @@ export default function VoiceHelp() {
   return (
     <View style={s.container}>
       <View style={s.header}>
-        <Text style={s.headerTitle}>💬 Help</Text>
-        <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)}><Text style={s.callText}>📞 Call Us</Text></TouchableOpacity>
+        <Text style={s.headerTitle}>Help</Text>
+        <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)}><Text style={s.callText}>Call Us</Text></TouchableOpacity>
       </View>
       <View style={s.answerArea}>
         {mode === 'answer' && <Animated.View style={{ opacity: fade }}><Text style={s.qText}>"{question}"</Text><Text style={s.aText}>{answer}</Text></Animated.View>}
-        {mode === 'thinking' && <Animated.View style={{ opacity: fade, alignItems: 'center' }}><Text style={s.qText}>"{question}"</Text><Text style={s.dots}>● ● ●</Text></Animated.View>}
+        {mode === 'thinking' && <Animated.View style={{ opacity: fade, alignItems: 'center' }}><Text style={s.qText}>"{question}"</Text><Text style={s.dots}>...</Text></Animated.View>}
         {mode === 'listening' && <Animated.View style={{ opacity: fade }}><Text style={s.listenText}>Go ahead, I'm listening...</Text></Animated.View>}
       </View>
       <View style={s.micWrap}>
@@ -69,7 +100,7 @@ export default function VoiceHelp() {
         <View style={s.quickWrap}>
           <Text style={s.quickLabel}>Or tap a question:</Text>
           <View style={s.quickRow}>
-            {QUICK_QUESTIONS.map((q, i) => <TouchableOpacity key={i} style={s.chip} onPress={() => process(q)}><Text style={s.chipText}>{q}</Text></TouchableOpacity>)}
+            {QUICK_QUESTIONS.map((q, i) => <TouchableOpacity key={i} style={s.chip} onPress={() => askBackend(q)}><Text style={s.chipText}>{q}</Text></TouchableOpacity>)}
           </View>
         </View>
       )}
@@ -86,7 +117,7 @@ const s = StyleSheet.create({
   qText: { fontSize: 14, color: COLORS.textSecondary, fontStyle: 'italic', textAlign: 'center', marginBottom: 10 },
   aText: { fontSize: 17, color: COLORS.text, lineHeight: 26, textAlign: 'center', fontWeight: '500' },
   listenText: { fontSize: 18, color: COLORS.accent, fontWeight: '600', textAlign: 'center' },
-  dots: { fontSize: 16, color: COLORS.accent, textAlign: 'center', letterSpacing: 4 },
+  dots: { fontSize: 24, color: COLORS.accent, textAlign: 'center', letterSpacing: 4 },
   micWrap: { width: 100, height: 100, justifyContent: 'center', alignItems: 'center' },
   ring: { position: 'absolute' },
   mic: { width: 88, height: 88, borderRadius: 44, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center', shadowColor: COLORS.accent, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 10 },

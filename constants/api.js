@@ -1,4 +1,10 @@
-// Change this to your backend URL when deploying
-// For local dev: use your machine's LAN IP (not localhost) so the phone can reach it
-// e.g. "http://192.168.1.100:8000"
-export const API_BASE = 'http://10.0.2.2:8000'; // Android emulator -> host machine
+import { Platform } from 'react-native';
+
+// Auto-detect the right backend URL based on platform
+const getBaseUrl = () => {
+  if (Platform.OS === 'android') return 'http://10.0.2.2:8000'; // Android emulator -> host
+  if (Platform.OS === 'web') return 'http://localhost:8000';     // Web browser
+  return 'http://localhost:8000';                                 // iOS simulator
+};
+
+export const API_BASE = getBaseUrl();

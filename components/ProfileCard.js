@@ -1,35 +1,50 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { COLORS, RADII, SPACING } from '../constants/theme';
+import { API_BASE } from '../constants/api';
 import { SAMPLE_MEMBER, SAMPLE_BENEFITS } from '../constants/data';
 
-const EXTRA_BENEFITS = [
-  { label: 'Dental', value: '$1,500', icon: '🦷', has: true },
-  { label: 'OTC', value: '$75/qtr', icon: '🛒', has: true },
-  { label: 'Flex Card', value: '$200', icon: '💳', has: false },
-  { label: 'Part B Giveback', value: '$100/mo', icon: '💰', has: true },
-];
-
 export default function ProfileCard({ onViewSOB }) {
+  const [member, setMember] = useState(SAMPLE_MEMBER);
+  const [benefits, setBenefits] = useState(SAMPLE_BENEFITS);
+  const [extras, setExtras] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/member/profile`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.member) setMember(data.member);
+        if (data.benefits) setBenefits(data.benefits);
+        if (data.extraBenefits) setExtras(data.extraBenefits.filter((b) => b.has));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
   const g = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning,' : h < 17 ? 'Good afternoon,' : 'Good evening,'; };
-  const extras = EXTRA_BENEFITS.filter((b) => b.has);
+
+  const ICON_MAP = { stethoscope: '🩺', doctor: '👨‍⚕️', pill: '💊', shield: '🛡️', tooth: '🦷', cart: '🛒', card: '💳', money: '💰' };
+
+  if (loading) return <ActivityIndicator size="large" color={COLORS.accent} style={{ marginTop: 20 }} />;
 
   return (
     <View style={s.container}>
       <View style={s.header}>
         <View>
           <Text style={s.greeting}>{g()}</Text>
-          <Text style={s.name}>{SAMPLE_MEMBER.firstName} {SAMPLE_MEMBER.lastName}</Text>
+          <Text style={s.name}>{member.firstName} {member.lastName}</Text>
         </View>
-        <View style={s.badge}><Text style={s.badgeText}>{SAMPLE_MEMBER.carrier}</Text></View>
+        <View style={s.badge}><Text style={s.badgeText}>{member.carrier}</Text></View>
       </View>
       <View style={s.planRow}>
-        <Text style={s.planName}>{SAMPLE_MEMBER.planName}</Text>
+        <Text style={s.planName}>{member.planName}</Text>
         <TouchableOpacity onPress={onViewSOB}><Text style={s.sobLink}>View SOB →</Text></TouchableOpacity>
       </View>
       <View style={s.grid}>
-        {SAMPLE_BENEFITS.map((b, i) => (
+        {benefits.map((b, i) => (
           <View key={i} style={s.card}>
-            <Text style={{ fontSize: 22 }}>{b.icon}</Text>
+            <Text style={{ fontSize: 22 }}>{ICON_MAP[b.icon] || b.icon}</Text>
             <Text style={s.val}>{b.value}</Text>
             <Text style={s.lbl}>{b.label}</Text>
           </View>
@@ -39,7 +54,7 @@ export default function ProfileCard({ onViewSOB }) {
         <View style={[s.grid, { marginTop: SPACING.sm }]}>
           {extras.map((b, i) => (
             <View key={i} style={s.card}>
-              <Text style={{ fontSize: 22 }}>{b.icon}</Text>
+              <Text style={{ fontSize: 22 }}>{ICON_MAP[b.icon] || b.icon}</Text>
               <Text style={s.val}>{b.value}</Text>
               <Text style={s.lbl}>{b.label}</Text>
             </View>

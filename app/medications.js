@@ -1,14 +1,9 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, RADII, SPACING } from '../constants/theme';
-
-const SAMPLE_MEDICATIONS = [
-  { id: '1', name: 'Eliquis (Apixaban)', tier: 'Tier 3', copay: '$47', daysSupply: '30-day', pharmacy: 'Preferred Retail' },
-  { id: '2', name: 'Lisinopril', tier: 'Tier 1', copay: '$0', daysSupply: '90-day', pharmacy: 'Mail Order' },
-  { id: '3', name: 'Atorvastatin', tier: 'Tier 1', copay: '$0', daysSupply: '90-day', pharmacy: 'Mail Order' },
-  { id: '4', name: 'Metformin', tier: 'Tier 1', copay: '$0', daysSupply: '30-day', pharmacy: 'Preferred Retail' },
-];
+import { API_BASE } from '../constants/api';
 
 const TIER_COLORS = {
   'Tier 1': '#4CAF50',
@@ -19,6 +14,16 @@ const TIER_COLORS = {
 
 export default function MedicationsScreen() {
   const router = useRouter();
+  const [meds, setMeds] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/medications`)
+      .then((r) => r.json())
+      .then((data) => setMeds(data.medications || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   const renderMed = ({ item }) => (
     <View style={s.card}>
@@ -51,13 +56,17 @@ export default function MedicationsScreen() {
         </TouchableOpacity>
         <Text style={s.title}>My Medications</Text>
       </View>
-      <FlatList
-        data={SAMPLE_MEDICATIONS}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMed}
-        contentContainerStyle={s.list}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <ActivityIndicator size="large" color={COLORS.accent} style={{ marginTop: 40 }} />
+      ) : (
+        <FlatList
+          data={meds}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMed}
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </SafeAreaView>
   );
 }
