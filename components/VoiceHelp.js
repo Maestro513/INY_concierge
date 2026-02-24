@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Linking } from 'react-native';
 import { COLORS, RADII, SPACING } from '../constants/theme';
 import { QUICK_QUESTIONS, SAMPLE_ANSWERS, CALL_NUMBER } from '../constants/data';
@@ -10,13 +10,16 @@ export default function VoiceHelp() {
   const pulse = useRef(new Animated.Value(1)).current;
   const pulseOp = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
+  const timers = useRef([]);
 
   useEffect(() => {
     if (mode === 'listening') {
-      Animated.loop(Animated.parallel([
+      const anim = Animated.loop(Animated.parallel([
         Animated.sequence([Animated.timing(pulse, { toValue: 1.5, duration: 1200, useNativeDriver: true }), Animated.timing(pulse, { toValue: 1, duration: 0, useNativeDriver: true })]),
         Animated.sequence([Animated.timing(pulseOp, { toValue: 0, duration: 1200, useNativeDriver: true }), Animated.timing(pulseOp, { toValue: 0.5, duration: 0, useNativeDriver: true })]),
-      ])).start();
+      ]));
+      anim.start();
+      return () => anim.stop();
     } else { pulse.stopAnimation(); pulseOp.stopAnimation(); pulse.setValue(1); pulseOp.setValue(0); }
   }, [mode]);
 
@@ -24,10 +27,20 @@ export default function VoiceHelp() {
     if (mode !== 'idle') { fade.setValue(0); Animated.timing(fade, { toValue: 1, duration: 300, useNativeDriver: true }).start(); }
   }, [mode, answer]);
 
-  const process = (q) => { setMode('thinking'); setQuestion(q); setTimeout(() => { setMode('answer'); setAnswer(SAMPLE_ANSWERS[q] || "Let me look into that."); }, 1500); };
+  useEffect(() => {
+    return () => timers.current.forEach(clearTimeout);
+  }, []);
+
+  const delay = useCallback((fn, ms) => {
+    const id = setTimeout(fn, ms);
+    timers.current.push(id);
+    return id;
+  }, []);
+
+  const process = (q) => { setMode('thinking'); setQuestion(q); delay(() => { setMode('answer'); setAnswer(SAMPLE_ANSWERS[q] || "Let me look into that."); }, 1500); };
 
   const handleMic = () => {
-    if (mode === 'idle' || mode === 'answer') { setMode('listening'); setTimeout(() => process("What's my specialist copay?"), 2500); }
+    if (mode === 'idle' || mode === 'answer') { setMode('listening'); delay(() => process("What's my specialist copay?"), 2500); }
     else if (mode === 'listening') process('Is Eliquis covered?');
   };
 

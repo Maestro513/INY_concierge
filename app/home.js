@@ -9,7 +9,7 @@ import SOBModal from '../components/SOBModal';
 export default function HomeScreen() {
   const [showSOB, setShowSOB] = useState(false);
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }} edges={['top', 'bottom']}>
       <ProfileCard onViewSOB={() => setShowSOB(true)} />
       <VoiceHelp />
       <SOBModal visible={showSOB} onClose={() => setShowSOB(false)} />

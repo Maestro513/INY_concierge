@@ -14,6 +14,7 @@ export default function OTPScreen() {
     if (!/^\d?$/.test(v)) return;
     const n = [...otp]; n[i] = v; setOtp(n);
     if (v && i < 5) refs.current[i + 1]?.focus();
+    if (!v && i > 0) refs.current[i - 1]?.focus();
   };
   const handleKey = (i, k) => { if (k === 'Backspace' && !otp[i] && i > 0) refs.current[i - 1]?.focus(); };
   const filled = otp.every((d) => d !== '');
@@ -34,7 +35,7 @@ export default function OTPScreen() {
           <TouchableOpacity style={[s.button, !filled && { opacity: 0.4 }]} onPress={() => filled && router.replace('/home')} disabled={!filled} activeOpacity={0.8}>
             <Text style={s.buttonText}>Verify</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={{ marginTop: SPACING.lg, alignItems: 'center' }}>
+          <TouchableOpacity style={{ marginTop: SPACING.lg, alignItems: 'center' }} onPress={() => { setOtp(['', '', '', '', '', '']); refs.current[0]?.focus(); }}>
             <Text style={{ fontSize: 15, color: COLORS.textSecondary }}>Didn't get it? <Text style={{ color: COLORS.accent, fontWeight: '600' }}>Resend code</Text></Text>
           </TouchableOpacity>
         </View>

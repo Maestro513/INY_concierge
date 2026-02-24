@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, Alert } from 'react-native';
 import { COLORS, RADII, SPACING } from '../constants/theme';
 import { SAMPLE_MEMBER, SAMPLE_SOB } from '../constants/data';
 
@@ -11,12 +11,12 @@ export default function SOBModal({ visible, onClose }) {
             <Text style={s.title}>Summary of Benefits</Text>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}><Text style={s.closeX}>✕</Text></TouchableOpacity>
           </View>
-          <ScrollView style={s.body} showsVerticalScrollIndicator={false}>
+          <ScrollView style={s.scroll} contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
             <View style={s.preview}>
               <Text style={{ fontSize: 48, marginBottom: SPACING.sm }}>📄</Text>
               <Text style={s.docTitle}>2026 Summary of Benefits</Text>
               <Text style={s.docSub}>{SAMPLE_MEMBER.planName} — {SAMPLE_MEMBER.planId}</Text>
-              <TouchableOpacity style={s.dlBtn}><Text style={s.dlText}>⬇ Download PDF</Text></TouchableOpacity>
+              <TouchableOpacity style={s.dlBtn} onPress={() => Alert.alert('Download', 'PDF download coming soon.')}><Text style={s.dlText}>⬇ Download PDF</Text></TouchableOpacity>
             </View>
             <Section title="Medical Benefits" items={SAMPLE_SOB.medical} />
             <Section title="Prescription Drugs" items={SAMPLE_SOB.drugs} />
@@ -48,6 +48,7 @@ const s = StyleSheet.create({
   title: { fontSize: 19, fontWeight: '700', color: COLORS.text },
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.inputBg, justifyContent: 'center', alignItems: 'center' },
   closeX: { fontSize: 16, color: COLORS.textSecondary },
+  scroll: { },
   body: { paddingHorizontal: 20, paddingBottom: 32 },
   preview: { alignItems: 'center', paddingVertical: 20, marginBottom: SPACING.md },
   docTitle: { fontSize: 17, fontWeight: '600', color: COLORS.text, marginBottom: 4 },
