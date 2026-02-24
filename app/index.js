@@ -35,6 +35,9 @@ export default function PhoneScreen() {
           <TouchableOpacity style={[s.button, !isValid && { opacity: 0.4 }]} onPress={() => isValid && router.push({ pathname: '/otp', params: { phone } })} disabled={!isValid} activeOpacity={0.8}>
             <Text style={s.buttonText}>Send me a code</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={s.skipButton} onPress={() => router.replace('/home')} activeOpacity={0.8}>
+            <Text style={s.skipText}>Skip for now (Admin)</Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -53,4 +56,6 @@ const s = StyleSheet.create({
   hint: { fontSize: 14, color: COLORS.textSecondary, marginTop: SPACING.sm },
   button: { backgroundColor: COLORS.accent, borderRadius: RADII.md, paddingVertical: 18, alignItems: 'center' },
   buttonText: { fontSize: 18, fontWeight: '600', color: COLORS.white },
+  skipButton: { marginTop: SPACING.lg, alignItems: 'center', paddingVertical: 12 },
+  skipText: { fontSize: 15, color: COLORS.textSecondary, textDecorationLine: 'underline' },
 });
