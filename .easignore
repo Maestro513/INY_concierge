@@ -39,5 +39,14 @@ yarn-error.*
 .DS_Store
 Thumbs.db
 
+# Backend (not needed for mobile build)
+backend/
+
+# Claude config
+.claude/
+
 # Env
 .env*.local
+
+# Catch any nested node_modules anywhere
+**/node_modules/
