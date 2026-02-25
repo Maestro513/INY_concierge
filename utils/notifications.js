@@ -15,13 +15,17 @@
  *   3. On delete → cancelReminder()
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// ── Lazy-load native modules (fail gracefully when not compiled in) ──
+let AsyncStorageMod = null;
+try {
+  AsyncStorageMod = require('@react-native-async-storage/async-storage').default;
+} catch (e) {
+  console.log('[Notifications] AsyncStorage native module not available. Caching disabled.');
+}
 
-// ── Lazy-load expo-notifications (fails gracefully in Expo Go) ──
 let Notifications = null;
 try {
   Notifications = require('expo-notifications');
-  // Configure foreground behavior
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
@@ -30,7 +34,7 @@ try {
     }),
   });
 } catch (e) {
-  console.log('[Notifications] Native module not available (Expo Go). Reminders will save but won\'t send alerts.');
+  console.log('[Notifications] Native module not available. Reminders will save but won\'t send alerts.');
 }
 
 function notifAvailable() {
@@ -123,14 +127,16 @@ const REMINDERS_CACHE_KEY = '@med_reminders';
 const USAGE_CACHE_KEY = '@benefits_usage_summary';
 
 export async function cacheReminders(reminders) {
+  if (!AsyncStorageMod) return;
   try {
-    await AsyncStorage.setItem(REMINDERS_CACHE_KEY, JSON.stringify(reminders));
+    await AsyncStorageMod.setItem(REMINDERS_CACHE_KEY, JSON.stringify(reminders));
   } catch (e) {}
 }
 
 export async function getCachedReminders() {
+  if (!AsyncStorageMod) return null;
   try {
-    const data = await AsyncStorage.getItem(REMINDERS_CACHE_KEY);
+    const data = await AsyncStorageMod.getItem(REMINDERS_CACHE_KEY);
     return data ? JSON.parse(data) : null;
   } catch (e) {
     return null;
@@ -138,14 +144,16 @@ export async function getCachedReminders() {
 }
 
 export async function cacheUsageSummary(summary) {
+  if (!AsyncStorageMod) return;
   try {
-    await AsyncStorage.setItem(USAGE_CACHE_KEY, JSON.stringify(summary));
+    await AsyncStorageMod.setItem(USAGE_CACHE_KEY, JSON.stringify(summary));
   } catch (e) {}
 }
 
 export async function getCachedUsageSummary() {
+  if (!AsyncStorageMod) return null;
   try {
-    const data = await AsyncStorage.getItem(USAGE_CACHE_KEY);
+    const data = await AsyncStorageMod.getItem(USAGE_CACHE_KEY);
     return data ? JSON.parse(data) : null;
   } catch (e) {
     return null;

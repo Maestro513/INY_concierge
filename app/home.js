@@ -7,8 +7,6 @@ import { API_URL, fetchWithTimeout } from '../constants/api';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
-import MedReminders from '../components/MedReminders';
-import UsageTracker from '../components/UsageTracker';
 import {
   syncAllReminders, scheduleReminder, cancelReminder,
   cacheReminders, getCachedReminders,
@@ -21,6 +19,7 @@ export default function HomeScreen() {
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [benefitsError, setBenefitsError] = useState(false);
   const [sobData, setSobData] = useState(null);
   const [sobLoading, setSobLoading] = useState(false);
 
@@ -43,6 +42,7 @@ export default function HomeScreen() {
   useEffect(() => {
     // Reset all state when plan changes (e.g. user logs out and back in)
     setBenefits([]);
+    setBenefitsError(false);
     setSobData(null);
     setReminders([]);
     setUsageSummary([]);
@@ -90,17 +90,34 @@ export default function HomeScreen() {
 
   const loadAllBenefits = async () => {
     setLoading(true);
+    setBenefitsError(false);
     try {
       const [benefitsRes, drugsRes] = await Promise.all([
-        fetchWithTimeout(`${API_URL}/cms/benefits/${planNumber}`).then(r => r.json()).catch(() => null),
+        fetchWithTimeout(`${API_URL}/cms/benefits/${planNumber}`)
+          .then(r => {
+            if (!r.ok) { console.warn(`Benefits fetch failed: ${r.status}`); return null; }
+            return r.json();
+          })
+          .catch((err) => { console.warn('Benefits fetch error:', err); return null; }),
         sessionId
-          ? fetchWithTimeout(`${API_URL}/cms/my-drugs-session/${sessionId}`).then(r => r.json()).catch(() => null)
+          ? fetchWithTimeout(`${API_URL}/cms/my-drugs-session/${sessionId}`)
+              .then(r => {
+                if (!r.ok) { console.warn(`Drugs fetch failed: ${r.status}`); return null; }
+                return r.json();
+              })
+              .catch((err) => { console.warn('Drugs fetch error:', err); return null; })
           : Promise.resolve(null),
       ]);
-      const cards = buildBenefitCards(benefitsRes, drugsRes);
-      setBenefits(cards);
+      if (!benefitsRes) {
+        setBenefitsError(true);
+        setBenefits([]);
+      } else {
+        const cards = buildBenefitCards(benefitsRes, drugsRes);
+        setBenefits(cards);
+      }
     } catch (err) {
-      console.log('Benefits fetch error:', err);
+      console.warn('Benefits load error:', err);
+      setBenefitsError(true);
       setBenefits([]);
     } finally {
       setLoading(false);
@@ -251,18 +268,12 @@ export default function HomeScreen() {
           onViewSOB={handleOpenSOB}
           benefits={benefits}
           loading={loading}
-        />
-        <MedReminders
+          benefitsError={benefitsError}
+          onRetryBenefits={loadAllBenefits}
           reminders={reminders}
-          loading={remindersLoading}
-          onToggle={handleToggleReminder}
-          onDelete={handleDeleteReminder}
-          onAdd={handleAddReminder}
-        />
-        <UsageTracker
-          summary={usageSummary}
-          loading={usageLoading}
-          onLogUsage={handleLogUsage}
+          onToggleReminder={handleToggleReminder}
+          onDeleteReminder={handleDeleteReminder}
+          onAddReminder={handleAddReminder}
         />
         <VoiceHelp
           planNumber={planNumber || ''}
