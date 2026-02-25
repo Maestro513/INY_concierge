@@ -1381,6 +1381,15 @@ def _split_plan(plan_number: str) -> tuple[str, str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 UPLOAD_SECRET = os.getenv("UPLOAD_SECRET", "")
 
+@app.get("/admin/check-env")
+def check_env():
+    """Debug: check if env vars are loaded."""
+    return {
+        "upload_secret_set": bool(UPLOAD_SECRET),
+        "pdfs_dir": PDFS_DIR,
+        "extracted_dir": EXTRACTED_DIR,
+    }
+
 @app.post("/admin/upload-pdf")
 async def upload_pdf(
     file: UploadFile = File(...),
