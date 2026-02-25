@@ -49,7 +49,7 @@ __pycache__/
 # Backend — sensitive / large files
 backend/.env
 backend/venv/
-backend/*.db
+backend/user_data.db
 backend/*.db-shm
 backend/*.db-wal
 backend/pdfs/
