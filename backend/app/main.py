@@ -7,9 +7,10 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-from .claude_client import ask_claude, load_plan_chunks, find_relevant_chunks
+from .claude_client import ask_claude, load_plan_chunks, find_relevant_chunks, _find_extracted_file
 from .zoho_client import search_contact_by_phone
 from .providers.service import search_providers
+from .sob_parser import extract_tier_copays, load_plan_text
 
 import json
 import os
@@ -18,7 +19,6 @@ import logging
 import time
 import anthropic
 from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR
-import glob
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +53,37 @@ def get_cms():
     return _cms
 
 
+# SOB tier copays cache: {plan_id: {"data": dict, "ts": float}}
+_sob_tier_cache: dict[str, dict] = {}
+SOB_TIER_CACHE_TTL = 3600  # 1 hour
+
+
+def get_sob_tier_copays(plan_id: str) -> dict | None:
+    """
+    Load structured per-tier copay data from the SOB PDF for a plan.
+    Returns dict keyed by tier number (1-5) with retail_30, retail_90, mail costs, etc.
+    Returns None if SOB text not available for this plan.
+    Cached in memory for 1 hour.
+    """
+    pid = normalize_plan_id(plan_id)
+    cached = _sob_tier_cache.get(pid)
+    if cached and (time.time() - cached["ts"]) < SOB_TIER_CACHE_TTL:
+        return cached["data"]
+
+    text = load_plan_text(pid)
+    if text is None:
+        return None
+
+    try:
+        tier_copays = extract_tier_copays(text)
+        _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
+        log.info(f"SOB tier copays loaded for {pid}: tiers={[k for k in tier_copays if isinstance(k, int)]}")
+        return tier_copays
+    except Exception as e:
+        log.warning(f"SOB tier copay extraction failed for {pid}: {e}")
+        return None
+
+
 def normalize_plan_id(plan_id: str) -> str:
     """
     H1234-567-000 → H1234-567
@@ -64,21 +95,37 @@ def normalize_plan_id(plan_id: str) -> str:
     return pid
 
 
-def parse_medications(raw: str) -> list[str]:
+def parse_medications(raw: str) -> list[dict]:
     """
     Parse medications from a multi-line or comma-separated string.
-    Handles: 'Eliquis, Metformin, Jardiance'
-         or: 'Eliquis\nMetformin\nJardiance'
-         or: 'Eliquis, Metformin\nJardiance, Lisinopril'
+    Returns list of {name, days_supply, is_mail} dicts.
+    Detects "90 day" patterns like "Ventolin 90 day" → days_supply=90.
+    Detects "mail" or "mail order" → is_mail=True.
     """
     if not raw or not raw.strip():
         return []
     parts = re.split(r'[,\n]+', raw)
     meds = []
     for part in parts:
-        name = part.strip()
-        if name and len(name) > 1:
-            meds.append(name)
+        text = part.strip()
+        if not text or len(text) < 2:
+            continue
+        # Detect mail order
+        is_mail = bool(re.search(r'\bmail\s*(?:order)?\b', text, re.IGNORECASE))
+        name = re.sub(r'\(?\s*mail\s*(?:order)?\s*\)?', '', text, flags=re.IGNORECASE).strip()
+        # Detect days supply pattern
+        days_match = re.search(r'(\d+)\s*-?\s*days?\s*(?:supply)?', name, re.IGNORECASE)
+        if days_match:
+            days = int(days_match.group(1))
+            name = re.sub(r'\(?\s*\d+\s*-?\s*days?\s*(?:supply)?\s*\)?', '', name,
+                          flags=re.IGNORECASE).strip()
+        else:
+            days = 30
+        # 90-day supply implies mail order
+        if days >= 90:
+            is_mail = True
+        if name:
+            meds.append({"name": name, "days_supply": days, "is_mail": is_mail})
     return meds
 
 
@@ -183,6 +230,190 @@ async def provider_search(req: ProviderSearchRequest):
     return result
 
 
+# --- SOB Enrichment with CMS data ---
+
+def _upsert_medical(medical: list, label_map: dict, label: str,
+                    in_network_value: str, force: bool = False):
+    """Update or insert a medical benefit row with fuzzy label matching."""
+    lbl_lower = label.lower()
+    matched_idx = None
+    for existing_lbl, idx in label_map.items():
+        if lbl_lower in existing_lbl or existing_lbl in lbl_lower:
+            matched_idx = idx
+            break
+
+    if matched_idx is not None:
+        if force:
+            medical[matched_idx]["in_network"] = in_network_value
+        else:
+            existing_val = (medical[matched_idx].get("in_network") or
+                            medical[matched_idx].get("value") or "")
+            if (not existing_val or existing_val in ("$0", "0", "Not specified", "Not found", "\u2014")
+                    or "$0 copay" == existing_val.strip()):
+                medical[matched_idx]["in_network"] = in_network_value
+    else:
+        medical.append({"label": label, "in_network": in_network_value, "out_of_network": "\u2014"})
+        label_map[lbl_lower] = len(medical) - 1
+
+
+def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
+    """Supplement Claude's SOB extraction with authoritative CMS data."""
+    try:
+        cms = get_cms()
+    except Exception:
+        return result
+
+    medical = result.get("medical", [])
+    label_map = {}
+    for i, item in enumerate(medical):
+        lbl = (item.get("label") or "").lower()
+        label_map[lbl] = i
+
+    # ── Dental (ALWAYS override — CMS is authoritative) ──
+    try:
+        dental = cms.get_dental_benefits(plan_number)
+        if dental.get("has_preventive") or dental.get("has_comprehensive"):
+            pv = dental.get("preventive", {})
+            cmp = dental.get("comprehensive", {})
+            pv_copay = pv.get("copay", "$0")
+            pv_max = pv.get("max_benefit")
+
+            if pv_max:
+                pv_value = f"$0 copay ({pv_max}/yr max)"
+            else:
+                pv_value = f"{pv_copay} copay"
+
+            cmp_value = ""
+            cmp_max = cmp.get("max_benefit")
+            if cmp_max:
+                if "combined" in str(cmp_max).lower():
+                    cmp_value = cmp_max
+                else:
+                    cmp_value = f"{cmp_max}/yr max"
+
+            _upsert_medical(medical, label_map, "Dental (preventive)", pv_value, force=True)
+            if dental.get("has_comprehensive") and cmp_value:
+                _upsert_medical(medical, label_map, "Dental (comprehensive)", cmp_value, force=True)
+    except Exception as e:
+        log.warning(f"CMS dental enrichment failed: {e}")
+
+    # ── Medical copays (CMS is authoritative) ──
+    try:
+        med_copays = cms.get_medical_copays(plan_number)
+        copay_map = {
+            "PCP visit": med_copays.get("pcp_copay"),
+            "Specialist visit": med_copays.get("specialist_copay"),
+            "Emergency room": med_copays.get("er_copay"),
+            "Urgent care": med_copays.get("urgent_care_copay"),
+        }
+        for label, value in copay_map.items():
+            if value:
+                _upsert_medical(medical, label_map, label, value, force=True)
+    except Exception as e:
+        log.warning(f"CMS medical copay enrichment failed: {e}")
+
+    # ── Vision (CMS is authoritative) ──
+    try:
+        vision = cms.get_vision_benefits(plan_number)
+        if vision.get("has_eye_exam"):
+            exam = vision["eye_exam"]
+            copay = exam.get("copay", "$0")
+            max_b = exam.get("max_benefit")
+            exams = exam.get("exams_per_year")
+            parts = [copay + " copay"]
+            if exams:
+                parts.append(f"{exams}/yr")
+            _upsert_medical(medical, label_map, "Vision (exam)", ", ".join(parts), force=True)
+
+        if vision.get("has_eyewear"):
+            ew = vision["eyewear"]
+            copay = ew.get("copay", "$0")
+            max_b = ew.get("max_benefit")
+            if max_b:
+                ew_value = f"{copay} copay ({max_b}/yr allowance)"
+            else:
+                ew_value = f"{copay} copay"
+            _upsert_medical(medical, label_map, "Vision (eyewear)", ew_value, force=True)
+    except Exception as e:
+        log.warning(f"CMS vision enrichment failed: {e}")
+
+    # ── Hearing (CMS is authoritative) ──
+    try:
+        hearing = cms.get_hearing_benefits(plan_number)
+        if hearing.get("has_hearing_exam"):
+            exam = hearing["hearing_exam"]
+            copay = exam.get("copay", "$0")
+            exams = exam.get("exams_per_year")
+            parts = [copay + " copay"]
+            if exams:
+                parts.append(f"{exams}/yr")
+            _upsert_medical(medical, label_map, "Hearing (exam)", ", ".join(parts), force=True)
+
+        if hearing.get("has_hearing_aids"):
+            aids = hearing["hearing_aids"]
+            copay = aids.get("copay", "$0")
+            max_b = aids.get("max_benefit")
+            period = aids.get("period")
+            aids_num = aids.get("aids_allowed")
+            parts = []
+            if max_b:
+                parts.append(f"{max_b} max")
+            if copay:
+                parts.append(f"{copay} copay")
+            if aids_num:
+                parts.append(f"{aids_num} aids")
+            if period:
+                parts.append(period)
+            _upsert_medical(medical, label_map, "Hearing (aids)", ", ".join(parts) if parts else "Covered", force=True)
+    except Exception as e:
+        log.warning(f"CMS hearing enrichment failed: {e}")
+
+    # ── OTC allowance (only fill if Claude missed it) ──
+    try:
+        otc = cms.get_otc_allowance(plan_number)
+        if otc.get("has_otc"):
+            amt = otc.get("amount", "")
+            period = otc.get("period", "")
+            otc_value = f"{amt} {period}".strip() if amt else "Included"
+            _upsert_medical(medical, label_map, "OTC allowance", otc_value)
+    except Exception as e:
+        log.warning(f"CMS OTC enrichment failed: {e}")
+
+    # ── Flex card / SSBCI (only fill if Claude missed it) ──
+    try:
+        flex = cms.get_flex_ssbci(plan_number)
+        if flex.get("has_ssbci") and flex.get("benefits"):
+            total = 0
+            cats = []
+            for b in flex["benefits"]:
+                cats.append(b["category"])
+                amt_str = b.get("amount", "")
+                if amt_str.startswith("$"):
+                    try:
+                        total += float(amt_str.replace("$", "").replace(",", ""))
+                    except ValueError:
+                        pass
+            if total > 0:
+                flex_value = f"${total:.0f} ({', '.join(cats[:3])})"
+            else:
+                flex_value = ", ".join(cats[:3])
+            _upsert_medical(medical, label_map, "Flex card / SSBCI", flex_value)
+    except Exception as e:
+        log.warning(f"CMS flex enrichment failed: {e}")
+
+    # ── Part B giveback (only fill if Claude missed it) ──
+    try:
+        giveback = cms.get_part_b_giveback(plan_number)
+        if giveback.get("has_giveback"):
+            gb_value = f"{giveback['monthly_amount']}/mo reduction"
+            _upsert_medical(medical, label_map, "Part B giveback", gb_value)
+    except Exception as e:
+        log.warning(f"CMS giveback enrichment failed: {e}")
+
+    result["medical"] = medical
+    return result
+
+
 SOB_EXTRACTION_PROMPT = """You are extracting benefits from a Medicare Summary of Benefits PDF. Your job is to pull EVERY dollar amount and cost-share from this document.
 
 CRITICAL RULES:
@@ -272,16 +503,15 @@ def get_sob_summary(req: SOBRequest):
             detail=f"No SOB document found for plan {plan_id}",
         )
 
-    # Send ALL chunks — drug tiers, dental, vision, hearing, mental health,
-    # OTC, etc. are often in the latter half of the document
-    context = "\n\n---\n\n".join(chunks)
+    # Use MORE chunks — we need the full document for in/out of network
+    context = "\n\n---\n\n".join(chunks[:12])
 
     # Ask Claude to extract structured benefits
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=4096,
+        max_tokens=3000,
         system=SOB_EXTRACTION_PROMPT,
         messages=[
             {
@@ -323,47 +553,107 @@ def get_sob_summary(req: SOBRequest):
         "drugs": parsed.get("drugs", []),
     }
 
+    # Enrich with CMS authoritative data
+    try:
+        result = _enrich_sob_with_cms(result, req.plan_number)
+    except Exception as e:
+        log.warning(f"CMS enrichment failed (non-fatal): {e}")
+
     # Cache it with timestamp
     _sob_cache[plan_id] = {"data": result, "ts": time.time()}
     return result
 
 
-# --- SOB PDF Download ---
+def _find_sob_pdf(plan_number: str) -> str | None:
+    """Find the actual SOB PDF file for a plan across all carrier folders.
+
+    Different carriers use different naming:
+      Humana:  H1036077000SB26.PDF
+      UHC:     2026 English SB- ... H1045-057-000.pdf
+      Aetna:   H1610_001_DS17_SB2026_M.pdf
+      Devoted: 2026-DEVOTED-...-H9888-001-ENG.pdf
+      Wellcare: Wellcare ... H5590-008.pdf
+
+    Common thread: all filenames contain the H-number.
+    """
+    pid = normalize_plan_id(plan_number)          # H1036-077
+    parts = pid.split("-")                         # ['H1036', '077']
+    if len(parts) != 2:
+        return None
+    h_num, plan_id = parts                         # 'H1036', '077'
+    # Patterns to match: H1036-077, H1036_077, H1036077
+    search_patterns = [
+        f"{h_num}-{plan_id}",                      # H1036-077
+        f"{h_num}_{plan_id}",                      # H1036_077
+        f"{h_num}{plan_id}",                       # H1036077
+    ]
+
+    for root, dirs, files in os.walk(PDFS_DIR):
+        # Skip CMS data folder
+        if "CMS" in root or "cms" in root:
+            continue
+        for fname in files:
+            if not fname.lower().endswith(".pdf"):
+                continue
+            fname_upper = fname.upper()
+            for pat in search_patterns:
+                if pat.upper() in fname_upper:
+                    return os.path.join(root, fname)
+    return None
+
 
 @app.get("/sob/pdf/{plan_number}")
 def get_sob_pdf(plan_number: str):
-    """Serve the original SOB PDF file for download."""
-    plan_id = normalize_plan_id(plan_number)
-
-    # Build multiple search patterns to handle different filename conventions:
-    #   H0028-007  →  H0028_007  (underscore)   e.g. H0028_007_SB.pdf
-    #   H7617-107  →  H7617107   (no separator)  e.g. H7617107000SB26.PDF
-    #   H7617-107  →  H7617-107  (dash kept)     e.g. H7617-107.PDF
-    underscore = plan_id.replace("-", "_")
-    nosep = plan_id.replace("-", "")
-    patterns = [
-        f"*{underscore}*SB*.[pP][dD][fF]",
-        f"*{nosep}*SB*.[pP][dD][fF]",
-        f"*{plan_id}*SB*.[pP][dD][fF]",
-        f"*{underscore}*.[pP][dD][fF]",
-        f"*{nosep}*.[pP][dD][fF]",
-        f"*{plan_id}*.[pP][dD][fF]",
-    ]
-
-    matches = []
-    for pat in patterns:
-        matches = glob.glob(os.path.join(PDFS_DIR, "**", pat), recursive=True)
-        if matches:
-            break
-
-    if not matches:
-        raise HTTPException(status_code=404, detail=f"No PDF found for plan {plan_id}")
-
+    """Serve the actual SOB PDF file for download."""
+    path = _find_sob_pdf(plan_number)
+    if not path:
+        raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
+    filename = f"SOB_{normalize_plan_id(plan_number)}.pdf"
     return FileResponse(
-        matches[0],
+        path,
         media_type="application/pdf",
-        filename=f"SOB_{plan_id}.pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# --- OTC fallback from SOB extracted text ---
+
+def _otc_from_sob_text(plan_number: str) -> dict | None:
+    """
+    Fast regex extraction of OTC amount from pre-extracted SOB text.
+    Used when CMS has the OTC flag but no dollar amount stored.
+    No Claude call — just reads the local JSON + regex.
+    """
+    sob_path = _find_extracted_file(plan_number)
+    if sob_path is None:
+        return None
+    try:
+        with open(sob_path) as f:
+            data = json.load(f)
+        chunks = data if isinstance(data, list) else data.get("chunks", [])
+        for chunk in chunks:
+            text = chunk if isinstance(chunk, str) else str(chunk)
+            up = text.upper()
+            if "OTC" not in up and "OVER-THE-COUNTER" not in up:
+                continue
+            m = re.findall(
+                r"\$(\d+)\s+(?:per\s+)?(month|quarter|year|annual|monthly|quarterly|yearly)",
+                text, re.IGNORECASE,
+            )
+            if m:
+                amt, period_word = m[0]
+                pw = period_word.lower()
+                if pw in ("month", "monthly"):
+                    period = "Monthly"
+                elif pw in ("quarter", "quarterly"):
+                    period = "Quarterly"
+                else:
+                    period = "Yearly"
+                return {"amount": f"${amt}", "period": period}
+    except Exception as e:
+        log.warning(f"OTC SOB fallback failed for {pid}: {e}")
+    return None
 
 
 # --- CMS Benefits Endpoints ---
@@ -375,6 +665,15 @@ def cms_benefits(plan_number: str):
     result = cms.get_full_benefits(plan_number)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
+
+    # OTC fallback: if CMS says plan has OTC but no dollar amount, check SOB text
+    otc = result.get("otc", {})
+    if otc.get("has_otc") and not otc.get("amount"):
+        sob_otc = _otc_from_sob_text(plan_number)
+        if sob_otc:
+            otc["amount"] = sob_otc["amount"]
+            otc["period"] = sob_otc["period"]
+
     return result
 
 
@@ -397,6 +696,20 @@ def cms_otc(plan_number: str):
     """OTC allowance amount and delivery method."""
     cms = get_cms()
     return cms.get_otc_allowance(plan_number)
+
+
+@app.get("/cms/benefits/{plan_number}/vision")
+def cms_vision(plan_number: str):
+    """Eye exam + eyewear vision benefits."""
+    cms = get_cms()
+    return cms.get_vision_benefits(plan_number)
+
+
+@app.get("/cms/benefits/{plan_number}/hearing")
+def cms_hearing(plan_number: str):
+    """Hearing exam + hearing aid benefits."""
+    cms = get_cms()
+    return cms.get_hearing_benefits(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/flex")
@@ -433,10 +746,48 @@ def cms_drug_lookup_get(plan_number: str, drug_name: str):
     return result
 
 
+def _resolve_sob_cost(tier_copays: dict, tier: int, is_mail: bool, days_supply: int) -> dict | None:
+    """
+    Look up cost from SOB tier_copays for a given tier.
+    Returns {"amount": float, "type": "copay"|"coinsurance", "pct": float|None, "cap": float|None, "raw": str}
+    or None if SOB doesn't have data for this tier.
+
+    Priority: SOB governs over CMS.
+    """
+    tier_data = tier_copays.get(tier)
+    if not tier_data:
+        return None
+
+    # Pick the right column based on mail/days_supply
+    if is_mail:
+        # Prefer preferred mail, fall back to standard mail
+        if days_supply >= 90:
+            raw = tier_data.get("pref_mail_90") or tier_data.get("mail_90")
+        else:
+            raw = tier_data.get("pref_mail_30") or tier_data.get("mail_30")
+    else:
+        if days_supply >= 90:
+            raw = tier_data.get("retail_90")
+        else:
+            raw = tier_data.get("retail_30")
+
+    if not raw or raw.upper() == "N/A":
+        # Fall back to retail_30 as default
+        raw = tier_data.get("retail_30")
+
+    if not raw or raw.upper() == "N/A":
+        return None
+
+    from .sob_parser import _parse_cost_value
+    parsed = _parse_cost_value(raw)
+    return parsed
+
+
 @app.get("/cms/my-drugs/{phone}")
 def cms_my_drugs(phone: str):
     """
     Pull member's medications from Zoho, look up each in CMS formulary.
+    SOB (Summary of Benefits) governs over CMS for tier copays.
     Returns individual drug costs + estimated monthly total.
     """
     # 1. Look up member in Zoho
@@ -454,9 +805,9 @@ def cms_my_drugs(phone: str):
 
     # 2. Parse medications
     raw_meds = member.get("medications", "") or ""
-    med_names = parse_medications(raw_meds)
+    meds = parse_medications(raw_meds)
 
-    if not med_names:
+    if not meds:
         return {
             "plan_number": plan_number,
             "medications": [],
@@ -465,91 +816,144 @@ def cms_my_drugs(phone: str):
             "has_medications": False,
         }
 
-    # 3. Look up each drug in CMS
+    # 3. Load SOB tier copays (primary source) + CMS (fallback)
     cms = get_cms()
+    sob_tiers = get_sob_tier_copays(plan_number)
+    sob_insulin_cap = sob_tiers.get("insulin_cap", 35) if sob_tiers else 35
+    sob_source = sob_tiers is not None
+
     drugs = []
     monthly_total = 0.0
 
-    for name in med_names:
-        result = cms.get_drug_by_name(plan_number, name)
-        if result and "error" not in result:
-            # Determine cost type and handle coinsurance vs copay
-            cost_type_30 = result.get("cost_type_30day", "copay")
-            cost_type_90 = result.get("cost_type_90day", "copay")
-            is_insulin = result.get("is_insulin", False)
+    for med in meds:
+        name = med["name"]
+        days_supply = med["days_supply"]
+        is_mail = med.get("is_mail", False)
 
-            copay_30 = result.get("copay_30day_preferred")
-            copay_90 = result.get("copay_90day_mail")
-            cost_max_30 = result.get("cost_max_30day")
-            cost_max_90 = result.get("cost_max_90day")
+        # Check if drug is insulin (independent of formulary lookup)
+        from .cms_lookup import INSULIN_NAMES
+        is_insulin = any(ins in name.lower() for ins in INSULIN_NAMES)
 
-            # Calculate 30-day monthly cost
-            if cost_type_30 == "copay" and isinstance(copay_30, (int, float)):
-                cost_30 = float(copay_30)
-            elif cost_type_30 == "coinsurance":
-                # For coinsurance: use cap if available, or IRA $35 for insulin
-                if is_insulin:
-                    cost_30 = 35.0  # IRA insulin cap per fill
-                elif cost_max_30 is not None and cost_max_30 > 0:
-                    cost_30 = float(cost_max_30)
-                else:
-                    cost_30 = None  # Can't calculate without drug price
+        # CMS lookup — gives us tier + restrictions (even if we override cost with SOB)
+        result = cms.get_drug_by_name(plan_number, name, days_supply=days_supply)
+        found_in_formulary = result and "error" not in result
+
+        if found_in_formulary:
+            tier = result.get("tier")
+            actual_days = result.get("days_supply", days_supply)
+            is_insulin = result.get("is_insulin", is_insulin)
+        else:
+            tier = None
+            actual_days = days_supply
+
+        # ── Resolve cost: SOB first, CMS fallback ──
+        cost_type = "copay"
+        monthly_cost = 0.0
+        best_option = f"{actual_days}-day"
+        copay_retail = None
+        copay_mail = None
+        cost_source = "cms"  # track which source we used
+
+        # Try SOB first (SOB governs over CMS)
+        sob_cost = None
+        if sob_tiers and tier is not None:
+            sob_cost = _resolve_sob_cost(sob_tiers, tier, is_mail, actual_days)
+        elif sob_tiers and not found_in_formulary:
+            # Drug not on formulary — use Tier 4 (Non-Preferred) from SOB as proxy
+            # Non-formulary drugs typically cost the non-preferred tier amount
+            sob_cost = _resolve_sob_cost(sob_tiers, 4, is_mail, actual_days)
+            if sob_cost:
+                tier = 4  # Assign non-preferred tier for display
+                found_in_formulary = True  # We have a cost to show
+                cost_source = "sob-nonformulary"
+
+        if sob_cost and sob_cost.get("type") == "copay" and sob_cost.get("amount") is not None:
+            # SOB has a flat dollar copay — use it
+            copay_retail = sob_cost["amount"]
+            cost_type = "copay"
+            cost_source = cost_source if cost_source == "sob-nonformulary" else "sob"
+
+            if is_mail:
+                copay_mail = copay_retail
+                fill_cost = float(copay_retail)
+                months_per_fill = actual_days / 30.0
+                monthly_cost = fill_cost / months_per_fill
+                best_option = f"{actual_days}-day mail"
             else:
-                cost_30 = None
+                fill_cost = float(copay_retail)
+                months_per_fill = actual_days / 30.0
+                monthly_cost = fill_cost / months_per_fill
 
-            # Calculate 90-day monthly cost (÷ 3)
-            if cost_type_90 == "copay" and isinstance(copay_90, (int, float)) and copay_90 > 0:
-                cost_90_monthly = float(copay_90) / 3.0
-            elif cost_type_90 == "coinsurance":
-                if is_insulin:
-                    cost_90_monthly = 35.0 / 3.0  # ~$11.67/mo for 90-day insulin
-                elif cost_max_90 is not None and cost_max_90 > 0:
-                    cost_90_monthly = float(cost_max_90) / 3.0
-                else:
-                    cost_90_monthly = None
+        elif sob_cost and sob_cost.get("type") == "coinsurance":
+            # SOB has percentage — use it, with cap if available
+            cost_type = "coinsurance"
+            cost_source = cost_source if cost_source == "sob-nonformulary" else "sob"
+            copay_retail = sob_cost.get("raw", "N/A")
+            if sob_cost.get("cap") is not None:
+                # "25% up to $35" → use the cap as the cost
+                monthly_cost = float(sob_cost["cap"]) / (actual_days / 30.0)
             else:
-                cost_90_monthly = None
-
-            # Pick the best option
-            if cost_30 is not None and cost_90_monthly is not None:
-                if cost_90_monthly < cost_30:
-                    monthly_cost = cost_90_monthly
-                    best_option = "90-day mail"
-                else:
-                    monthly_cost = cost_30
-                    best_option = "30-day retail"
-            elif cost_30 is not None:
-                monthly_cost = cost_30
-                best_option = "30-day retail"
-            elif cost_90_monthly is not None:
-                monthly_cost = cost_90_monthly
-                best_option = "90-day mail"
-            else:
+                # Pure percentage without cap — can't calculate exact dollar amount
                 monthly_cost = 0.0
-                best_option = "unknown"
 
-            # Build display string
-            if cost_type_30 == "coinsurance" and not is_insulin and cost_max_30 is None:
-                copay_display = str(copay_30 or "N/A")  # Show "25%" as-is
+        elif found_in_formulary and result:
+            # SOB not available or no data for this tier — fall back to CMS
+            cost_source = "cms"
+            copay_retail = result.get("copay_preferred") or result.get("copay_30day_preferred")
+            copay_mail = result.get("copay_mail") or result.get("copay_90day_mail")
+            cost_type_retail = result.get("cost_type", result.get("cost_type_30day", "copay"))
+            cost_type_mail = result.get("cost_type_90day", "copay")
+            cost_max = result.get("cost_max_30day")
+
+            if is_mail and copay_mail is not None and isinstance(copay_mail, (int, float)):
+                fill_cost = float(copay_mail)
+                months_per_fill = actual_days / 30.0
+                monthly_cost = fill_cost / months_per_fill
+                cost_type = cost_type_mail
+                best_option = f"{actual_days}-day mail"
+            elif cost_type_retail == "copay" and isinstance(copay_retail, (int, float)):
+                fill_cost = float(copay_retail)
+                months_per_fill = actual_days / 30.0
+                monthly_cost = fill_cost / months_per_fill
+                cost_type = cost_type_retail
+            elif cost_type_retail == "coinsurance":
+                cost_type = "coinsurance"
+                if cost_max is not None and cost_max > 0:
+                    monthly_cost = float(cost_max) / (actual_days / 30.0)
+                else:
+                    monthly_cost = 0.0
+
+        # IRA insulin cap: $35/month (or SOB insulin_cap) is the MAX, not a minimum
+        if is_insulin and monthly_cost > float(sob_insulin_cap):
+            monthly_cost = float(sob_insulin_cap)
+
+        # Build display string
+        if found_in_formulary or cost_source == "sob-nonformulary":
+            if cost_type == "coinsurance" and not is_insulin and sob_cost and sob_cost.get("cap") is None:
+                copay_display = str(copay_retail or "N/A")
             else:
                 copay_display = "$" + str(int(round(monthly_cost)))
 
+            tier_labels = {1: "Preferred Generic", 2: "Generic", 3: "Preferred Brand",
+                           4: "Non-Preferred Drug", 5: "Specialty", 6: "Select Care"}
+
             drugs.append({
                 "drug_name": name,
-                "tier": result.get("tier"),
-                "tier_label": result.get("tier_label", ""),
-                "copay_30day": copay_30,
-                "copay_90day_mail": copay_90,
-                "cost_type": cost_type_30,
+                "tier": tier,
+                "tier_label": tier_labels.get(tier, f"Tier {tier}") if tier else "",
+                "copay_30day": copay_retail,
+                "copay_90day_mail": copay_mail,
+                "cost_type": cost_type,
                 "is_insulin": is_insulin,
                 "monthly_cost": round(monthly_cost, 2),
                 "best_option": best_option,
                 "copay_display": copay_display,
-                "prior_auth": result.get("prior_auth", False),
-                "step_therapy": result.get("step_therapy", False),
-                "quantity_limit": result.get("quantity_limit", False),
-                "deductible_applies": result.get("deductible_applies", False),
+                "prior_auth": result.get("prior_auth", False) if result and "error" not in result else False,
+                "step_therapy": result.get("step_therapy", False) if result and "error" not in result else False,
+                "quantity_limit": result.get("quantity_limit", False) if result and "error" not in result else False,
+                "deductible_applies": result.get("deductible_applies", False) if result and "error" not in result else False,
                 "found": True,
+                "cost_source": cost_source,
             })
             monthly_total += monthly_cost
         else:
@@ -564,6 +968,7 @@ def cms_my_drugs(phone: str):
                 "quantity_limit": False,
                 "deductible_applies": False,
                 "found": False,
+                "cost_source": "none",
             })
 
     return {
@@ -572,4 +977,5 @@ def cms_my_drugs(phone: str):
         "monthly_total": monthly_total,
         "monthly_display": "$" + str(int(monthly_total)),
         "has_medications": True,
+        "cost_source": "sob" if sob_source else "cms",
     }

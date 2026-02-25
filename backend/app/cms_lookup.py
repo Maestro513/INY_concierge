@@ -11,6 +11,8 @@ Key lookups:
   - get_otc_allowance(contract_id, plan_id) → OTC benefit amount + delivery method
   - get_flex_ssbci(contract_id, plan_id) → flex card / SSBCI benefits
   - get_part_b_giveback(contract_id, plan_id) → Part B premium reduction
+  - get_vision_benefits(contract_id, plan_id) → eye exams + eyewear
+  - get_hearing_benefits(contract_id, plan_id) → hearing exams + hearing aids
   - get_full_benefits(contract_id, plan_id) → all of the above combined
 """
 
@@ -181,10 +183,12 @@ class CMSLookup:
 
     # ── Drug Coverage ─────────────────────────────────────────────────────────
 
-    def get_drug_coverage(self, plan_number: str, rxcui: str) -> Optional[dict]:
+    def get_drug_coverage(self, plan_number: str, rxcui: str,
+                          days_supply: int = 30) -> Optional[dict]:
         """
         Look up a drug by RXCUI for a given plan.
         Returns tier, copay, and restrictions.
+        days_supply: 30/60/90 — maps to CMS codes 1/2/3.
         """
         cid, pid, _ = self._parse_plan_number(plan_number)
 
@@ -212,26 +216,52 @@ class CMSLookup:
 
         tier = int(drug["tier_level_value"]) if drug["tier_level_value"] else None
 
-        # Step 3: Tier → copay from beneficiary_cost (30-day supply)
-        # We query BOTH preferred and non-preferred pharmacy columns.
-        # "preferred" = preferred pharmacy network (e.g. CenterWell for Humana)
-        # "non-preferred" = standard retail pharmacies (CVS, Walgreens, etc.)
-        # Many plans have cost_amt_pref=0 (no preferred retail tier), so we
-        # fall back to cost_amt_nonpref which is the actual standard retail cost.
-        cost = self._query_one(
-            """SELECT cost_type_pref, cost_amt_pref, cost_min_amt_pref, cost_max_amt_pref,
-                      cost_type_nonpref, cost_amt_nonpref, cost_min_amt_nonpref, cost_max_amt_nonpref,
-                      cost_type_mail_pref, cost_amt_mail_pref,
-                      cost_min_amt_mail_pref, cost_max_amt_mail_pref,
-                      cost_type_mail_nonpref, cost_amt_mail_nonpref,
-                      cost_min_amt_mail_nonpref, cost_max_amt_mail_nonpref,
-                      ded_applies_yn, coverage_level
-               FROM beneficiary_cost
-               WHERE contract_id = ? AND plan_id = ? AND tier = ? AND days_supply = '1'
-                     AND coverage_level = '0'
-               LIMIT 1""",
-            (cid, pid, str(tier))
-        )
+        # Step 3: Tier → copay from beneficiary_cost
+        # Map days_supply to CMS code: 30=1, 60=2, 90=3
+        ds_code = '1'
+        if days_supply >= 90:
+            ds_code = '3'
+        elif days_supply >= 60:
+            ds_code = '2'
+
+        # Try requested days_supply first, fall back to 30-day
+        cost = None
+        for try_ds in ([ds_code, '1'] if ds_code != '1' else ['1']):
+            cost = self._query_one(
+                """SELECT cost_type_pref, cost_amt_pref, cost_min_amt_pref, cost_max_amt_pref,
+                          cost_type_nonpref, cost_amt_nonpref,
+                          cost_type_mail_pref, cost_amt_mail_pref,
+                          cost_min_amt_mail_pref, cost_max_amt_mail_pref,
+                          cost_type_mail_nonpref, cost_amt_mail_nonpref,
+                          ded_applies_yn, days_supply
+                   FROM beneficiary_cost
+                   WHERE contract_id = ? AND plan_id = ? AND tier = ? AND days_supply = ?
+                         AND coverage_level = '1'
+                   LIMIT 1""",
+                (cid, pid, str(tier), try_ds)
+            )
+            if cost:
+                break
+
+        # Also try without coverage_level filter if nothing found
+        if not cost:
+            cost = self._query_one(
+                """SELECT cost_type_pref, cost_amt_pref, cost_min_amt_pref, cost_max_amt_pref,
+                          cost_type_nonpref, cost_amt_nonpref,
+                          cost_type_mail_pref, cost_amt_mail_pref,
+                          cost_min_amt_mail_pref, cost_max_amt_mail_pref,
+                          cost_type_mail_nonpref, cost_amt_mail_nonpref,
+                          ded_applies_yn, days_supply
+                   FROM beneficiary_cost
+                   WHERE contract_id = ? AND plan_id = ? AND tier = ? AND days_supply = '1'
+                   LIMIT 1""",
+                (cid, pid, str(tier))
+            )
+
+        # Track actual days_supply used
+        actual_ds_code = cost.get("days_supply", ds_code) if cost else ds_code
+        ds_map = {'1': 30, '2': 60, '3': 90}
+        actual_days = ds_map.get(str(actual_ds_code), 30)
 
         # Build result
         tier_labels = {1: "Preferred Generic", 2: "Generic", 3: "Preferred Brand",
@@ -247,70 +277,52 @@ class CMSLookup:
             "quantity_limit": drug.get("quantity_limit_yn", "") == "Y",
             "quantity_limit_amount": self._safe_float(drug.get("quantity_limit_amount")),
             "quantity_limit_days": self._safe_float(drug.get("quantity_limit_days")),
+            "copay_preferred": None,
+            "copay_mail": None,
+            "days_supply": actual_days,
+            "cost_type": "copay",
+            # Legacy backward compat keys
             "copay_30day_preferred": None,
             "copay_90day_mail": None,
-            "cost_type_30day": "copay",       # "copay" or "coinsurance"
+            "cost_type_30day": "copay",
             "cost_type_90day": "copay",
-            "cost_max_30day": None,            # coinsurance cap (e.g. $35 for insulin)
+            "cost_max_30day": None,
             "cost_max_90day": None,
             "deductible_applies": False,
         }
 
         if cost:
-            # Determine the best 30-day retail cost.
-            # Preferred pharmacy (cost_amt_pref) may be $0/N/A for plans without
-            # a preferred retail tier. Standard retail (cost_amt_nonpref) is what
-            # most members pay at CVS, Walgreens, etc.
-            pref_amt = self._safe_float(cost.get("cost_amt_pref"))
-            nonpref_amt = self._safe_float(cost.get("cost_amt_nonpref"))
-            pref_type = str(cost.get("cost_type_pref", "0")).strip()
-            nonpref_type = str(cost.get("cost_type_nonpref", "0")).strip()
-
-            # Use nonpref (standard retail) if pref is 0/null, else use pref
-            if (pref_amt is None or pref_amt == 0) and nonpref_amt and nonpref_amt > 0:
-                use_amt = nonpref_amt
-                use_type = nonpref_type
-                use_max_key = "cost_max_amt_nonpref"
-            else:
-                use_amt = pref_amt
-                use_type = pref_type
-                use_max_key = "cost_max_amt_pref"
-
-            if use_type == "0" or use_type == "":
-                result["copay_30day_preferred"] = use_amt
+            # Preferred retail: cost_type 0=copay, 1=coinsurance
+            cost_type = str(cost.get("cost_type_pref", "0")).strip()
+            if cost_type == "0" or cost_type == "":
+                retail_cost = self._safe_float(cost.get("cost_amt_pref"))
+                result["copay_preferred"] = retail_cost
+                result["copay_30day_preferred"] = retail_cost
+                result["cost_type"] = "copay"
                 result["cost_type_30day"] = "copay"
             else:
-                result["copay_30day_preferred"] = f"{use_amt}%" if use_amt else None
+                pct = self._safe_float(cost.get("cost_amt_pref"))
+                pct_str = f"{pct}%" if pct else None
+                result["copay_preferred"] = pct_str
+                result["copay_30day_preferred"] = pct_str
+                result["cost_type"] = "coinsurance"
                 result["cost_type_30day"] = "coinsurance"
-                result["cost_max_30day"] = self._safe_float(cost.get(use_max_key))
+                result["cost_max_30day"] = self._safe_float(cost.get("cost_max_amt_pref"))
 
-            # Also store both for transparency
-            result["copay_30day_pref_pharmacy"] = pref_amt
-            result["copay_30day_std_retail"] = nonpref_amt
-
-            # Mail order: same logic — prefer nonpref if pref is 0
-            mail_pref_amt = self._safe_float(cost.get("cost_amt_mail_pref"))
-            mail_nonpref_amt = self._safe_float(cost.get("cost_amt_mail_nonpref"))
-            mail_pref_type = str(cost.get("cost_type_mail_pref", "0")).strip()
-            mail_nonpref_type = str(cost.get("cost_type_mail_nonpref", "0")).strip()
-
-            if (mail_pref_amt is None or mail_pref_amt == 0) and mail_nonpref_amt and mail_nonpref_amt > 0:
-                mail_amt = mail_nonpref_amt
-                mail_type = mail_nonpref_type
-                mail_max_key = "cost_max_amt_mail_nonpref"
-            else:
-                mail_amt = mail_pref_amt
-                mail_type = mail_pref_type
-                mail_max_key = "cost_max_amt_mail_pref"
-
+            # Mail: use mail columns
+            mail_type = str(cost.get("cost_type_mail_pref", "0")).strip()
             if mail_type == "0" or mail_type == "":
-                result["copay_90day_mail"] = mail_amt
+                mail_cost = self._safe_float(cost.get("cost_amt_mail_pref"))
+                result["copay_mail"] = mail_cost
+                result["copay_90day_mail"] = mail_cost
                 result["cost_type_90day"] = "copay"
             else:
-                pct = mail_amt
-                result["copay_90day_mail"] = f"{pct}%" if pct else None
+                pct = self._safe_float(cost.get("cost_amt_mail_pref"))
+                pct_str = f"{pct}%" if pct else None
+                result["copay_mail"] = pct_str
+                result["copay_90day_mail"] = pct_str
                 result["cost_type_90day"] = "coinsurance"
-                result["cost_max_90day"] = self._safe_float(cost.get(mail_max_key))
+                result["cost_max_90day"] = self._safe_float(cost.get("cost_max_amt_mail_pref"))
 
             result["deductible_applies"] = cost.get("ded_applies_yn", "") == "Y"
 
@@ -383,7 +395,8 @@ class CMSLookup:
             log.warning(f"RxNorm lookup failed for '{drug_name}': {e}")
             return rxcuis
 
-    def get_drug_by_name(self, plan_number: str, drug_name: str) -> Optional[dict]:
+    def get_drug_by_name(self, plan_number: str, drug_name: str,
+                         days_supply: int = 30) -> Optional[dict]:
         """
         Look up drug by name. Tries RxNorm API first, then falls back to
         prefix matching in the formulary DB.
@@ -405,33 +418,13 @@ class CMSLookup:
 
         # Try each RXCUI against the formulary
         for rxcui in rxcuis:
-            result = self.get_drug_coverage(plan_number, rxcui)
+            result = self.get_drug_coverage(plan_number, rxcui, days_supply=days_supply)
             if result:
                 result["drug_name"] = drug_name
                 result["is_insulin"] = self._is_insulin(drug_name)
                 return result
 
-        # Fallback: if we got an ingredient RXCUI, search formulary by prefix
-        if rxcuis:
-            prefix = rxcuis[0][:4]  # First 4 digits of ingredient RXCUI
-            matches = self._query_all(
-                """SELECT rxcui, tier_level_value, prior_authorization_yn,
-                          step_therapy_yn, quantity_limit_yn
-                   FROM formulary_drugs
-                   WHERE formulary_id = ? AND rxcui LIKE ?
-                   LIMIT 5""",
-                (formulary_id, f"{prefix}%")
-            )
-            if matches:
-                # Use the first match
-                hit = matches[0]
-                result = self.get_drug_coverage(plan_number, hit["rxcui"])
-                if result:
-                    result["drug_name"] = drug_name
-                    result["matched_via"] = "prefix"
-                    result["is_insulin"] = self._is_insulin(drug_name)
-                    return result
-
+        # Drug not found in formulary — return not-found error
         return {
             "error": f"'{drug_name}' not on this plan's formulary",
             "rxcuis_checked": rxcuis[:5] if rxcuis else [],
@@ -614,18 +607,24 @@ class CMSLookup:
         if not b13:
             return result
 
-        amt = self._safe_float(b13.get("pbp_b13b_maxenr_amt") or b13.get("pbp_b13b_maxplan_amt"))
+        # bendesc_otc = '1' means OTC benefit is offered
+        if not self._yn_to_bool(b13.get("pbp_b13b_bendesc_otc")):
+            return result
+
+        result["has_otc"] = True
+
+        # Get dollar amount — not all plans store it in CMS
+        amt = self._safe_float(b13.get("pbp_b13b_maxplan_amt") or b13.get("pbp_b13b_maxenr_amt"))
         if amt and amt > 0:
-            result["has_otc"] = True
             result["amount"] = f"${amt:.0f}"
 
-            # Period mapping
-            per_code = b13.get("pbp_b13b_maxenr_per") or b13.get("pbp_b13b_otc_maxplan_per", "")
-            period_map = {"1": "per month", "2": "per quarter", "3": "per half year",
-                          "4": "per year", "5": "per episode", "6": "per stay"}
-            result["period"] = period_map.get(str(per_code).strip(), per_code)
+        # Period: 5=Monthly, 7=Quarterly, 4=Monthly, 3=Yearly
+        per_code = str(b13.get("pbp_b13b_otc_maxplan_per") or b13.get("pbp_b13b_maxenr_per") or "").strip()
+        period_map = {"3": "Yearly", "4": "Monthly", "5": "Monthly", "7": "Quarterly"}
+        period = period_map.get(per_code, "")
+        result["period"] = period if period else None
 
-            result["delivery_method"] = b13.get("pbp_b13b_mode_desc", "")
+        result["delivery_method"] = b13.get("pbp_b13b_mode_desc", "")
 
         return result
 
@@ -728,6 +727,150 @@ class CMSLookup:
 
         return result
 
+    # ── Vision Benefits ─────────────────────────────────────────────────────
+
+    def get_vision_benefits(self, plan_number: str) -> dict:
+        """Get vision exam + eyewear benefits from B17."""
+        cid, pid, _ = self._parse_plan_number(plan_number)
+
+        result = {
+            "has_eye_exam": False,
+            "has_eyewear": False,
+            "eye_exam": {},
+            "eyewear": {},
+        }
+
+        b17 = self._query_one(
+            """SELECT
+                pbp_b17a_bendesc_yn,
+                pbp_b17a_copay_amt_mc_min, pbp_b17a_copay_amt_mc_max,
+                pbp_b17a_coins_pct_mc_min, pbp_b17a_coins_pct_mc_max,
+                pbp_b17a_maxplan_amt, pbp_b17a_maxenr_amt,
+                pbp_b17a_bendesc_num_rex, pbp_b17a_bendesc_per_rex,
+                pbp_b17b_bendesc_yn,
+                pbp_b17b_copay_amt_mc_min, pbp_b17b_copay_amt_mc_max,
+                pbp_b17b_coins_pct_mc_min, pbp_b17b_coins_pct_mc_max,
+                pbp_b17b_comb_maxplan_amt, pbp_b17b_maxenr_amt,
+                pbp_b17b_bendesc_numv_cl, pbp_b17b_bendesc_per_cl
+               FROM pbp_b17_vision
+               WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
+               LIMIT 1""",
+            (cid, pid)
+        )
+
+        if not b17:
+            return result
+
+        # Eye exams (17a)
+        if self._yn_to_bool(b17.get("pbp_b17a_bendesc_yn")):
+            result["has_eye_exam"] = True
+            copay = self._safe_float(b17.get("pbp_b17a_copay_amt_mc_min"))
+            coins = self._safe_float(b17.get("pbp_b17a_coins_pct_mc_min"))
+            max_amt = self._safe_float(
+                b17.get("pbp_b17a_maxplan_amt") or b17.get("pbp_b17a_maxenr_amt")
+            )
+            exam_num = b17.get("pbp_b17a_bendesc_num_rex", "")
+
+            result["eye_exam"] = {
+                "copay": f"${copay:.0f}" if copay is not None else None,
+                "coinsurance": f"{coins:.0f}%" if coins is not None else None,
+                "max_benefit": f"${max_amt:.0f}" if max_amt is not None else None,
+                "exams_per_year": exam_num if exam_num else None,
+            }
+
+        # Eyewear (17b)
+        if self._yn_to_bool(b17.get("pbp_b17b_bendesc_yn")):
+            result["has_eyewear"] = True
+            copay = self._safe_float(b17.get("pbp_b17b_copay_amt_mc_min"))
+            coins = self._safe_float(b17.get("pbp_b17b_coins_pct_mc_min"))
+            max_amt = self._safe_float(
+                b17.get("pbp_b17b_comb_maxplan_amt") or b17.get("pbp_b17b_maxenr_amt")
+            )
+
+            result["eyewear"] = {
+                "copay": f"${copay:.0f}" if copay is not None else None,
+                "coinsurance": f"{coins:.0f}%" if coins is not None else None,
+                "max_benefit": f"${max_amt:.0f}" if max_amt is not None else None,
+            }
+
+        return result
+
+    # ── Hearing Benefits ─────────────────────────────────────────────────────
+
+    def get_hearing_benefits(self, plan_number: str) -> dict:
+        """Get hearing exam + hearing aid benefits from B18."""
+        cid, pid, _ = self._parse_plan_number(plan_number)
+
+        result = {
+            "has_hearing_exam": False,
+            "has_hearing_aids": False,
+            "hearing_exam": {},
+            "hearing_aids": {},
+        }
+
+        b18 = self._query_one(
+            """SELECT
+                pbp_b18a_bendesc_yn,
+                pbp_b18a_copay_amt, pbp_b18a_med_copay_amt_max,
+                pbp_b18a_med_coins_pct, pbp_b18a_med_coins_pct_max,
+                pbp_b18a_maxplan_amt, pbp_b18a_maxenr_amt,
+                pbp_b18a_bendesc_numv_cl,
+                pbp_b18b_bendesc_yn,
+                pbp_b18b_copay_at_min_amt, pbp_b18b_copay_at_max_amt,
+                pbp_b18b_coins_pct_at_min, pbp_b18b_coins_pct_at_max,
+                pbp_b18b_maxplan_amt, pbp_b18b_maxenr_amt,
+                pbp_b18b_bendesc_numv_at, pbp_b18b_bendesc_per_at
+               FROM pbp_b18_hearing
+               WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
+               LIMIT 1""",
+            (cid, pid)
+        )
+
+        if not b18:
+            return result
+
+        # Hearing exams (18a)
+        if self._yn_to_bool(b18.get("pbp_b18a_bendesc_yn")):
+            result["has_hearing_exam"] = True
+            copay = self._safe_float(b18.get("pbp_b18a_copay_amt"))
+            coins = self._safe_float(b18.get("pbp_b18a_med_coins_pct"))
+            max_amt = self._safe_float(
+                b18.get("pbp_b18a_maxplan_amt") or b18.get("pbp_b18a_maxenr_amt")
+            )
+            exam_num = b18.get("pbp_b18a_bendesc_numv_cl", "")
+
+            result["hearing_exam"] = {
+                "copay": f"${copay:.0f}" if copay is not None else None,
+                "coinsurance": f"{coins:.0f}%" if coins is not None else None,
+                "max_benefit": f"${max_amt:.0f}" if max_amt is not None else None,
+                "exams_per_year": exam_num if exam_num else None,
+            }
+
+        # Hearing aids (18b)
+        if self._yn_to_bool(b18.get("pbp_b18b_bendesc_yn")):
+            result["has_hearing_aids"] = True
+            copay = self._safe_float(b18.get("pbp_b18b_copay_at_min_amt"))
+            coins = self._safe_float(b18.get("pbp_b18b_coins_pct_at_min"))
+            max_amt = self._safe_float(
+                b18.get("pbp_b18b_maxplan_amt") or b18.get("pbp_b18b_maxenr_amt")
+            )
+            aid_num = b18.get("pbp_b18b_bendesc_numv_at", "")
+
+            # Period mapping
+            per_code = str(b18.get("pbp_b18b_bendesc_per_at", "")).strip()
+            period_map = {"1": "per year", "2": "every 2 years", "3": "every 3 years"}
+            period = period_map.get(per_code, "")
+
+            result["hearing_aids"] = {
+                "copay": f"${copay:.0f}" if copay is not None else None,
+                "coinsurance": f"{coins:.0f}%" if coins is not None else None,
+                "max_benefit": f"${max_amt:.0f}" if max_amt is not None else None,
+                "aids_allowed": aid_num if aid_num else None,
+                "period": period if period else None,
+            }
+
+        return result
+
     # ── Combined Full Benefits ────────────────────────────────────────────────
 
     def get_full_benefits(self, plan_number: str) -> dict:
@@ -740,6 +883,8 @@ class CMSLookup:
             "plan": overview,
             "medical": self.get_medical_copays(plan_number),
             "dental": self.get_dental_benefits(plan_number),
+            "vision": self.get_vision_benefits(plan_number),
+            "hearing": self.get_hearing_benefits(plan_number),
             "otc": self.get_otc_allowance(plan_number),
             "flex_ssbci": self.get_flex_ssbci(plan_number),
             "part_b_giveback": self.get_part_b_giveback(plan_number),

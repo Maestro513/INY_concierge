@@ -16,6 +16,8 @@ Files loaded:
     - pbp_b16_dental: Dental preventive + comprehensive
     - pbp_b13_other_services: OTC allowance
     - pbp_b13i_ssbci: Flex card / SSBCI benefits
+    - pbp_b17_vision: Eye exams + eyewear (vision)
+    - pbp_b18_hearing: Hearing exams + hearing aids
 
 Usage:
     python cms_import.py [--cms-dir PATH] [--db PATH]
@@ -70,6 +72,8 @@ PBP_FILES = [
     ("pbp_b16_dental",        "pbp-benefits-2026/pbp_b16_dental.txt"),
     ("pbp_b13_other_services","pbp-benefits-2026/pbp_b13_other_services.txt"),
     ("pbp_b13i_ssbci",        "pbp-benefits-2026/pbp_b13i_b19b_services_vbid_ssbci.txt"),
+    ("pbp_b17_vision",        "pbp-benefits-2026/pbp_b17_eye_exams_wear.txt"),
+    ("pbp_b18_hearing",       "pbp-benefits-2026/pbp_b18_hearing_exams_aids.txt"),
 ]
 
 
@@ -183,6 +187,8 @@ def create_indexes(db: sqlite3.Connection):
         ("idx_b16_plan", "pbp_b16_dental",      "pbp_a_hnumber, pbp_a_plan_identifier, segment_id"),
         ("idx_b13_plan", "pbp_b13_other_services","pbp_a_hnumber, pbp_a_plan_identifier, segment_id"),
         ("idx_b13i_plan","pbp_b13i_ssbci",      "pbp_a_hnumber, pbp_a_plan_identifier, segment_id"),
+        ("idx_b17_plan", "pbp_b17_vision",      "pbp_a_hnumber, pbp_a_plan_identifier, segment_id"),
+        ("idx_b18_plan", "pbp_b18_hearing",     "pbp_a_hnumber, pbp_a_plan_identifier, segment_id"),
     ]
 
     for idx_name, table, cols in indexes:

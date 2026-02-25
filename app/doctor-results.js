@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { COLORS, RADII, SPACING } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL } from '../constants/api';
 
 export default function DoctorResults() {
@@ -16,99 +17,98 @@ export default function DoctorResults() {
   const [error, setError] = useState('');
   const [meta, setMeta] = useState({});
 
-  useEffect(() => {
-    searchProviders();
-  }, []);
+  useEffect(() => { searchProviders(); }, []);
 
   const searchProviders = async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await fetch(`${API_URL}/providers/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan_name: planName,
-          specialty: specialty,
-          zip_code: zipCode,
-          radius_miles: 25,
-          limit: 50,
-          enrich_google: true,
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_name: planName, specialty, zip_code: zipCode, radius_miles: 25, limit: 50, enrich_google: true }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Search failed');
-      }
+      if (!res.ok) throw new Error(data.detail || 'Search failed');
       setProviders(data.providers || []);
-      setMeta({
-        total: data.total,
-        carrier: data.carrier,
-        specialty: data.specialty,
-      });
+      setMeta({ total: data.total, carrier: data.carrier, specialty: data.specialty });
     } catch (err) {
       console.log('Provider search error:', err);
       if (err.message === 'Network request failed' || err.name === 'TypeError') {
         setError("Can't connect to the server right now. Check your connection and try again.");
-      } else {
-        setError(err.message || 'Something went wrong. Please try again.');
-      }
-    } finally {
-      setLoading(false);
-    }
+      } else { setError(err.message || 'Something went wrong. Please try again.'); }
+    } finally { setLoading(false); }
   };
 
   const callDoctor = (phone) => {
     if (!phone) return;
-    const digits = phone.replace(/\D/g, '');
-    Linking.openURL(`tel:${digits}`);
+    Linking.openURL(`tel:${phone.replace(/\D/g, '')}`);
   };
 
   const renderStars = (rating) => {
     if (!rating) return null;
     const full = Math.floor(rating);
     const half = rating - full >= 0.5;
-    let stars = '★'.repeat(full);
-    if (half) stars += '½';
+    const stars = [];
+    for (let i = 0; i < full; i++) stars.push(<Ionicons key={'f'+i} name="star" size={14} color={COLORS.warning} />);
+    if (half) stars.push(<Ionicons key="h" name="star-half" size={14} color={COLORS.warning} />);
     return stars;
   };
 
-  const renderProvider = ({ item }) => (
+  const getInitials = (name) => {
+    if (!name) return '?';
+    const parts = name.replace(/^Dr\.?\s*/i, '').split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return (parts[0] || '?')[0].toUpperCase();
+  };
+
+  const renderProvider = ({ item, index }) => (
     <View style={s.card}>
-      {/* Name + Credentials */}
-      <Text style={s.name}>{item.name}</Text>
-      <Text style={s.specialty}>{item.specialty}</Text>
+      <View style={s.cardHeader}>
+        {/* Avatar with initials */}
+        <View style={s.avatar}>
+          <Text style={s.avatarText}>{getInitials(item.name)}</Text>
+        </View>
+        <View style={s.nameWrap}>
+          <Text style={s.name}>{item.name}</Text>
+          <Text style={s.specialty}>{item.specialty}</Text>
+        </View>
+        {item.accepting_new_patients != null && (
+          <View style={[s.statusPill, !item.accepting_new_patients && s.statusPillClosed]}>
+            <View style={[s.statusDot, !item.accepting_new_patients && s.statusDotClosed]} />
+            <Text style={[s.statusText, !item.accepting_new_patients && s.statusTextClosed]}>
+              {item.accepting_new_patients ? 'Accepting' : 'Not Accepting'}
+            </Text>
+          </View>
+        )}
+      </View>
 
       {/* Google Rating */}
       {item.google_rating && (
         <View style={s.ratingRow}>
-          <Text style={s.stars}>{renderStars(item.google_rating)}</Text>
+          <View style={s.starsRow}>{renderStars(item.google_rating)}</View>
           <Text style={s.ratingNum}>{item.google_rating}</Text>
           {item.google_review_count ? (
-            <Text style={s.reviewCount}>({item.google_review_count} reviews)</Text>
+            <Text style={s.reviewCount}>({item.google_review_count})</Text>
           ) : null}
         </View>
       )}
 
-      {/* Address */}
-      <Text style={s.address}>{item.address}</Text>
-
-      {/* Distance */}
+      {/* Address + distance inline */}
+      <View style={s.infoRow}>
+        <Ionicons name="location-outline" size={15} color={COLORS.textSecondary} />
+        <Text style={s.address}>{item.address}</Text>
+      </View>
       {item.distance_miles != null && (
-        <Text style={s.distance}>📍 {item.distance_miles.toFixed(1)} miles away</Text>
-      )}
-
-      {/* Accepting new patients */}
-      {item.accepting_new_patients != null && (
-        <Text style={[s.accepting, !item.accepting_new_patients && s.notAccepting]}>
-          {item.accepting_new_patients ? '✓ Accepting new patients' : '✗ Not accepting new patients'}
-        </Text>
+        <View style={s.distanceBadge}>
+          <Ionicons name="navigate-outline" size={12} color={COLORS.accent} />
+          <Text style={s.distanceText}>{item.distance_miles.toFixed(1)} mi</Text>
+        </View>
       )}
 
       {/* Phone button */}
       {item.phone ? (
-        <TouchableOpacity style={s.callBtn} onPress={() => callDoctor(item.phone)} activeOpacity={0.7}>
-          <Text style={s.callText}>📞  {item.phone}</Text>
+        <TouchableOpacity style={s.callDocBtn} onPress={() => callDoctor(item.phone)} activeOpacity={0.7}>
+          <Ionicons name="call" size={15} color={COLORS.accent} />
+          <Text style={s.callDocText}>{item.phone}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -118,12 +118,16 @@ export default function DoctorResults() {
     <SafeAreaView style={s.container} edges={['top']}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backText}>← Back</Text>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={22} color={COLORS.accent} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>
-          {meta.specialty || specialty || 'Doctors'} Near You
-        </Text>
+        <View style={s.headerCenter}>
+          <Text style={s.headerTitle} numberOfLines={1}>
+            {meta.specialty || specialty || 'Doctors'}
+          </Text>
+          <Text style={s.headerSub}>Near {zipCode}</Text>
+        </View>
+        <View style={{ width: 36 }} />
       </View>
 
       {/* Loading */}
@@ -137,9 +141,11 @@ export default function DoctorResults() {
       {/* Error */}
       {error !== '' && !loading && (
         <View style={s.center}>
-          <Text style={{ fontSize: 48, marginBottom: 12 }}>😔</Text>
+          <View style={s.errorIcon}>
+            <Ionicons name="cloud-offline-outline" size={36} color={COLORS.textTertiary} />
+          </View>
           <Text style={s.errorText}>{error}</Text>
-          <TouchableOpacity style={s.retryBtn} onPress={searchProviders}>
+          <TouchableOpacity style={s.retryBtn} onPress={searchProviders} activeOpacity={0.7}>
             <Text style={s.retryBtnText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -148,7 +154,9 @@ export default function DoctorResults() {
       {/* No results */}
       {!loading && !error && providers.length === 0 && (
         <View style={s.center}>
-          <Text style={{ fontSize: 48, marginBottom: 12 }}>🔍</Text>
+          <View style={s.errorIcon}>
+            <Ionicons name="search-outline" size={36} color={COLORS.textTertiary} />
+          </View>
           <Text style={s.emptyText}>
             No {specialty || 'doctors'} found near {zipCode}.{'\n'}
             Try a different specialty or call us at (844) 463-2931.
@@ -159,10 +167,14 @@ export default function DoctorResults() {
       {/* Results */}
       {!loading && providers.length > 0 && (
         <>
-          <Text style={s.resultCount}>
-            {meta.total || providers.length} {meta.specialty || specialty || 'doctor'}
-            {(meta.total || providers.length) !== 1 ? 's' : ''} found
-          </Text>
+          <View style={s.countRow}>
+            <View style={s.countBadge}>
+              <Text style={s.countBadgeText}>{meta.total || providers.length}</Text>
+            </View>
+            <Text style={s.resultCount}>
+              result{(meta.total || providers.length) !== 1 ? 's' : ''} found
+            </Text>
+          </View>
           <FlatList
             data={providers}
             keyExtractor={(item, i) => item.npi || `${item.name}-${i}`}
@@ -178,45 +190,111 @@ export default function DoctorResults() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
+
+  // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
     backgroundColor: COLORS.white,
+    borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
   },
-  backBtn: { paddingRight: 12 },
-  backText: { fontSize: 16, color: COLORS.accent, fontWeight: '600' },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, flex: 1 },
+  backBtn: {
+    width: 36, height: 36, borderRadius: 12,
+    backgroundColor: COLORS.accentLight,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle: { ...TYPE.h3, color: COLORS.text },
+  headerSub: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 1 },
+
+  // States
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  loadingText: { fontSize: 16, color: COLORS.textSecondary, marginTop: 16 },
-  errorText: { fontSize: 16, color: '#D32F2F', textAlign: 'center', marginBottom: 16, lineHeight: 24 },
-  retryBtn: { backgroundColor: COLORS.accent, borderRadius: RADII.md, paddingHorizontal: 28, paddingVertical: 12 },
+  loadingText: { ...TYPE.body, color: COLORS.textSecondary, marginTop: 16 },
+  errorIcon: {
+    width: 72, height: 72, borderRadius: 22,
+    backgroundColor: COLORS.bg,
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 16,
+  },
+  errorText: { ...TYPE.body, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 20, lineHeight: 24 },
+  retryBtn: {
+    backgroundColor: COLORS.accent, borderRadius: RADII.md,
+    paddingHorizontal: 28, paddingVertical: 12,
+    ...SHADOWS.button,
+  },
   retryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  emptyText: { fontSize: 16, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 24 },
-  resultCount: {
-    fontSize: 14, fontWeight: '600', color: COLORS.textSecondary,
-    paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4,
+  emptyText: { ...TYPE.body, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 24 },
+
+  // Results
+  countRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4,
   },
+  countBadge: {
+    backgroundColor: COLORS.accentLight, borderRadius: RADII.xs,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  countBadgeText: { ...TYPE.label, color: COLORS.accent, fontSize: 12 },
+  resultCount: { ...TYPE.label, color: COLORS.textSecondary },
   list: { paddingHorizontal: 16, paddingBottom: 24 },
+
+  // Card
   card: {
-    backgroundColor: COLORS.white, borderRadius: RADII.md,
-    padding: 16, marginTop: 12,
-    borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: COLORS.white, borderRadius: RADII.lg,
+    padding: 18, marginTop: 12,
+    ...SHADOWS.card,
+    borderWidth: 1, borderColor: COLORS.borderLight,
   },
-  name: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
-  specialty: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 8 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  stars: { fontSize: 16, color: '#F5A623', marginRight: 6 },
-  ratingNum: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginRight: 4 },
-  reviewCount: { fontSize: 13, color: COLORS.textSecondary },
-  address: { fontSize: 14, color: COLORS.text, lineHeight: 20, marginBottom: 4 },
-  distance: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 6 },
-  accepting: { fontSize: 13, color: '#2E7D32', fontWeight: '600', marginBottom: 10 },
-  notAccepting: { color: '#C62828' },
-  callBtn: {
-    backgroundColor: COLORS.accentLight || '#F3E8FF',
-    borderRadius: RADII.sm, paddingVertical: 10, alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(123,63,191,0.2)',
+  cardHeader: {
+    flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8,
   },
-  callText: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
+  avatar: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: COLORS.accentLight,
+    justifyContent: 'center', alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: { fontSize: 15, fontWeight: '700', color: COLORS.accent },
+  nameWrap: { flex: 1, marginRight: 10 },
+  name: { fontSize: 17, fontWeight: '700', color: COLORS.text, letterSpacing: 0.1 },
+  specialty: { ...TYPE.caption, color: COLORS.textSecondary, marginTop: 2 },
+
+  // Status pill
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: COLORS.successBg,
+    borderRadius: RADII.full,
+    paddingHorizontal: 10, paddingVertical: 4,
+  },
+  statusPillClosed: { backgroundColor: COLORS.errorBg },
+  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.success },
+  statusDotClosed: { backgroundColor: COLORS.error },
+  statusText: { fontSize: 11, fontWeight: '600', color: COLORS.success },
+  statusTextClosed: { color: COLORS.error },
+
+  // Rating
+  ratingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 4 },
+  starsRow: { flexDirection: 'row', gap: 1 },
+  ratingNum: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginLeft: 4 },
+  reviewCount: { ...TYPE.caption, color: COLORS.textTertiary },
+
+  // Info rows
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 },
+  address: { fontSize: 14, color: COLORS.text, lineHeight: 20, flex: 1 },
+  distanceBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: COLORS.accentLighter, borderRadius: RADII.xs,
+    paddingHorizontal: 8, paddingVertical: 4,
+    alignSelf: 'flex-start', marginBottom: 4,
+  },
+  distanceText: { fontSize: 12, fontWeight: '600', color: COLORS.accent },
+
+  // Call button
+  callDocBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: COLORS.accentLighter, borderRadius: RADII.md,
+    paddingVertical: 12, marginTop: 8,
+    borderWidth: 1.5, borderColor: COLORS.accentLight,
+  },
+  callDocText: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
 });

@@ -19,11 +19,20 @@ def normalize_plan_id(plan_id: str) -> str:
     return pid
 
 
+def _find_extracted_file(plan_id: str) -> str | None:
+    """Find extracted JSON — tries both H1234-567.json and H1234-567-000.json."""
+    pid = normalize_plan_id(plan_id)  # H1234-567
+    for candidate in [f"{pid}.json", f"{pid}-000.json"]:
+        path = os.path.join(EXTRACTED_DIR, candidate)
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def load_plan_chunks(plan_id: str) -> list[str] | None:
     """Load pre-extracted chunks for a plan."""
-    pid = normalize_plan_id(plan_id)
-    path = os.path.join(EXTRACTED_DIR, f"{pid}.json")
-    if not os.path.exists(path):
+    path = _find_extracted_file(plan_id)
+    if path is None:
         return None
     with open(path, "r") as f:
         data = json.load(f)

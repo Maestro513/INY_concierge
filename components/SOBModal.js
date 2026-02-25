@@ -1,5 +1,6 @@
-import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator, Linking, Platform } from 'react-native';
-import { COLORS, RADII, SPACING } from '../constants/theme';
+import { View, Text, Pressable, TouchableOpacity, Modal, ScrollView, Linking, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL } from '../constants/api';
 
 export default function SOBModal({ visible, onClose, member, sobData, loading, onRetry }) {
@@ -14,19 +15,44 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
   const isPPO = (sobData?.plan_type || planName || '').toUpperCase().includes('PPO');
   const hasOutOfNetwork = isPPO || medical.some(b => b.out_of_network && b.out_of_network !== b.in_network);
 
+  const handleDownload = async () => {
+    if (!planNumber) return;
+    const url = `${API_URL}/sob/pdf/${encodeURIComponent(planNumber)}`;
+    try { await Linking.openURL(url); } catch (err) { console.log('Download error:', err); Alert.alert('Error', 'Could not open the document.'); }
+  };
+
   return (
     <Modal visible={true} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onClose}>
-        <View style={s.sheet} onStartShouldSetResponder={() => true}>
-          {/* Header */}
-          <View style={s.header}>
-            <Text style={s.title}>Summary of Benefits</Text>
-            <TouchableOpacity onPress={onClose} style={s.closeBtn}>
-              <Text style={s.closeX}>✕</Text>
-            </TouchableOpacity>
+      <View style={s.overlay}>
+        <Pressable style={s.backdrop} onPress={onClose} />
+        <View style={s.sheet}>
+          {/* Drag handle */}
+          <View style={s.handleWrap}>
+            <View style={s.handle} />
           </View>
 
-          <ScrollView style={s.body} contentContainerStyle={s.bodyContent} showsVerticalScrollIndicator={true}>
+          {/* Header */}
+          <View style={s.header}>
+            <View style={s.headerLeft}>
+              <View style={s.headerIcon}>
+                <Ionicons name="document-text" size={16} color={COLORS.accent} />
+              </View>
+              <Text style={s.title}>Summary of Benefits</Text>
+            </View>
+            <View style={s.headerRight}>
+              {hasData && !isLoading ? (
+                <TouchableOpacity onPress={handleDownload} style={s.downloadBtn} activeOpacity={0.7}>
+                  <Ionicons name="download-outline" size={14} color="#fff" />
+                  <Text style={s.downloadText}>PDF</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7}>
+                <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView style={s.body} contentContainerStyle={s.bodyContent} showsVerticalScrollIndicator={true} nestedScrollEnabled={true}>
             {/* Plan info */}
             <View style={s.planInfo}>
               <Text style={s.planName}>{sobData?.plan_name || planName}</Text>
@@ -37,21 +63,30 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
             {!isLoading && hasData && (
               <View style={s.snapshotRow}>
                 {sobData.monthly_premium ? (
-                  <View style={s.snapshotCard}>
-                    <Text style={s.snapValue}>{sobData.monthly_premium}</Text>
-                    <Text style={s.snapLabel}>Monthly Premium</Text>
+                  <View style={[s.snapshotCard, { backgroundColor: COLORS.accentLighter }]}>
+                    <View style={[s.snapIconCircle, { backgroundColor: 'rgba(123, 63, 191, 0.12)' }]}>
+                      <Ionicons name="wallet-outline" size={16} color={COLORS.accent} />
+                    </View>
+                    <Text style={[s.snapValue, { color: COLORS.accent }]}>{sobData.monthly_premium}</Text>
+                    <Text style={s.snapLabel}>Premium</Text>
                   </View>
                 ) : null}
                 {sobData.annual_deductible_in ? (
-                  <View style={s.snapshotCard}>
-                    <Text style={s.snapValue}>{sobData.annual_deductible_in}</Text>
-                    <Text style={s.snapLabel}>Deductible (In)</Text>
+                  <View style={[s.snapshotCard, { backgroundColor: COLORS.clinicalBg }]}>
+                    <View style={[s.snapIconCircle, { backgroundColor: 'rgba(61, 107, 153, 0.12)' }]}>
+                      <Ionicons name="shield-outline" size={16} color={COLORS.clinical} />
+                    </View>
+                    <Text style={[s.snapValue, { color: COLORS.clinical }]}>{sobData.annual_deductible_in}</Text>
+                    <Text style={s.snapLabel}>Deductible</Text>
                   </View>
                 ) : null}
                 {sobData.moop_in ? (
-                  <View style={s.snapshotCard}>
-                    <Text style={s.snapValue}>{sobData.moop_in}</Text>
-                    <Text style={s.snapLabel}>Max Out of Pocket</Text>
+                  <View style={[s.snapshotCard, { backgroundColor: COLORS.savingsBg }]}>
+                    <View style={[s.snapIconCircle, { backgroundColor: 'rgba(58, 125, 92, 0.12)' }]}>
+                      <Ionicons name="trending-down-outline" size={16} color={COLORS.savings} />
+                    </View>
+                    <Text style={[s.snapValue, { color: COLORS.savings }]}>{sobData.moop_in}</Text>
+                    <Text style={s.snapLabel}>MOOP</Text>
                   </View>
                 ) : null}
               </View>
@@ -65,9 +100,10 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
               </View>
             ) : !hasData ? (
               <View style={s.center}>
+                <Ionicons name="cloud-offline-outline" size={40} color={COLORS.textTertiary} style={{ marginBottom: 12 }} />
                 <Text style={s.errorText}>{"Couldn't load benefits for this plan."}</Text>
                 {onRetry ? (
-                  <TouchableOpacity style={s.retryBtn} onPress={onRetry}>
+                  <TouchableOpacity style={s.retryBtn} onPress={onRetry} activeOpacity={0.7}>
                     <Text style={s.retryText}>Try Again</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -77,150 +113,211 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
                 {/* Medical Benefits Table */}
                 {medical.length > 0 ? (
                   <View style={s.section}>
-                    <Text style={s.secTitle}>Medical Benefits</Text>
-                    {/* Column headers */}
-                    <View style={s.tableHeader}>
-                      <Text style={s.thLabel}>Benefit</Text>
-                      <Text style={s.thValue}>In-Network</Text>
-                      {hasOutOfNetwork ? (
-                        <Text style={s.thValue}>Out-of-Network</Text>
-                      ) : null}
+                    <View style={s.secTitleRow}>
+                      <Ionicons name="medkit-outline" size={14} color={COLORS.accent} />
+                      <Text style={s.secTitle}>Medical Benefits</Text>
                     </View>
-                    {medical.map((item, i) => (
-                      <View key={i} style={s.tableRow}>
-                        <Text style={s.tdLabel}>{item.label || ''}</Text>
-                        <Text style={s.tdValue}>{item.in_network || item.value || ''}</Text>
-                        {hasOutOfNetwork ? (
-                          <Text style={[s.tdValue, s.tdOut]}>
-                            {item.out_of_network || '—'}
-                          </Text>
-                        ) : null}
+                    <View style={s.tableCard}>
+                      <View style={s.tableHeader}>
+                        <Text style={s.thLabel}>Benefit</Text>
+                        <Text style={s.thValue}>In-Network</Text>
+                        {hasOutOfNetwork ? <Text style={s.thValue}>Out-of-Network</Text> : null}
                       </View>
-                    ))}
+                      {medical.map((item, i) => (
+                        <View key={i} style={[s.tableRow, i % 2 === 0 && s.tableRowAlt]}>
+                          <Text style={s.tdLabel}>{item.label || ''}</Text>
+                          <Text style={s.tdValue}>{item.in_network || item.value || ''}</Text>
+                          {hasOutOfNetwork ? <Text style={[s.tdValue, s.tdOut]}>{item.out_of_network || '\u2014'}</Text> : null}
+                        </View>
+                      ))}
+                    </View>
                   </View>
+                ) : null}
+
+                {/* Divider between sections */}
+                {medical.length > 0 && drugs.length > 0 ? (
+                  <View style={s.sectionDivider} />
                 ) : null}
 
                 {/* Prescription Drugs */}
                 {drugs.length > 0 ? (
                   <View style={s.section}>
-                    <Text style={s.secTitle}>Prescription Drugs</Text>
-                    <View style={s.tableHeader}>
-                      <Text style={s.thLabel}>Tier / Phase</Text>
-                      <Text style={s.thValue}>You Pay</Text>
+                    <View style={s.secTitleRow}>
+                      <Ionicons name="medical-outline" size={14} color={COLORS.clinical} />
+                      <Text style={[s.secTitle, { color: COLORS.clinical }]}>Prescription Drugs</Text>
                     </View>
-                    {drugs.map((item, i) => (
-                      <View key={i} style={s.tableRow}>
-                        <Text style={s.tdLabel}>{item.label || ''}</Text>
-                        <Text style={s.tdValue}>{item.value || item.in_network || ''}</Text>
+                    <View style={s.tableCard}>
+                      <View style={s.tableHeader}>
+                        <Text style={s.thLabel}>Tier / Phase</Text>
+                        <Text style={s.thValue}>You Pay</Text>
                       </View>
-                    ))}
+                      {drugs.map((item, i) => (
+                        <View key={i} style={[s.tableRow, i % 2 === 0 && s.tableRowAlt]}>
+                          <Text style={s.tdLabel}>{item.label || ''}</Text>
+                          <Text style={s.tdValue}>{item.value || item.in_network || ''}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
                 ) : null}
 
-                {/* Out-of-network deductible / MOOP footer */}
+                {/* Out-of-network footer */}
                 {hasOutOfNetwork && (sobData.annual_deductible_out || sobData.moop_out) ? (
                   <View style={s.footer}>
                     {sobData.annual_deductible_out ? (
-                      <Text style={s.footerText}>
-                        Out-of-Network Deductible: {sobData.annual_deductible_out}
-                      </Text>
+                      <Text style={s.footerText}>Out-of-Network Deductible: {sobData.annual_deductible_out}</Text>
                     ) : null}
                     {sobData.moop_out ? (
-                      <Text style={s.footerText}>
-                        Out-of-Network Max Out of Pocket: {sobData.moop_out}
-                      </Text>
+                      <Text style={s.footerText}>Out-of-Network Max Out of Pocket: {sobData.moop_out}</Text>
                     ) : null}
                   </View>
                 ) : null}
 
                 {/* Download PDF */}
                 <TouchableOpacity
-                  style={s.downloadBtn}
-                  onPress={() => Linking.openURL(`${API_URL}/sob/pdf/${encodeURIComponent(planNumber)}`)}
+                  style={s.downloadBtnLarge}
+                  onPress={handleDownload}
                   activeOpacity={0.7}
                 >
-                  <Text style={s.downloadText}>📄  Download Full SOB (PDF)</Text>
+                  <Ionicons name="document-text-outline" size={16} color={COLORS.accent} />
+                  <Text style={s.downloadTextLarge}>Download Full SOB (PDF)</Text>
                 </TouchableOpacity>
               </View>
             )}
+
+            <View style={{ height: 40 }} />
           </ScrollView>
         </View>
-      </TouchableOpacity>
+      </View>
     </Modal>
   );
 }
 
 const s = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: COLORS.white, borderTopLeftRadius: RADII.xl, borderTopRightRadius: RADII.xl, height: '85%' },
+  overlay: { flex: 1, backgroundColor: COLORS.overlay, justifyContent: 'flex-end' },
+  backdrop: { flex: 1 },
+  sheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: RADII.xxl, borderTopRightRadius: RADII.xxl,
+    height: '85%', ...SHADOWS.modal,
+  },
+
+  // Handle
+  handleWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 4 },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: COLORS.border },
+
+  // Header
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 14,
+    borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
   },
-  title: { fontSize: 19, fontWeight: '700', color: COLORS.text },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.border, justifyContent: 'center', alignItems: 'center' },
-  closeX: { fontSize: 16, color: COLORS.textSecondary },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerIcon: {
+    width: 30, height: 30, borderRadius: 10,
+    backgroundColor: COLORS.accentLight,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  title: { ...TYPE.h3, color: COLORS.text },
+  downloadBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: COLORS.accent, borderRadius: RADII.full,
+    paddingHorizontal: 14, paddingVertical: 7,
+    ...SHADOWS.button,
+  },
+  downloadText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  closeBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: COLORS.bg,
+    justifyContent: 'center', alignItems: 'center',
+  },
   body: { flex: 1 },
   bodyContent: { paddingBottom: 80 },
 
   // Plan info
   planInfo: { alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20 },
-  planName: { fontSize: 16, fontWeight: '700', color: COLORS.text, textAlign: 'center' },
-  planId: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
+  planName: { fontSize: 16, fontWeight: '700', color: COLORS.text, textAlign: 'center', letterSpacing: 0.1 },
+  planId: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 2 },
 
-  // Snapshot cards (premium, deductible, MOOP)
-  snapshotRow: { flexDirection: 'row', paddingHorizontal: 16, marginBottom: 16, gap: 8 },
+  // Snapshot cards
+  snapshotRow: { flexDirection: 'row', paddingHorizontal: 16, marginBottom: 20, gap: 8 },
   snapshotCard: {
-    flex: 1, backgroundColor: COLORS.bg, borderRadius: RADII.sm,
-    paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center',
-    borderWidth: 1, borderColor: COLORS.border,
+    flex: 1, borderRadius: RADII.md,
+    paddingVertical: 14, paddingHorizontal: 8, alignItems: 'center',
+    gap: 4,
   },
-  snapValue: { fontSize: 15, fontWeight: '700', color: COLORS.accent },
-  snapLabel: { fontSize: 10, color: COLORS.textSecondary, marginTop: 2, textAlign: 'center' },
+  snapIconCircle: {
+    width: 32, height: 32, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 2,
+  },
+  snapValue: { ...TYPE.cardValue, fontSize: 20 },
+  snapLabel: { ...TYPE.cardLabel, color: COLORS.textSecondary, marginTop: 2, textAlign: 'center' },
 
   // Loading / error
   center: { alignItems: 'center', paddingVertical: 30 },
   loadingText: { fontSize: 15, color: COLORS.textSecondary, marginTop: 12 },
-  errorText: { fontSize: 15, color: '#D32F2F', textAlign: 'center', marginBottom: 12 },
-  retryBtn: { backgroundColor: COLORS.accent, borderRadius: RADII.sm, paddingHorizontal: 24, paddingVertical: 10 },
+  errorText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 12 },
+  retryBtn: {
+    backgroundColor: COLORS.accent, borderRadius: RADII.md,
+    paddingHorizontal: 24, paddingVertical: 10,
+    ...SHADOWS.button,
+  },
   retryText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+
+  // Section divider
+  sectionDivider: {
+    height: 1, backgroundColor: COLORS.borderLight,
+    marginHorizontal: 24, marginBottom: 8,
+  },
 
   // Section
   section: { marginBottom: 20, paddingHorizontal: 16 },
-  secTitle: {
-    fontSize: 14, fontWeight: '700', color: COLORS.accent,
-    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, marginTop: 4,
+  secTitleRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginBottom: 10, marginTop: 4,
   },
+  secTitle: { ...TYPE.sectionHeader, color: COLORS.accent },
 
-  // Table header
-  tableHeader: {
-    flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 4,
-    backgroundColor: COLORS.bg, borderRadius: 4, marginBottom: 2,
+  // Table card
+  tableCard: {
+    backgroundColor: COLORS.white, borderRadius: RADII.md,
+    borderWidth: 1, borderColor: COLORS.borderLight,
+    overflow: 'hidden',
   },
-  thLabel: { flex: 2, fontSize: 11, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase' },
-  thValue: { flex: 1.5, fontSize: 11, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', textAlign: 'right' },
+  tableHeader: {
+    flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12,
+    backgroundColor: COLORS.bg,
+  },
+  thLabel: { flex: 2, fontSize: 11, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  thValue: { flex: 1.5, fontSize: 11, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', textAlign: 'right', letterSpacing: 0.5 },
 
   // Table rows
   tableRow: {
-    flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 4,
-    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12,
     alignItems: 'flex-start',
   },
-  tdLabel: { flex: 2, fontSize: 14, color: COLORS.text },
+  tableRowAlt: { backgroundColor: COLORS.cardTinted },
+  tdLabel: { flex: 2, fontSize: 14, color: COLORS.text, lineHeight: 20 },
   tdValue: { flex: 1.5, fontSize: 13, fontWeight: '600', color: COLORS.text, textAlign: 'right' },
   tdOut: { color: COLORS.textSecondary },
 
   // Footer
-  footer: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
+  footer: {
+    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16,
+    backgroundColor: COLORS.bg, borderRadius: RADII.sm,
+    marginHorizontal: 16,
+  },
   footerText: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 4 },
 
-  // Download
-  downloadBtn: {
+  // Download (large, inside scroll)
+  downloadBtnLarge: {
     marginHorizontal: 16, marginTop: 12, marginBottom: 8,
-    backgroundColor: COLORS.accentLight || '#F3E8FF', borderRadius: RADII.sm,
-    paddingVertical: 14, alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(123,63,191,0.2)',
+    backgroundColor: COLORS.accentLighter, borderRadius: RADII.md,
+    paddingVertical: 14, alignItems: 'center', flexDirection: 'row',
+    justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: COLORS.accentLight,
   },
-  downloadText: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
+  downloadTextLarge: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
 });

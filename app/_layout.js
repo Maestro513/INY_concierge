@@ -45,7 +45,12 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: COLORS.bg }, animation: 'fade' }} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: COLORS.bg }, animation: 'fade' }}>
+        <Stack.Screen name="index" options={{ animation: 'none' }} />
+        <Stack.Screen name="home" options={{ animation: 'fade', gestureEnabled: false }} />
+        <Stack.Screen name="otp" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="doctor-results" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+      </Stack>
     </SafeAreaProvider>
   );
 }

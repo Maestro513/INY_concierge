@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet } from 'react-native';
+// import GradientBg from '../components/GradientBg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { COLORS } from '../constants/theme';
@@ -25,6 +26,9 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
+    // Reset all state when plan changes (e.g. user logs out and back in)
+    setBenefits([]);
+    setSobData(null);
     if (!planNumber) {
       setLoading(false);
       return;
@@ -79,23 +83,25 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ProfileCard
-        member={member}
-        onViewSOB={handleOpenSOB}
-        benefits={benefits}
-        loading={loading}
-      />
-      <VoiceHelp planNumber={planNumber || ''} planName={planName || ''} zipCode={zipCode || '33434'} />
-      <SOBModal
-        visible={showSOB}
-        onClose={() => setShowSOB(false)}
-        member={member}
-        sobData={sobData}
-        loading={sobLoading}
-        onRetry={loadSOBData}
-      />
-    </SafeAreaView>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ProfileCard
+          member={member}
+          onViewSOB={handleOpenSOB}
+          benefits={benefits}
+          loading={loading}
+        />
+        <VoiceHelp planNumber={planNumber || ''} planName={planName || ''} zipCode={zipCode || '33434'} />
+        <SOBModal
+          visible={showSOB}
+          onClose={() => setShowSOB(false)}
+          member={member}
+          sobData={sobData}
+          loading={sobLoading}
+          onRetry={loadSOBData}
+        />
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -148,9 +154,11 @@ function buildBenefitCards(data, drugsData) {
     });
   }
 
-  // Dental
-  if (dental.has_preventive && dental.preventive && dental.preventive.copay) {
-    row2.push({ label: 'Dental', in_network: String(dental.preventive.copay) });
+  // Dental — show annual max if available, otherwise $0 copay
+  if (dental.has_preventive && dental.preventive) {
+    const maxBenefit = dental.preventive.max_benefit;
+    const dentalValue = maxBenefit ? `${maxBenefit}/yr max` : '$0 copay';
+    row2.push({ label: 'Dental', in_network: dentalValue });
   }
 
   // Part B Giveback
@@ -164,9 +172,12 @@ function buildBenefitCards(data, drugsData) {
   // OTC Allowance
   if (otc.has_otc && otc.amount) {
     const period = otc.period === 'Monthly' ? '/mo' : otc.period === 'Quarterly' ? '/qtr' : '/yr';
+    // amount may already include $ from backend (e.g. "$50")
+    const amt = String(otc.amount);
+    const display = amt.startsWith('$') ? amt : '$' + amt;
     row2.push({
       label: 'OTC Allowance',
-      in_network: '$' + String(otc.amount) + period,
+      in_network: display + period,
     });
   }
 
@@ -184,4 +195,5 @@ function buildBenefitCards(data, drugsData) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
+  safe: { flex: 1 },
 });
