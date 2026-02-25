@@ -17,19 +17,7 @@ const getApiUrl = () => {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl) return envUrl;
 
-  // 2. Auto-detect from Expo dev server (no hardcoded IP needed)
-  if (__DEV__) {
-    const debuggerHost =
-      Constants.expoConfig?.hostUri ||
-      Constants.manifest2?.extra?.expoGo?.debuggerHost ||
-      Constants.manifest?.debuggerHost;
-    if (debuggerHost) {
-      const host = debuggerHost.split(':')[0]; // strip Expo's port
-      return `http://${host}:${DEV_PORT}`;
-    }
-  }
-
-  // 3. Production — your domain
+  // 2. Always use Render backend
   return 'https://iny-concierge.onrender.com';
 };
 
@@ -54,12 +42,13 @@ async function probeDevBackend() {
 
 export let API_URL = getApiUrl();
 
-// On startup in dev, probe both IPs — if one answers, switch to it
-if (__DEV__) {
-  probeDevBackend().then((url) => {
-    if (url) API_URL = url;
-  });
-}
+// On startup in dev, probe local IPs — if one answers, use it instead of Render
+// Uncomment below to use local backend during development:
+// if (__DEV__) {
+//   probeDevBackend().then((url) => {
+//     if (url) API_URL = url;
+//   });
+// }
 
 // ── Fetch with timeout ─────────────────────────────────────────
 // Default 15s timeout — all API calls should use this instead of raw fetch
