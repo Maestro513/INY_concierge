@@ -2,7 +2,7 @@
 InsuranceNYou Backend API
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -1374,3 +1374,25 @@ def _split_plan(plan_number: str) -> tuple[str, str]:
     if len(parts) >= 2:
         return parts[0], parts[1]
     return pid, ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEMPORARY FILE UPLOAD (remove after initial data migration)
+# ═══════════════════════════════════════════════════════════════════════════════
+UPLOAD_SECRET = os.getenv("UPLOAD_SECRET", "")
+
+@app.post("/admin/upload-pdf")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    path: str = Form(...),
+    secret: str = Form(""),
+):
+    """Upload a PDF to the persistent disk. Requires UPLOAD_SECRET env var."""
+    if not UPLOAD_SECRET or secret != UPLOAD_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    dest = os.path.join(PDFS_DIR, path)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "wb") as f:
+        content = await file.read()
+        f.write(content)
+    return {"uploaded": path, "size": len(content)}
