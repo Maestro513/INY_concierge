@@ -24,7 +24,7 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
   return (
     <Modal visible={true} transparent animationType="slide" onRequestClose={onClose}>
       <View style={s.overlay}>
-        <Pressable style={s.backdrop} onPress={onClose} />
+        <Pressable style={s.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close benefits sheet" />
         <View style={s.sheet}>
           {/* Drag handle */}
           <View style={s.handleWrap}>
@@ -41,12 +41,12 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
             </View>
             <View style={s.headerRight}>
               {hasData && !isLoading ? (
-                <TouchableOpacity onPress={handleDownload} style={s.downloadBtn} activeOpacity={0.7}>
+                <TouchableOpacity onPress={handleDownload} style={s.downloadBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Download benefits PDF">
                   <Ionicons name="download-outline" size={14} color="#fff" />
                   <Text style={s.downloadText}>PDF</Text>
                 </TouchableOpacity>
               ) : null}
-              <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7}>
+              <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Close">
                 <Ionicons name="close" size={18} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -103,7 +103,7 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
                 <Ionicons name="cloud-offline-outline" size={40} color={COLORS.textTertiary} style={{ marginBottom: 12 }} />
                 <Text style={s.errorText}>{"Couldn't load benefits for this plan."}</Text>
                 {onRetry ? (
-                  <TouchableOpacity style={s.retryBtn} onPress={onRetry} activeOpacity={0.7}>
+                  <TouchableOpacity style={s.retryBtn} onPress={onRetry} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Retry loading benefits">
                     <Text style={s.retryText}>Try Again</Text>
                   </TouchableOpacity>
                 ) : null}
@@ -178,6 +178,8 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
                   style={s.downloadBtnLarge}
                   onPress={handleDownload}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Download full summary of benefits PDF"
                 >
                   <Ionicons name="document-text-outline" size={16} color={COLORS.accent} />
                   <Text style={s.downloadTextLarge}>Download Full SOB (PDF)</Text>

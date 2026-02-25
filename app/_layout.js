@@ -5,6 +5,9 @@ import { Text, TextInput } from 'react-native';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { COLORS } from '../constants/theme';
 
+// expo-notifications requires a dev build (not available in Expo Go).
+// Notification handler is set up in utils/notifications.js when reminders are created.
+
 // Set Inter as default font for ALL Text and TextInput components app-wide
 const originalTextRender = Text.render;
 Text.render = function (...args) {

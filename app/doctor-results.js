@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
-import { API_URL } from '../constants/api';
+import { API_URL, fetchWithTimeout } from '../constants/api';
 
 export default function DoctorResults() {
   const { specialty, zipCode, planName } = useLocalSearchParams();
@@ -22,17 +22,19 @@ export default function DoctorResults() {
   const searchProviders = async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API_URL}/providers/search`, {
+      const res = await fetchWithTimeout(`${API_URL}/providers/search`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan_name: planName, specialty, zip_code: zipCode, radius_miles: 25, limit: 50, enrich_google: true }),
-      });
+      }, 30000);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Search failed');
       setProviders(data.providers || []);
       setMeta({ total: data.total, carrier: data.carrier, specialty: data.specialty });
     } catch (err) {
       console.log('Provider search error:', err);
-      if (err.message === 'Network request failed' || err.name === 'TypeError') {
+      if (err.name === 'AbortError') {
+        setError('Search is taking too long. Check your connection and try again.');
+      } else if (err.message === 'Network request failed' || err.name === 'TypeError') {
         setError("Can't connect to the server right now. Check your connection and try again.");
       } else { setError(err.message || 'Something went wrong. Please try again.'); }
     } finally { setLoading(false); }
@@ -106,7 +108,7 @@ export default function DoctorResults() {
 
       {/* Phone button */}
       {item.phone ? (
-        <TouchableOpacity style={s.callDocBtn} onPress={() => callDoctor(item.phone)} activeOpacity={0.7}>
+        <TouchableOpacity style={s.callDocBtn} onPress={() => callDoctor(item.phone)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Call ${item.name} at ${item.phone}`}>
           <Ionicons name="call" size={15} color={COLORS.accent} />
           <Text style={s.callDocText}>{item.phone}</Text>
         </TouchableOpacity>
@@ -118,7 +120,7 @@ export default function DoctorResults() {
     <SafeAreaView style={s.container} edges={['top']}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
           <Ionicons name="chevron-back" size={22} color={COLORS.accent} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
@@ -145,7 +147,7 @@ export default function DoctorResults() {
             <Ionicons name="cloud-offline-outline" size={36} color={COLORS.textTertiary} />
           </View>
           <Text style={s.errorText}>{error}</Text>
-          <TouchableOpacity style={s.retryBtn} onPress={searchProviders} activeOpacity={0.7}>
+          <TouchableOpacity style={s.retryBtn} onPress={searchProviders} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Try search again">
             <Text style={s.retryBtnText}>Try Again</Text>
           </TouchableOpacity>
         </View>

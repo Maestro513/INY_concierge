@@ -1,0 +1,153 @@
+/**
+ * Notification utilities for medication reminders.
+ *
+ * Uses LOCAL scheduled notifications (not server push) so they
+ * work offline and don't require push token infrastructure.
+ *
+ * NOTE: expo-notifications requires a dev build. In Expo Go the native
+ * module isn't available, so all notification functions gracefully no-op.
+ * Reminders still save to the backend — they just won't fire alerts
+ * until you switch to a dev build.
+ *
+ * Flow:
+ *   1. On login → fetchReminders() → syncAllReminders()
+ *   2. On create/update → scheduleReminder() for the single item
+ *   3. On delete → cancelReminder()
+ */
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ── Lazy-load expo-notifications (fails gracefully in Expo Go) ──
+let Notifications = null;
+try {
+  Notifications = require('expo-notifications');
+  // Configure foreground behavior
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+} catch (e) {
+  console.log('[Notifications] Native module not available (Expo Go). Reminders will save but won\'t send alerts.');
+}
+
+function notifAvailable() {
+  return Notifications !== null;
+}
+
+// ── Permission ──────────────────────────────────────────────────
+
+export async function requestNotificationPermissions() {
+  if (!notifAvailable()) return false;
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === 'granted') return true;
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function hasNotificationPermission() {
+  if (!notifAvailable()) return false;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    return status === 'granted';
+  } catch (e) {
+    return false;
+  }
+}
+
+// ── Schedule / Cancel ───────────────────────────────────────────
+
+export async function scheduleReminder(reminder) {
+  if (!notifAvailable()) return;
+  const notifId = `med-reminder-${reminder.id}`;
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(notifId).catch(() => {});
+    if (!reminder.enabled) return;
+
+    const doseText = reminder.dose_label ? ` (${reminder.dose_label})` : '';
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: notifId,
+      content: {
+        title: 'Medication Reminder',
+        body: `Time to take your ${reminder.drug_name}${doseText}`,
+        sound: true,
+        data: { type: 'med_reminder', reminder_id: reminder.id },
+      },
+      trigger: {
+        type: 'daily',
+        hour: reminder.time_hour,
+        minute: reminder.time_minute,
+        repeats: true,
+      },
+    });
+  } catch (e) {
+    console.log('[Notifications] Schedule failed:', e.message);
+  }
+}
+
+export async function cancelReminder(reminderId) {
+  if (!notifAvailable()) return;
+  try {
+    await Notifications.cancelScheduledNotificationAsync(`med-reminder-${reminderId}`);
+  } catch (e) {}
+}
+
+export async function syncAllReminders(reminders) {
+  if (!notifAvailable()) return;
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const notif of scheduled) {
+      if (notif.identifier.startsWith('med-reminder-')) {
+        await Notifications.cancelScheduledNotificationAsync(notif.identifier);
+      }
+    }
+    for (const r of reminders) {
+      if (r.enabled) await scheduleReminder(r);
+    }
+  } catch (e) {
+    console.log('[Notifications] Sync failed:', e.message);
+  }
+}
+
+// ── AsyncStorage cache ──────────────────────────────────────────
+
+const REMINDERS_CACHE_KEY = '@med_reminders';
+const USAGE_CACHE_KEY = '@benefits_usage_summary';
+
+export async function cacheReminders(reminders) {
+  try {
+    await AsyncStorage.setItem(REMINDERS_CACHE_KEY, JSON.stringify(reminders));
+  } catch (e) {}
+}
+
+export async function getCachedReminders() {
+  try {
+    const data = await AsyncStorage.getItem(REMINDERS_CACHE_KEY);
+    return data ? JSON.parse(data) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function cacheUsageSummary(summary) {
+  try {
+    await AsyncStorage.setItem(USAGE_CACHE_KEY, JSON.stringify(summary));
+  } catch (e) {}
+}
+
+export async function getCachedUsageSummary() {
+  try {
+    const data = await AsyncStorage.getItem(USAGE_CACHE_KEY);
+    return data ? JSON.parse(data) : null;
+  } catch (e) {
+    return null;
+  }
+}

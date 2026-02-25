@@ -54,7 +54,5 @@ backend/*.db-shm
 backend/*.db-wal
 backend/pdfs/
 backend/extracted/
-backend/{app,pdfs,extracted}/
-
 # Claude Code
 .claude/

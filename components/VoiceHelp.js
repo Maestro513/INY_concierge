@@ -4,13 +4,14 @@ import {
   Linking, Platform, ScrollView, TextInput, KeyboardAvoidingView, Keyboard,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import * as Speech from 'expo-speech';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { CALL_NUMBER } from '../constants/data';
-import { API_URL } from '../constants/api';
+import { API_URL, fetchWithTimeout } from '../constants/api';
 
 // --- Doctor search keywords and specialty extraction ---
 
@@ -139,7 +140,7 @@ function formatDrugResponse(data) {
 
 async function lookupDrug(planNumber, drugName) {
   try {
-    const res = await fetch(`${API_URL}/cms/drug/${encodeURIComponent(planNumber)}/${encodeURIComponent(drugName)}`);
+    const res = await fetchWithTimeout(`${API_URL}/cms/drug/${encodeURIComponent(planNumber)}/${encodeURIComponent(drugName)}`);
     if (!res.ok) return null;
     const data = await res.json();
     if (data.error) return null;
@@ -213,10 +214,136 @@ function formatGivebackResponse(data) {
 
 async function lookupBenefit(planNumber, config) {
   try {
-    const res = await fetch(`${API_URL}/cms/benefits/${encodeURIComponent(planNumber)}/${config.endpoint}`);
+    const res = await fetchWithTimeout(`${API_URL}/cms/benefits/${encodeURIComponent(planNumber)}/${config.endpoint}`);
     if (!res.ok) return null;
     return config.format(await res.json());
   } catch (err) { console.log('Benefit lookup error:', err); return null; }
+}
+
+
+// --- Reminder intent detection ---
+
+const REMINDER_TRIGGERS = [
+  'remind me', 'set a reminder', 'set reminder', 'medication reminder',
+  'pill reminder', 'take my', 'remind me to take', 'set up reminder',
+  'add a reminder', 'add reminder', 'reminder for',
+];
+
+const TIME_WORD_MAP = {
+  morning: { hour: 8, minute: 0 },
+  afternoon: { hour: 13, minute: 0 },
+  evening: { hour: 18, minute: 0 },
+  night: { hour: 21, minute: 0 },
+  noon: { hour: 12, minute: 0 },
+  bedtime: { hour: 21, minute: 0 },
+};
+
+function detectReminderIntent(text) {
+  const lower = text.toLowerCase();
+  const hasTrigger = REMINDER_TRIGGERS.some(t => lower.includes(t));
+  if (!hasTrigger) return null;
+
+  // Extract time: "at 8am", "at 8:30 PM", "in the morning"
+  let timeHour = null;
+  let timeMinute = 0;
+
+  // Pattern: "at 8:30 am"
+  const timeMatch = lower.match(/at\s+(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?/i);
+  if (timeMatch) {
+    let h = parseInt(timeMatch[1], 10);
+    timeMinute = parseInt(timeMatch[2], 10);
+    const meridiem = (timeMatch[3] || '').replace(/\./g, '').toLowerCase();
+    if (meridiem === 'pm' && h < 12) h += 12;
+    if (meridiem === 'am' && h === 12) h = 0;
+    timeHour = h;
+  }
+
+  // Pattern: "at 8 am" or "at 8am"
+  if (timeHour === null) {
+    const simpleMatch = lower.match(/at\s+(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)/i);
+    if (simpleMatch) {
+      let h = parseInt(simpleMatch[1], 10);
+      const meridiem = simpleMatch[2].replace(/\./g, '').toLowerCase();
+      if (meridiem === 'pm' && h < 12) h += 12;
+      if (meridiem === 'am' && h === 12) h = 0;
+      timeHour = h;
+    }
+  }
+
+  // Pattern: "in the morning", "at night", "at bedtime"
+  if (timeHour === null) {
+    for (const [word, time] of Object.entries(TIME_WORD_MAP)) {
+      if (lower.includes(word)) {
+        timeHour = time.hour;
+        timeMinute = time.minute;
+        break;
+      }
+    }
+  }
+
+  // Extract drug name — look for patterns like "take my X", "reminder for X"
+  let drugName = null;
+  const drugPatterns = [
+    /(?:take|taking)\s+(?:my\s+)?(.+?)(?:\s+at\s+|\s+every\s+|\s+in the\s+|$)/i,
+    /reminder\s+for\s+(?:my\s+)?(.+?)(?:\s+at\s+|\s+every\s+|\s+in the\s+|$)/i,
+    /remind\s+me\s+(?:to take\s+)?(?:my\s+)?(.+?)(?:\s+at\s+|\s+every\s+|\s+in the\s+|$)/i,
+  ];
+  for (const pat of drugPatterns) {
+    const m = text.match(pat);
+    if (m && m[1]) {
+      let name = m[1].trim().replace(/\s*(every day|daily|each day|tonight|tomorrow)\s*/i, '').trim();
+      if (name.length > 1 && name.length < 50) {
+        drugName = name;
+        break;
+      }
+    }
+  }
+
+  if (!drugName && !timeHour) return null; // Need at least one piece of info
+
+  return { drug_name: drugName, time_hour: timeHour, time_minute: timeMinute };
+}
+
+
+// --- Usage intent detection ---
+
+const USAGE_TRIGGERS = [
+  'i spent', 'i used', 'i bought', 'i purchased', 'log',
+  'spent', 'used my otc', 'used my flex', 'used my dental',
+  'went to the dentist', 'dental visit', 'otc purchase',
+  'bought otc', 'bought over the counter',
+];
+
+const USAGE_CATEGORY_MAP = {
+  otc: ['otc', 'over the counter', 'cvs', 'walgreens', 'rite aid', 'pharmacy'],
+  dental: ['dental', 'dentist', 'cleaning', 'crown', 'filling', 'root canal'],
+  flex: ['flex', 'grocery', 'food', 'produce', 'meals', 'pest control'],
+  vision: ['vision', 'eyeglasses', 'glasses', 'eye exam', 'contacts', 'optical'],
+  hearing: ['hearing', 'hearing aid'],
+};
+
+function detectUsageIntent(text) {
+  const lower = text.toLowerCase();
+  const hasTrigger = USAGE_TRIGGERS.some(t => lower.includes(t));
+  if (!hasTrigger) return null;
+
+  // Extract amount
+  const amountMatch = lower.match(/\$?\s*(\d+(?:\.\d{1,2})?)/);
+  const amount = amountMatch ? parseFloat(amountMatch[1]) : null;
+
+  // Detect category
+  let category = null;
+  for (const [cat, keywords] of Object.entries(USAGE_CATEGORY_MAP)) {
+    if (keywords.some(kw => lower.includes(kw))) {
+      category = cat;
+      break;
+    }
+  }
+
+  if (!amount && !category) return null;
+
+  // Build description from the original text
+  return { amount, category, description: text.trim() };
 }
 
 
@@ -224,10 +351,14 @@ async function lookupBenefit(planNumber, config) {
 
 async function askBackend(question, planId) {
   try {
-    const res = await fetch(`${API_URL}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, plan_number: planId }) });
+    const res = await fetchWithTimeout(`${API_URL}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, plan_number: planId }) }, 30000);
     const data = await res.json();
     return data.answer;
-  } catch (err) { console.log('API error:', err); return "I'm having trouble connecting right now. Please try again or call us at (844) 463-2931."; }
+  } catch (err) {
+    console.log('API error:', err);
+    if (err.name === 'AbortError') return "That's taking longer than usual. Please try again or call us at (844) 463-2931.";
+    return "I'm having trouble connecting right now. Please try again or call us at (844) 463-2931.";
+  }
 }
 
 function speakResponse(text) {
@@ -235,8 +366,81 @@ function speakResponse(text) {
   Speech.speak(text, { language: 'en-US', rate: 0.9, pitch: 1.0 });
 }
 
-export default function VoiceHelp({ planNumber, planName, zipCode }) {
+// --- Voice handlers for reminders and usage ---
+
+async function handleReminderVoice(intent, sessionId, onCreated) {
+  const { drug_name, time_hour, time_minute } = intent;
+
+  if (!drug_name) {
+    return "I heard you want to set a reminder, but I didn't catch the medication name. Try saying something like: remind me to take my metformin at 8 AM.";
+  }
+  if (time_hour === null || time_hour === undefined) {
+    return `I heard ${drug_name}, but what time should I remind you? Try saying: remind me to take my ${drug_name} at 8 AM.`;
+  }
+
+  try {
+    const res = await fetchWithTimeout(`${API_URL}/reminders/${sessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        drug_name,
+        time_hour,
+        time_minute: time_minute || 0,
+      }),
+    });
+    if (!res.ok) throw new Error('Failed to create reminder');
+
+    // Refresh the reminders list in home screen
+    if (onCreated) onCreated();
+
+    const ampm = time_hour >= 12 ? 'PM' : 'AM';
+    const displayHour = time_hour === 0 ? 12 : time_hour > 12 ? time_hour - 12 : time_hour;
+    const displayMin = String(time_minute || 0).padStart(2, '0');
+    return `Done! I'll remind you to take your ${drug_name} every day at ${displayHour}:${displayMin} ${ampm}.`;
+  } catch (err) {
+    console.log('Reminder voice error:', err);
+    return "I had trouble saving that reminder. Please try again.";
+  }
+}
+
+async function handleUsageVoice(intent, sessionId, onLogged) {
+  const { amount, category, description } = intent;
+
+  if (!amount || amount <= 0) {
+    return "I heard you want to log spending, but I didn't catch the amount. Try saying: I spent $45 on OTC at CVS.";
+  }
+  if (!category) {
+    return `I heard $${amount}, but which benefit? Try saying: I spent $${amount} on OTC, or dental, or flex card.`;
+  }
+
+  const categoryLabels = { otc: 'OTC', dental: 'Dental', flex: 'Flex Card', vision: 'Vision', hearing: 'Hearing' };
+
+  try {
+    const res = await fetchWithTimeout(`${API_URL}/usage/${sessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category,
+        amount,
+        description: description || '',
+        benefit_period: category === 'otc' ? 'Monthly' : 'Yearly',
+      }),
+    });
+    if (!res.ok) throw new Error('Failed to log usage');
+
+    // Refresh the usage summary in home screen
+    if (onLogged) onLogged();
+
+    return `Got it! I logged $${amount.toFixed(0)} for ${categoryLabels[category] || category}. You can see your updated balance on the home screen.`;
+  } catch (err) {
+    console.log('Usage voice error:', err);
+    return "I had trouble logging that. Please try again.";
+  }
+}
+
+export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, onReminderCreated, onUsageLogged }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [mode, setMode] = useState('idle');
   const [answer, setAnswer] = useState('');
   const [question, setQuestion] = useState('');
@@ -335,14 +539,33 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
     setMode('thinking');
     let response;
 
+    // 1. Benefit questions (vision, dental, OTC, etc.)
     const benefitConfig = detectBenefitQuestion(q);
     if (benefitConfig && planNumber) response = await lookupBenefit(planNumber, benefitConfig);
 
+    // 2. Medication reminder intent
+    if (!response) {
+      const reminderIntent = detectReminderIntent(q);
+      if (reminderIntent && sessionId) {
+        response = await handleReminderVoice(reminderIntent, sessionId, onReminderCreated);
+      }
+    }
+
+    // 3. Usage logging intent
+    if (!response) {
+      const usageIntent = detectUsageIntent(q);
+      if (usageIntent && sessionId) {
+        response = await handleUsageVoice(usageIntent, sessionId, onUsageLogged);
+      }
+    }
+
+    // 4. Drug cost question
     if (!response && isDrugQuestion(q)) {
       const drugName = extractDrugName(q);
       if (drugName && planNumber) response = await lookupDrug(planNumber, drugName);
     }
 
+    // 5. Fallback — ask Claude
     if (!response) response = await askBackend(q, planNumber);
 
     setMode('answer'); setAnswer(response);
@@ -390,7 +613,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
           </View>
           <Text style={s.headerTitle}>Ask anything</Text>
         </View>
-        <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7}>
+        <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Call us for help">
           <Ionicons name="call" size={14} color="#fff" />
           <Text style={s.callText}>Call Us</Text>
         </TouchableOpacity>
@@ -400,22 +623,19 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
       <ScrollView style={s.answerScroll} contentContainerStyle={s.answerArea}>
         {mode === 'idle' && (
           <View style={s.idleWrap}>
-            <View style={s.idleIconCircle}>
-              <Ionicons name="mic-outline" size={32} color={COLORS.accent} />
-            </View>
             <Text style={s.idleTitle}>How can I help?</Text>
             <Text style={s.idleText}>Ask about your benefits, find a{'\n'}doctor, or check drug costs.</Text>
             {/* Suggestion chips */}
             <View style={s.chipRow}>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my PCP copay?')} activeOpacity={0.7}>
+              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my PCP copay?')} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ask about copays">
                 <Ionicons name="medical-outline" size={13} color={COLORS.accent} />
                 <Text style={s.chipText}>My copays</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('Find me a cardiologist')} activeOpacity={0.7}>
+              <TouchableOpacity style={s.chip} onPress={() => processQuestion('Find me a cardiologist')} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Find a doctor">
                 <Ionicons name="search-outline" size={13} color={COLORS.accent} />
                 <Text style={s.chipText}>Find a doctor</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my dental benefit?')} activeOpacity={0.7}>
+              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my dental benefit?')} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ask about dental benefits">
                 <Ionicons name="sparkles-outline" size={13} color={COLORS.accent} />
                 <Text style={s.chipText}>Dental</Text>
               </TouchableOpacity>
@@ -433,7 +653,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
               <Text style={s.aText}>{answer}</Text>
             </View>
             <View style={s.answerActions}>
-              <TouchableOpacity style={s.speakerBtn} onPress={toggleSpeech} activeOpacity={0.7}>
+              <TouchableOpacity style={s.speakerBtn} onPress={toggleSpeech} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={isSpeaking ? 'Stop speaking' : 'Read answer aloud'}>
                 <Ionicons
                   name={isSpeaking ? 'volume-mute-outline' : 'volume-high-outline'}
                   size={16}
@@ -441,7 +661,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
                 />
                 <Text style={s.speakerText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.newQuestionBtn} onPress={() => { Speech.stop(); setIsSpeaking(false); setMode('idle'); setAnswer(''); setQuestion(''); }} activeOpacity={0.7}>
+              <TouchableOpacity style={s.newQuestionBtn} onPress={() => { Speech.stop(); setIsSpeaking(false); setMode('idle'); setAnswer(''); setQuestion(''); }} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ask a new question">
                 <Ionicons name="refresh-outline" size={16} color={COLORS.textSecondary} />
                 <Text style={s.newQuestionText}>New question</Text>
               </TouchableOpacity>
@@ -492,8 +712,10 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
               style={[s.mic, mode === 'listening' && s.micActive]}
               onPress={handleMic}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={mode === 'listening' ? 'Stop listening' : 'Start voice input'}
             >
-              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={34} color="#fff" />
+              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={38} color="#fff" />
             </TouchableOpacity>
           </View>
           <Text style={s.status}>
@@ -506,7 +728,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
       )}
 
       {/* Chat Input Bar */}
-      <View style={s.inputBar}>
+      <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <TextInput
           style={s.textInput}
           placeholder="Type your question..."
@@ -516,12 +738,15 @@ export default function VoiceHelp({ planNumber, planName, zipCode }) {
           onSubmitEditing={handleSend}
           returnKeyType="send"
           editable={mode !== 'thinking' && mode !== 'listening'}
+          accessibilityLabel="Type your question"
         />
         <TouchableOpacity
           style={[s.sendBtn, typedText.trim().length === 0 && s.sendBtnDisabled]}
           onPress={handleSend}
           disabled={typedText.trim().length === 0 || mode === 'thinking'}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Send question"
         >
           <Ionicons name="arrow-up" size={20} color="#fff" />
         </TouchableOpacity>
@@ -563,12 +788,6 @@ const s = StyleSheet.create({
 
   // Idle state
   idleWrap: { alignItems: 'center' },
-  idleIconCircle: {
-    width: 64, height: 64, borderRadius: 20,
-    backgroundColor: COLORS.accentLighter,
-    justifyContent: 'center', alignItems: 'center',
-    marginBottom: 16,
-  },
   idleTitle: { ...TYPE.h2, color: COLORS.text, marginBottom: 8 },
   idleText: { fontSize: 16, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 24, marginBottom: 20 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
@@ -639,11 +858,11 @@ const s = StyleSheet.create({
   },
   newQuestionText: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
 
-  // Mic button
-  micWrap: { width: 100, height: 100, justifyContent: 'center', alignItems: 'center', alignSelf: 'center' },
+  // Mic button (10% bigger: 82→90, wrap 100→110)
+  micWrap: { width: 110, height: 110, justifyContent: 'center', alignItems: 'center', alignSelf: 'center' },
   ring: { position: 'absolute' },
   mic: {
-    width: 82, height: 82, borderRadius: 41, backgroundColor: COLORS.accent,
+    width: 90, height: 90, borderRadius: 45, backgroundColor: COLORS.accent,
     justifyContent: 'center', alignItems: 'center',
     ...SHADOWS.glow,
   },

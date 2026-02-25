@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
-import { API_URL } from '../constants/api';
+import { API_URL, fetchWithTimeout } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
 import GradientBg from '../components/GradientBg';
 
@@ -72,7 +72,7 @@ export default function PhoneScreen() {
     setError('');
 
     try {
-      const res = await fetch(`${API_URL}/auth/lookup`, {
+      const res = await fetchWithTimeout(`${API_URL}/auth/lookup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: rawDigits }),
@@ -80,6 +80,7 @@ export default function PhoneScreen() {
       const data = await res.json();
 
       if (data.found) {
+        // Navigate with session_id — phone stays server-side
         router.push({
           pathname: '/home',
           params: {
@@ -88,7 +89,7 @@ export default function PhoneScreen() {
             planName: data.plan_name,
             planNumber: data.plan_number,
             agent: data.agent,
-            phone: rawDigits,
+            sessionId: data.session_id || '',
             zipCode: data.zip_code || '',
           },
         });
@@ -96,8 +97,11 @@ export default function PhoneScreen() {
         setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
       }
     } catch (err) {
-      console.log('Lookup error:', err);
-      setError("Can't connect right now. Please try again.");
+      if (err.name === 'AbortError') {
+        setError("Request timed out. Please check your connection and try again.");
+      } else {
+        setError("Can't connect right now. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -117,7 +121,13 @@ export default function PhoneScreen() {
               transform: [{ scale: logoScale }],
             }]}>
               <View style={styles.logoCircle}>
-                <Image source={logo} style={styles.logo} resizeMode="contain" />
+                <Image
+                  source={logo}
+                  style={styles.logo}
+                  resizeMode="contain"
+                  accessible={true}
+                  accessibilityLabel="Med Concierge logo"
+                />
               </View>
             </Animated.View>
 
@@ -125,7 +135,7 @@ export default function PhoneScreen() {
               opacity: contentOpacity,
               transform: [{ translateY: contentSlide }],
             }}>
-              <Text style={styles.title}>Med Concierge</Text>
+              <Text style={styles.title} accessibilityRole="header">Med Concierge</Text>
               <Text style={styles.subtitle}>
                 Your health plan, simplified.{'\n'}
                 <Text style={styles.brandName}>Powered by Insurance 'n You</Text>
@@ -133,7 +143,7 @@ export default function PhoneScreen() {
 
               {/* Phone Input Card */}
               <View style={styles.inputCard}>
-                <Text style={styles.label}>Enter your phone number</Text>
+                <Text style={styles.label} nativeID="phoneLabel">Enter your phone number</Text>
                 <Animated.View style={[styles.inputRow, { borderColor: inputBorderColor }]}>
                   <View style={styles.inputIconWrap}>
                     <Ionicons name="call-outline" size={18} color={focused ? COLORS.accent : COLORS.textTertiary} />
@@ -149,6 +159,10 @@ export default function PhoneScreen() {
                     keyboardType="phone-pad"
                     autoFocus
                     editable={!loading}
+                    accessible={true}
+                    accessibilityLabel="Phone number input"
+                    accessibilityLabelledBy="phoneLabel"
+                    accessibilityHint="Enter your 10-digit phone number to look up your plan"
                   />
                   {isValid && !loading ? (
                     <View style={styles.checkWrap}>
@@ -160,7 +174,7 @@ export default function PhoneScreen() {
               </View>
 
               {error ? (
-                <View style={styles.errorWrap}>
+                <View style={styles.errorWrap} accessibilityRole="alert" accessibilityLiveRegion="assertive">
                   <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
@@ -171,6 +185,10 @@ export default function PhoneScreen() {
                 onPress={handleSubmit}
                 disabled={!isValid || loading}
                 activeOpacity={0.8}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel="Look up my plan"
+                accessibilityState={{ disabled: !isValid || loading }}
               >
                 {loading ? (
                   <ActivityIndicator color={COLORS.white} />
@@ -187,7 +205,13 @@ export default function PhoneScreen() {
           {/* Footer — call for help */}
           <Animated.View style={[styles.footer, { opacity: footerOpacity }]}>
             <Text style={styles.footerText}>Need help? </Text>
-            <TouchableOpacity onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={() => Linking.openURL('tel:' + CALL_NUMBER)}
+              activeOpacity={0.7}
+              accessible={true}
+              accessibilityRole="link"
+              accessibilityLabel="Call (844) 463-2931 for help"
+            >
               <Text style={styles.footerLink}>Call (844) 463-2931</Text>
             </TouchableOpacity>
           </Animated.View>

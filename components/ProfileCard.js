@@ -91,12 +91,17 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading }) {
     ]).start();
   }, []);
 
+  const now = new Date();
   const greeting = () => {
-    const hour = new Date().getHours();
+    const hour = now.getHours();
     if (hour < 12) return 'Good morning,';
     if (hour < 17) return 'Good afternoon,';
     return 'Good evening,';
   };
+
+  const dateString = now.toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
 
   const carrier = detectCarrier(member.planName);
   const carrierLogo = carrier ? CARRIER_LOGOS[carrier] : null;
@@ -106,33 +111,42 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading }) {
 
   return (
     <View style={styles.container}>
-      {/* Header: Greeting + Name + Agent | Carrier Logo top-right */}
+      {/* Header: Greeting + Name + Agent | Carrier Logo + Plan Name */}
       <Animated.View style={[styles.header, { opacity: greetFade, transform: [{ translateY: greetSlide }] }]}>
         <View style={styles.headerLeft}>
+          <Text style={styles.dateText}>{dateString}</Text>
           <Text style={styles.greeting}>{greeting()}</Text>
           <Text style={styles.name}>
             {member.firstName} {member.lastName}
           </Text>
-          {member.agent ? (
-            <View style={styles.agentRow}>
-              <Ionicons name="person-outline" size={14} color={COLORS.textSecondary} />
-              <Text style={styles.agent}>Agent: {member.agent}</Text>
+        </View>
+        <View style={styles.headerRight}>
+          {carrierLogo ? (
+            <View style={styles.logoBg} accessibilityLabel={`${carrier} insurance logo`}>
+              <Image source={carrierLogo} style={styles.carrierLogo} resizeMode="contain" accessibilityRole="image" />
             </View>
           ) : null}
+          <Text style={styles.planName} numberOfLines={2}>{member.planName}</Text>
         </View>
-        {carrierLogo ? (
-          <View style={styles.logoBg}>
-            <Image source={carrierLogo} style={styles.carrierLogo} resizeMode="contain" />
-          </View>
-        ) : null}
       </Animated.View>
 
-      {/* Plan name + View Benefits */}
-      <View style={styles.planRow}>
-        <Text style={styles.planName} numberOfLines={2}>{member.planName}</Text>
-        <TouchableOpacity onPress={onViewSOB} style={styles.sobBtn} activeOpacity={0.7}>
+      {/* Reminder Bar */}
+      <View style={styles.reminderBar}>
+        <Ionicons name="notifications-outline" size={16} color={COLORS.accent} />
+        <Text style={styles.reminderText}>Annual Enrollment: Oct 15 – Dec 7</Text>
+      </View>
+
+      {/* Agent + View More Benefits row — right above cards */}
+      <View style={styles.aboveCardsRow}>
+        {member.agent ? (
+          <View style={styles.agentRow}>
+            <Ionicons name="person-outline" size={14} color={COLORS.textSecondary} />
+            <Text style={styles.agent}>Agent: {member.agent}</Text>
+          </View>
+        ) : <View />}
+        <TouchableOpacity onPress={onViewSOB} style={styles.sobBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
           <Ionicons name="document-text-outline" size={16} color={COLORS.accent} />
-          <Text style={styles.sobLink}>View Benefits</Text>
+          <Text style={styles.sobLink}>View More Benefits</Text>
           <Ionicons name="chevron-forward" size={14} color={COLORS.accent} />
         </TouchableOpacity>
       </View>
@@ -145,12 +159,6 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading }) {
         </View>
       ) : row1.length > 0 ? (
         <View style={styles.benefitsWrap}>
-          {/* Section label */}
-          <View style={styles.sectionLabelRow}>
-            <View style={styles.sectionDot} />
-            <Text style={styles.sectionLabel}>Your Benefits at a Glance</Text>
-          </View>
-          {/* Row 1: Medical copays (4 cards) */}
           <View style={styles.benefitsRow}>
             {row1.map((b, i) => (
               <AnimatedCard key={'r1-' + String(i)} index={i} style={styles.benefitCard}>
@@ -183,31 +191,44 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading }) {
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 20, paddingTop: SPACING.sm, paddingBottom: SPACING.md },
+  container: { paddingHorizontal: 20, paddingTop: SPACING.md, paddingBottom: SPACING.md },
 
   // Header
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'flex-start', marginBottom: SPACING.sm,
   },
-  headerLeft: { flex: 1 },
-  greeting: { ...TYPE.label, color: COLORS.textSecondary, marginBottom: 2 },
+  headerLeft: { flex: 1, paddingTop: 4 },
+  dateText: { fontSize: 13, fontWeight: '500', color: COLORS.textTertiary, marginBottom: 6 },
+  headerRight: { alignItems: 'flex-end', flexShrink: 0, maxWidth: '48%' },
+  greeting: { fontSize: 17, fontWeight: '600', letterSpacing: 0.2, color: COLORS.textSecondary, marginBottom: 2 },
   name: { ...TYPE.h1, color: COLORS.text },
-  agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  agent: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
+  agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  agent: { fontSize: 16, fontWeight: '700', color: COLORS.textSecondary },
   logoBg: {
-    backgroundColor: COLORS.white, borderRadius: RADII.sm,
-    padding: 6, marginTop: 2,
+    backgroundColor: '#FFFFFF', borderRadius: RADII.sm,
+    padding: 6, overflow: 'hidden',
     ...SHADOWS.soft,
   },
   carrierLogo: { width: 96, height: 48 },
+  planName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, textAlign: 'right', marginTop: 6, lineHeight: 18 },
 
-  // Plan row (below header)
-  planRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 16,
+  // Reminder bar
+  reminderBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: COLORS.accentLight,
+    borderRadius: RADII.md,
+    paddingHorizontal: 14, paddingVertical: 10,
+    marginBottom: 14,
+    borderWidth: 1, borderColor: COLORS.accentSoft,
   },
-  planName: { fontSize: 16, fontWeight: '700', color: COLORS.text, flex: 1, marginRight: 10, lineHeight: 22 },
+  reminderText: { fontSize: 14, fontWeight: '600', color: COLORS.accentDark, flex: 1 },
+
+  // Agent + View More Benefits row (right above cards)
+  aboveCardsRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 12,
+  },
   sobBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: COLORS.accentLight,

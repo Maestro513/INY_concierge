@@ -19,6 +19,7 @@ Key lookups:
 import sqlite3
 import os
 import logging
+import threading
 import requests
 from typing import Optional
 
@@ -56,10 +57,15 @@ class CMSLookup:
         self.db_path = db_path or os.environ.get("CMS_DB_PATH", DEFAULT_DB)
         if not os.path.isfile(self.db_path):
             raise FileNotFoundError(f"CMS database not found: {self.db_path}")
+        self._local = threading.local()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        """Thread-local connection pooling — one connection per thread, reused."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
         return conn
 
     def _query_one(self, sql: str, params: tuple) -> Optional[dict]:

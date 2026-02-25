@@ -21,6 +21,13 @@ ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 # Google APIs (Geocoding + Places)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# App environment
+APP_ENV = os.getenv("APP_ENV", "development")  # development | staging | production
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# CORS — comma-separated extra origins (insurancenyou.com is always allowed in prod)
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "")  # e.g. "https://staging.insurancenyou.com"
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDFS_DIR = os.path.join(BASE_DIR, "pdfs")

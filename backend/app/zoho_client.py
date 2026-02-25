@@ -25,7 +25,7 @@ def get_access_token() -> str:
         "client_id": ZOHO_CLIENT_ID,
         "client_secret": ZOHO_CLIENT_SECRET,
         "refresh_token": ZOHO_REFRESH_TOKEN,
-    })
+    }, timeout=15)
     data = resp.json()
 
     if "access_token" not in data:
@@ -70,7 +70,7 @@ def search_contact_by_phone(phone: str) -> dict | None:
     # Search by phone and mobile fields
     for field in ["Phone", "Mobile"]:
         search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{clean})"
-        resp = requests.get(search_url, headers=headers)
+        resp = requests.get(search_url, headers=headers, timeout=15)
 
         if resp.status_code == 200:
             data = resp.json()
@@ -82,7 +82,7 @@ def search_contact_by_phone(phone: str) -> dict | None:
         formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}"
         for field in ["Phone", "Mobile"]:
             search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{formatted})"
-            resp = requests.get(search_url, headers=headers)
+            resp = requests.get(search_url, headers=headers, timeout=15)
 
             if resp.status_code == 200:
                 data = resp.json()

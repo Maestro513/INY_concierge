@@ -1,3 +1,14 @@
 backend/
 .git/
 .claude/
+.expo/
+android/
+ios/
+__pycache__/
+venv/
+*.db
+*.db-shm
+*.db-wal
+Pdfs/
+extracted/
+_ul

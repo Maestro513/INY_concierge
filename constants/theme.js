@@ -16,9 +16,11 @@ export const COLORS = {
   accentGlow: 'rgba(123, 63, 191, 0.25)',
 
   // Category accent colors (for benefit card icon backgrounds)
-  careVisit: '#7B3FBF',       // purple - care visits
+  careVisit: '#7B3FBF',       // purple - care visits (PCP, Specialist, Urgent, ER)
   careBg: 'rgba(123, 63, 191, 0.08)',
-  clinical: '#3D6B99',        // slate blue - clinical
+  rxDrug: '#C0392B',          // warm red - prescriptions/drugs
+  rxDrugBg: 'rgba(192, 57, 43, 0.08)',
+  clinical: '#3D6B99',        // slate blue - supplementals (Dental, OTC, Part B, Flex)
   clinicalBg: 'rgba(61, 107, 153, 0.08)',
   savings: '#3A7D5C',         // sage green - savings
   savingsBg: 'rgba(58, 125, 92, 0.08)',
@@ -141,7 +143,7 @@ export const BENEFIT_ICON_MAP = {
   'pcp':          { family: 'MaterialCommunityIcons', name: 'stethoscope',              color: COLORS.careVisit,  bg: COLORS.careBg },
   'primary':      { family: 'MaterialCommunityIcons', name: 'stethoscope',              color: COLORS.careVisit,  bg: COLORS.careBg },
   'doctor':       { family: 'MaterialCommunityIcons', name: 'stethoscope',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'specialist':   { family: 'MaterialCommunityIcons', name: 'account-tie',              color: COLORS.clinical,   bg: COLORS.clinicalBg },
+  'specialist':   { family: 'MaterialCommunityIcons', name: 'account-tie',              color: COLORS.careVisit,  bg: COLORS.careBg },
   'emergency':    { family: 'MaterialCommunityIcons', name: 'ambulance',                color: COLORS.careVisit,  bg: COLORS.careBg },
   'er ':          { family: 'MaterialCommunityIcons', name: 'ambulance',                color: COLORS.careVisit,  bg: COLORS.careBg },
   'urgent':       { family: 'MaterialCommunityIcons', name: 'medical-bag',              color: COLORS.careVisit,  bg: COLORS.careBg },
@@ -154,15 +156,15 @@ export const BENEFIT_ICON_MAP = {
   'mental':       { family: 'MaterialCommunityIcons', name: 'head-heart-outline',       color: COLORS.clinical,   bg: COLORS.clinicalBg },
   'lab':          { family: 'MaterialCommunityIcons', name: 'flask-outline',            color: COLORS.clinical,   bg: COLORS.clinicalBg },
   'x-ray':        { family: 'MaterialCommunityIcons', name: 'flask-outline',            color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'drug':         { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'prescription': { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'rx':           { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'estimated':    { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.clinical,   bg: COLORS.clinicalBg },
+  'drug':         { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
+  'prescription': { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
+  'rx':           { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
+  'estimated':    { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
   'preventive':   { family: 'Ionicons',               name: 'checkmark-circle-outline', color: COLORS.savings,    bg: COLORS.savingsBg },
   'telehealth':   { family: 'Ionicons',               name: 'videocam-outline',         color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'otc':          { family: 'Ionicons',               name: 'cart-outline',             color: COLORS.savings,    bg: COLORS.savingsBg },
-  'flex':         { family: 'Ionicons',               name: 'card-outline',             color: COLORS.savings,    bg: COLORS.savingsBg },
-  'part b':       { family: 'Ionicons',               name: 'cash-outline',             color: COLORS.savings,    bg: COLORS.savingsBg },
-  'giveback':     { family: 'Ionicons',               name: 'cash-outline',             color: COLORS.savings,    bg: COLORS.savingsBg },
+  'otc':          { family: 'Ionicons',               name: 'cart-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
+  'flex':         { family: 'Ionicons',               name: 'card-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
+  'part b':       { family: 'Ionicons',               name: 'cash-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
+  'giveback':     { family: 'Ionicons',               name: 'cash-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
 };
 export const DEFAULT_ICON = { family: 'Ionicons', name: 'document-text-outline', color: COLORS.careVisit, bg: COLORS.careBg };

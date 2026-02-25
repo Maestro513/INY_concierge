@@ -17,24 +17,121 @@ import os
 import re
 import logging
 import time
+import uuid
 import anthropic
-from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL
+from .user_data import UserDataDB
 
+# ── Structured logging ───────────────────────────────────────────────────────
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="InsuranceNYou API", version="0.5.0")
+app = FastAPI(title="InsuranceNYou API", version="0.6.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"http://localhost(:\d+)?",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ── CORS — env-based ─────────────────────────────────────────────────────────
+_default_prod_origins = [
+    "https://insurancenyou.com",
+    "https://www.insurancenyou.com",
+    "https://api.insurancenyou.com",
+]
+if APP_ENV == "production":
+    _extra = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()] if CORS_ORIGINS else []
+    _origins = _default_prod_origins + _extra
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["*"],
+    )
+else:
+    # Dev: allow any localhost origin
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# ── Request timing + metrics middleware ──────────────────────────────────────
+_request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.time()
+    try:
+        response = await call_next(request)
+    except Exception:
+        _request_metrics["errors"] += 1
+        raise
+    elapsed = time.time() - start
+    _request_metrics["total"] += 1
+    _request_metrics["latency_sum"] += elapsed
+    if response.status_code >= 500:
+        _request_metrics["errors"] += 1
+    log.info(f"{request.method} {request.url.path} → {response.status_code} ({elapsed:.3f}s)")
+    return response
+
+# ── Session store (in-memory with TTL) ───────────────────────────────────────
+_sessions: dict[str, dict] = {}
+SESSION_TTL = 7200  # 2 hours
+
+def create_session(phone: str, member_data: dict) -> str:
+    """Create a session and return the session ID."""
+    sid = uuid.uuid4().hex
+    _sessions[sid] = {"phone": phone, "data": member_data, "ts": time.time()}
+    _cleanup_sessions()
+    return sid
+
+def get_session(sid: str) -> dict | None:
+    """Get session data, or None if expired/missing."""
+    entry = _sessions.get(sid)
+    if not entry:
+        return None
+    if time.time() - entry["ts"] > SESSION_TTL:
+        _sessions.pop(sid, None)
+        return None
+    return entry
+
+def _cleanup_sessions():
+    """Remove expired sessions (called lazily)."""
+    now = time.time()
+    expired = [k for k, v in _sessions.items() if now - v["ts"] > SESSION_TTL]
+    for k in expired:
+        _sessions.pop(k, None)
 
 # In-memory cache for parsed SOB summaries: {plan_id: {"data": {...}, "ts": float}}
 _sob_cache: dict[str, dict] = {}
 SOB_CACHE_TTL = 3600  # 1 hour
+
+# User Data DB — lazy init
+_user_db = None
+
+
+def get_user_db() -> UserDataDB:
+    global _user_db
+    if _user_db is None:
+        _user_db = UserDataDB()
+        log.info("User data DB loaded")
+    return _user_db
+
+
+def _session_phone(session_id: str) -> str:
+    """Resolve session_id → phone, or raise 401."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    # Touch timestamp to extend TTL on activity
+    session["ts"] = time.time()
+    return session["phone"]
+
 
 # CMS Lookup — lazy init so server starts even if DB missing
 _cms = None
@@ -153,6 +250,7 @@ class LookupResponse(BaseModel):
     phone: str = ""
     medications: str = ""
     zip_code: str = ""
+    session_id: str = ""
 
 class ProviderSearchRequest(BaseModel):
     plan_name: str
@@ -170,11 +268,55 @@ class DrugLookupRequest(BaseModel):
     drug_name: str
 
 
+# --- Reminder / Usage Models ---
+
+class ReminderCreate(BaseModel):
+    drug_name: str
+    dose_label: str = ""
+    time_hour: int          # 0-23
+    time_minute: int = 0
+    days_supply: int = 30
+    refill_reminder: bool = False
+    last_refill_date: Optional[str] = None
+
+class ReminderUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    time_hour: Optional[int] = None
+    time_minute: Optional[int] = None
+    refill_reminder: Optional[bool] = None
+    last_refill_date: Optional[str] = None
+    dose_label: Optional[str] = None
+
+class BulkReminderCreate(BaseModel):
+    reminders: list[ReminderCreate]
+    created_by: str = "member"
+
+class UsageCreate(BaseModel):
+    category: str           # otc, dental, flex, vision, hearing
+    amount: float
+    description: str = ""
+    usage_date: Optional[str] = None  # defaults to today
+    benefit_period: str = "Monthly"   # Monthly, Quarterly, Yearly
+
+
 # --- Endpoints ---
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics():
+    """Basic request metrics for monitoring."""
+    total = _request_metrics["total"]
+    return {
+        "total_requests": total,
+        "total_errors": _request_metrics["errors"],
+        "avg_latency_ms": round((_request_metrics["latency_sum"] / total) * 1000, 1) if total > 0 else 0,
+        "active_sessions": len(_sessions),
+        "sob_cache_size": len(_sob_cache),
+    }
 
 
 @app.post("/auth/lookup", response_model=LookupResponse)
@@ -183,10 +325,14 @@ def lookup_member(req: LookupRequest):
     try:
         member = search_contact_by_phone(req.phone)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Zoho error: {str(e)}")
+        log.error(f"Zoho lookup failed: {e}")
+        raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
 
     if member is None:
         return LookupResponse(found=False)
+
+    # Create session so frontend doesn't need to pass phone around
+    sid = create_session(req.phone, member)
 
     return LookupResponse(
         found=True,
@@ -198,6 +344,7 @@ def lookup_member(req: LookupRequest):
         phone=member["phone"] or member["mobile"],
         medications=member.get("medications", "") or "",
         zip_code=member.get("zip_code", "") or "",
+        session_id=sid,
     )
 
 
@@ -783,6 +930,15 @@ def _resolve_sob_cost(tier_copays: dict, tier: int, is_mail: bool, days_supply: 
     return parsed
 
 
+@app.get("/cms/my-drugs-session/{session_id}")
+def cms_my_drugs_session(session_id: str):
+    """Session-based drug lookup — no phone in URL."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    return _my_drugs_impl(session["data"])
+
+
 @app.get("/cms/my-drugs/{phone}")
 def cms_my_drugs(phone: str):
     """
@@ -794,11 +950,17 @@ def cms_my_drugs(phone: str):
     try:
         member = search_contact_by_phone(phone)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Zoho error: {str(e)}")
+        log.error(f"Zoho lookup failed in my-drugs: {e}")
+        raise HTTPException(status_code=500, detail="Unable to look up your account right now.")
 
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
 
+    return _my_drugs_impl(member)
+
+
+def _my_drugs_impl(member: dict):
+    """Shared implementation for drug lookup."""
     plan_number = member.get("plan_number", "")
     if not plan_number:
         raise HTTPException(status_code=400, detail="Member has no plan number")
@@ -979,3 +1141,236 @@ def cms_my_drugs(phone: str):
         "has_medications": True,
         "cost_source": "sob" if sob_source else "cms",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MEDICATION REMINDERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/reminders/{session_id}")
+def list_reminders(session_id: str):
+    """List all medication reminders for this member."""
+    phone = _session_phone(session_id)
+    db = get_user_db()
+    return {"reminders": db.get_reminders(phone)}
+
+
+@app.post("/reminders/{session_id}")
+def create_reminder(session_id: str, req: ReminderCreate):
+    """Create a single medication reminder."""
+    phone = _session_phone(session_id)
+    if not 0 <= req.time_hour <= 23:
+        raise HTTPException(status_code=400, detail="time_hour must be 0-23")
+    if not 0 <= req.time_minute <= 59:
+        raise HTTPException(status_code=400, detail="time_minute must be 0-59")
+    db = get_user_db()
+    reminder = db.create_reminder(
+        phone=phone,
+        drug_name=req.drug_name,
+        time_hour=req.time_hour,
+        time_minute=req.time_minute,
+        dose_label=req.dose_label,
+        days_supply=req.days_supply,
+        refill_reminder=req.refill_reminder,
+        last_refill_date=req.last_refill_date,
+    )
+    return {"reminder": reminder}
+
+
+@app.post("/reminders/{session_id}/bulk")
+def create_reminders_bulk(session_id: str, req: BulkReminderCreate):
+    """Create multiple reminders at once (agent onboarding)."""
+    phone = _session_phone(session_id)
+    db = get_user_db()
+    reminders = db.create_reminders_bulk(
+        phone=phone,
+        reminders=[r.model_dump() for r in req.reminders],
+        created_by=req.created_by,
+    )
+    return {"reminders": reminders, "count": len(reminders)}
+
+
+@app.put("/reminders/{session_id}/{reminder_id}")
+def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate):
+    """Update a reminder (toggle, reschedule, etc.)."""
+    phone = _session_phone(session_id)
+    db = get_user_db()
+    reminder = db.update_reminder(phone, reminder_id, **req.model_dump(exclude_none=True))
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return {"reminder": reminder}
+
+
+@app.delete("/reminders/{session_id}/{reminder_id}")
+def delete_reminder(session_id: str, reminder_id: int):
+    """Delete a medication reminder."""
+    phone = _session_phone(session_id)
+    db = get_user_db()
+    deleted = db.delete_reminder(phone, reminder_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return {"deleted": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BENEFITS USAGE TRACKING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+VALID_USAGE_CATEGORIES = {"otc", "dental", "flex", "vision", "hearing"}
+
+
+@app.post("/usage/{session_id}")
+def log_usage(session_id: str, req: UsageCreate):
+    """Log a benefits usage entry (e.g. OTC purchase, dental visit)."""
+    phone = _session_phone(session_id)
+    cat = req.category.lower()
+    if cat not in VALID_USAGE_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(VALID_USAGE_CATEGORIES)}")
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    db = get_user_db()
+    entry = db.log_usage(
+        phone=phone,
+        category=cat,
+        amount=req.amount,
+        benefit_period=req.benefit_period,
+        description=req.description,
+        usage_date=req.usage_date,
+    )
+    return {"usage": entry}
+
+
+@app.get("/usage/{session_id}")
+def get_usage(session_id: str, category: Optional[str] = None):
+    """Get all usage entries for this member, optionally filtered by category."""
+    phone = _session_phone(session_id)
+    db = get_user_db()
+    entries = db.get_usage(phone, category)
+    return {"usage": entries}
+
+
+@app.delete("/usage/{session_id}/{usage_id}")
+def delete_usage(session_id: str, usage_id: int):
+    """Delete a usage entry (undo mistake)."""
+    phone = _session_phone(session_id)
+    db = get_user_db()
+    deleted = db.delete_usage(phone, usage_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Usage entry not found")
+    return {"deleted": True}
+
+
+@app.get("/usage/{session_id}/summary")
+def usage_summary(session_id: str):
+    """
+    Get per-category spending summary: spent vs. cap for current period.
+    Cross-references CMS benefit caps with logged usage.
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    session["ts"] = time.time()
+
+    phone = session["phone"]
+    plan_number = session["data"].get("plan_number", "")
+    if not plan_number:
+        return {"summary": []}
+
+    db = get_user_db()
+    cms = get_cms()
+
+    # Gather benefit caps from CMS
+    categories = []
+
+    # OTC
+    try:
+        otc = cms.get_otc_allowance(*_split_plan(plan_number))
+        if otc and otc.get("has_otc") and otc.get("amount"):
+            amt = otc["amount"]
+            # amount may be string with $ — normalize to float
+            if isinstance(amt, str):
+                amt = float(amt.replace("$", "").replace(",", "").strip())
+            period = otc.get("period", "Monthly")
+            categories.append({"category": "otc", "cap": amt, "period": period, "label": "OTC Allowance"})
+    except Exception:
+        pass
+
+    # Dental
+    try:
+        dental = cms.get_dental_benefits(*_split_plan(plan_number))
+        if dental and dental.get("has_preventive"):
+            prev = dental.get("preventive", {})
+            max_ben = prev.get("max_benefit")
+            if max_ben:
+                cap = float(str(max_ben).replace("$", "").replace(",", ""))
+                categories.append({"category": "dental", "cap": cap, "period": "Yearly", "label": "Dental"})
+    except Exception:
+        pass
+
+    # Flex / SSBCI
+    try:
+        flex = cms.get_flex_ssbci(*_split_plan(plan_number))
+        if flex and flex.get("has_ssbci") and flex.get("benefits"):
+            total = sum(b.get("max_amount", 0) for b in flex["benefits"] if b.get("max_amount"))
+            if total > 0:
+                categories.append({"category": "flex", "cap": total, "period": "Yearly", "label": "Flex Card"})
+    except Exception:
+        pass
+
+    # Vision
+    try:
+        vision = cms.get_vision_benefits(*_split_plan(plan_number))
+        if vision and vision.get("has_exams"):
+            exams = vision.get("exams", {})
+            max_amt = exams.get("max_benefit")
+            if max_amt:
+                cap = float(str(max_amt).replace("$", "").replace(",", ""))
+                categories.append({"category": "vision", "cap": cap, "period": "Yearly", "label": "Vision"})
+    except Exception:
+        pass
+
+    # Hearing
+    try:
+        hearing = cms.get_hearing_benefits(*_split_plan(plan_number))
+        if hearing and hearing.get("has_aids"):
+            aids = hearing.get("aids", {})
+            max_amt = aids.get("max_benefit")
+            if max_amt:
+                cap = float(str(max_amt).replace("$", "").replace(",", ""))
+                categories.append({"category": "hearing", "cap": cap, "period": "Yearly", "label": "Hearing"})
+    except Exception:
+        pass
+
+    if not categories:
+        return {"summary": []}
+
+    # Get current-period spending for each category
+    benefit_periods = {c["category"]: c["period"] for c in categories}
+    totals = db.get_current_period_totals(phone, benefit_periods)
+
+    summary = []
+    for c in categories:
+        spent = totals.get(c["category"], 0.0)
+        cap = c["cap"]
+        remaining = max(0, cap - spent)
+        pct = round((spent / cap) * 100, 1) if cap > 0 else 0
+        summary.append({
+            "category": c["category"],
+            "label": c["label"],
+            "cap": cap,
+            "period": c["period"],
+            "spent": spent,
+            "remaining": remaining,
+            "pct_used": pct,
+        })
+
+    return {"summary": summary}
+
+
+def _split_plan(plan_number: str) -> tuple[str, str]:
+    """Split 'H1234-567' or 'H1234-567-000' into (contract_id, plan_id)."""
+    pid = normalize_plan_id(plan_number)
+    parts = pid.split("-")
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return pid, ""

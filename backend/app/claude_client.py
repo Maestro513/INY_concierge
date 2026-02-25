@@ -49,33 +49,55 @@ _DRUG_SYNONYMS = {
 
 
 def find_relevant_chunks(chunks: list[str], question: str, max_chunks: int = 5) -> str:
-    """Keyword matching to find most relevant chunks.
-    Uses synonym expansion for drug-related queries so that
-    'how much is Eliquis' also pulls in chunks about tiers/formulary.
-    TODO: Replace with embeddings/vector search for production.
+    """TF-IDF inspired scoring to find the most relevant chunks.
+    Uses term frequency with IDF-like weighting: rarer terms score higher.
+    Also supports bigram matching and synonym expansion for drug queries.
     """
+    import math
     question_lower = question.lower()
-    keywords = [w for w in question_lower.split() if len(w) > 2]
+
+    # Build unigrams (len > 2) and bigrams from the question
+    words = [w for w in question_lower.split() if len(w) > 2]
+    bigrams = [f"{words[i]} {words[i+1]}" for i in range(len(words) - 1)]
 
     # Expand: if any keyword is drug-related, add all drug synonyms
-    # Also check for short drug terms ("rx") that the length filter dropped
     is_drug_q = (
-        any(kw in _DRUG_SYNONYMS for kw in keywords)
+        any(kw in _DRUG_SYNONYMS for kw in words)
         or " rx " in f" {question_lower} "
     )
     if is_drug_q:
-        keywords = list(set(keywords) | _DRUG_SYNONYMS)
+        words = list(set(words) | _DRUG_SYNONYMS)
 
+    all_terms = words + bigrams
+
+    # Compute document frequency (how many chunks contain each term)
+    n_docs = len(chunks)
+    doc_freq = {}
+    chunks_lower = [c.lower() for c in chunks]
+    for term in all_terms:
+        doc_freq[term] = sum(1 for cl in chunks_lower if term in cl)
+
+    # Score each chunk using TF * IDF
     scored = []
-    for chunk in chunks:
-        chunk_lower = chunk.lower()
-        score = sum(1 for kw in keywords if kw in chunk_lower)
-        scored.append((score, chunk))
+    for i, chunk_lower in enumerate(chunks_lower):
+        score = 0.0
+        for term in all_terms:
+            if term not in chunk_lower:
+                continue
+            # Term frequency: count occurrences in this chunk
+            tf = chunk_lower.count(term)
+            # IDF: rarer terms across chunks get higher weight
+            df = doc_freq.get(term, 0)
+            idf = math.log((n_docs + 1) / (df + 1)) + 1.0
+            # Bigrams get a 2x boost
+            weight = 2.0 if " " in term else 1.0
+            score += tf * idf * weight
+        scored.append((score, chunks[i]))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     top = [chunk for score, chunk in scored[:max_chunks] if score > 0]
 
-    # If no keyword matches, return first few chunks (they usually have overview info)
+    # If no matches, return first few chunks (they usually have overview info)
     if not top:
         top = chunks[:max_chunks]
 
