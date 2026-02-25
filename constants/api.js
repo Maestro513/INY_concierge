@@ -30,7 +30,7 @@ const getApiUrl = () => {
   }
 
   // 3. Production — your domain
-  return 'https://api.insurancenyou.com';
+  return 'https://iny-concierge.onrender.com';
 };
 
 // Probe known dev IPs — whichever responds first wins
