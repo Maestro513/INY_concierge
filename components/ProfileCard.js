@@ -225,8 +225,8 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading, bene
           <Text style={styles.name}>
             {member.firstName} {member.lastName}
           </Text>
-          {member.planNumber ? (
-            <Text style={styles.medicareNumber}>Medicare #: {member.planNumber}</Text>
+          {member.medicareNumber ? (
+            <Text style={styles.medicareNumber}>Medicare #: {member.medicareNumber}</Text>
           ) : null}
         </View>
         <View style={styles.headerRight}>
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
   headerRight: { alignItems: 'flex-end', flexShrink: 0, maxWidth: '48%' },
   greeting: { fontSize: 17, fontWeight: '600', letterSpacing: 0.2, color: COLORS.textSecondary, marginBottom: 2 },
   name: { ...TYPE.h1, color: COLORS.text },
-  medicareNumber: { fontSize: 13, fontWeight: '500', color: COLORS.textTertiary, marginTop: 4 },
+  medicareNumber: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 6 },
   agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   agent: { fontSize: 16, fontWeight: '700', color: COLORS.textSecondary },
   logoBg: {

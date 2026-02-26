@@ -15,7 +15,7 @@ import {
 } from '../utils/notifications';
 
 export default function HomeScreen() {
-  const { firstName, lastName, planName, planNumber, agent, sessionId, zipCode } = useLocalSearchParams();
+  const { firstName, lastName, planName, planNumber, agent, medicareNumber, sessionId, zipCode } = useLocalSearchParams();
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +37,7 @@ export default function HomeScreen() {
     planName: planName || '',
     planNumber: planNumber || '',
     agent: agent || '',
+    medicareNumber: medicareNumber || '',
   };
 
   useEffect(() => {

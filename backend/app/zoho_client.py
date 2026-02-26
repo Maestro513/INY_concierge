@@ -46,6 +46,7 @@ def _extract_contact(contact: dict) -> dict:
         "plan_name": contact.get("Plan_Name", ""),
         "plan_number": contact.get("Plan_Number", ""),
         "agent": contact.get("Agent", ""),
+        "medicare_number": contact.get("Medicare_Number", ""),
         "medications": contact.get("Medications", ""),
         "zip_code": contact.get("Mailing_Zip", ""),
     }

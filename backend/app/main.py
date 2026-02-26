@@ -247,6 +247,7 @@ class LookupResponse(BaseModel):
     plan_name: str = ""
     plan_number: str = ""
     agent: str = ""
+    medicare_number: str = ""
     phone: str = ""
     medications: str = ""
     zip_code: str = ""
@@ -341,6 +342,7 @@ def lookup_member(req: LookupRequest):
         plan_name=member["plan_name"],
         plan_number=member["plan_number"],
         agent=member["agent"] or "",
+        medicare_number=member.get("medicare_number", "") or "",
         phone=member["phone"] or member["mobile"],
         medications=member.get("medications", "") or "",
         zip_code=member.get("zip_code", "") or "",
