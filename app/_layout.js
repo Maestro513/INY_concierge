@@ -1,9 +1,11 @@
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Text, TextInput } from 'react-native';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { COLORS } from '../constants/theme';
+import { setupNotificationChannel } from '../utils/notifications';
 
 // expo-notifications requires a dev build (not available in Expo Go).
 // Notification handler is set up in utils/notifications.js when reminders are created.
@@ -43,6 +45,11 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
+  // Set up Android notification channel on app launch
+  useEffect(() => {
+    setupNotificationChannel();
+  }, []);
+
   if (!fontsLoaded) return null;
 
   return (
@@ -53,6 +60,8 @@ export default function RootLayout() {
         <Stack.Screen name="home" options={{ animation: 'fade', gestureEnabled: false }} />
         <Stack.Screen name="otp" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="doctor-results" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+        <Stack.Screen name="digital-id" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
+        <Stack.Screen name="pharmacy-results" options={{ animation: 'slide_from_right', gestureEnabled: true }} />
       </Stack>
     </SafeAreaProvider>
   );

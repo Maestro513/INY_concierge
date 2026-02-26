@@ -36,7 +36,15 @@
           "speechRecognitionPermission": "InsuranceNYou needs speech recognition to understand your questions."
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logo.png",
+          "color": "#7B3FBF",
+          "defaultChannel": "medication-reminders"
+        }
+      ]
     ],
     "extra": {
       "router": {},

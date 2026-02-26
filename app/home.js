@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
 import { API_URL, fetchWithTimeout } from '../constants/api';
 import ProfileCard from '../components/ProfileCard';
@@ -15,6 +15,7 @@ import {
 } from '../utils/notifications';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const { firstName, lastName, planName, planNumber, agent, medicareNumber, sessionId, zipCode } = useLocalSearchParams();
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
@@ -86,6 +87,20 @@ export default function HomeScreen() {
     setShowSOB(true);
     loadSOBData();
   }, [loadSOBData]);
+
+  const handleViewIDCard = () => {
+    router.push({
+      pathname: '/digital-id',
+      params: { firstName, lastName, planName, planNumber, medicareNumber: medicareNumber || '' },
+    });
+  };
+
+  const handleFindPharmacy = () => {
+    router.push({
+      pathname: '/pharmacy-results',
+      params: { zipCode: zipCode || '', planNumber: planNumber || '', planName: planName || '' },
+    });
+  };
 
   // ── Benefits ────────────────────────────────────────────────────
 
@@ -267,6 +282,8 @@ export default function HomeScreen() {
         <ProfileCard
           member={member}
           onViewSOB={handleOpenSOB}
+          onViewIDCard={handleViewIDCard}
+          onFindPharmacy={handleFindPharmacy}
           benefits={benefits}
           loading={loading}
           benefitsError={benefitsError}

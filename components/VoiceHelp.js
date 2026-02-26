@@ -13,6 +13,21 @@ import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/them
 import { CALL_NUMBER } from '../constants/data';
 import { API_URL, fetchWithTimeout } from '../constants/api';
 
+// --- Pharmacy search detection ---
+
+const PHARMACY_TRIGGERS = [
+  'find a pharmacy', 'find me a pharmacy', 'pharmacy near',
+  'pharmacies near', 'where is a pharmacy', 'nearest pharmacy',
+  'in-network pharmacy', 'preferred pharmacy', 'find pharmacy',
+  'pharmacy finder', 'drug store', 'drugstore', 'find a drugstore',
+  'where can i fill', 'where do i fill', 'fill my prescription',
+];
+
+function detectPharmacySearch(text) {
+  const lower = text.toLowerCase();
+  return PHARMACY_TRIGGERS.some(t => lower.includes(t));
+}
+
 // --- Doctor search keywords and specialty extraction ---
 
 const DOCTOR_TRIGGERS = [
@@ -526,6 +541,17 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
     setQuestion(q); setLiveText(''); setTypedText('');
     Keyboard.dismiss();
 
+    // Pharmacy search
+    if (detectPharmacySearch(q)) {
+      speakResponse('Searching for pharmacies near you.');
+      setIsSpeaking(true); setMode('idle');
+      setTimeout(() => {
+        router.push({ pathname: '/pharmacy-results', params: { zipCode: zipCode || '33434', planNumber: planNumber || '', planName: planName || '' } });
+      }, 800);
+      return;
+    }
+
+    // Doctor search
     const specialty = detectDoctorSearch(q);
     if (specialty) {
       speakResponse(`Searching for a ${specialty} near you.`);
@@ -621,27 +647,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
 
       {/* Answer / Status Area */}
       <ScrollView style={s.answerScroll} contentContainerStyle={s.answerArea}>
-        {mode === 'idle' && (
-          <View style={s.idleWrap}>
-            <Text style={s.idleTitle}>How can I help?</Text>
-            <Text style={s.idleText}>Ask about your benefits, find a{'\n'}doctor, or check drug costs.</Text>
-            {/* Suggestion chips */}
-            <View style={s.chipRow}>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my PCP copay?')} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ask about copays">
-                <Ionicons name="medical-outline" size={13} color={COLORS.accent} />
-                <Text style={s.chipText}>My copays</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('Find me a cardiologist')} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Find a doctor">
-                <Ionicons name="search-outline" size={13} color={COLORS.accent} />
-                <Text style={s.chipText}>Find a doctor</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my dental benefit?')} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ask about dental benefits">
-                <Ionicons name="sparkles-outline" size={13} color={COLORS.accent} />
-                <Text style={s.chipText}>Dental</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+        {mode === 'idle' && null}
         {mode === 'answer' && (
           <Animated.View style={{ opacity: fade }}>
             <View style={s.questionBubble}>
@@ -694,17 +700,17 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
         <>
           <View style={s.micWrap}>
             <Animated.View style={[s.ring, {
-              width: 160, height: 160, borderRadius: 80,
+              width: 140, height: 140, borderRadius: 70,
               backgroundColor: COLORS.micRing3,
               transform: [{ scale: pulse }], opacity: pulseOp,
             }]} />
             <Animated.View style={[s.ring, {
-              width: 130, height: 130, borderRadius: 65,
+              width: 115, height: 115, borderRadius: 57.5,
               backgroundColor: COLORS.micRing2,
               transform: [{ scale: pulse }], opacity: pulseOp,
             }]} />
             <Animated.View style={[s.ring, {
-              width: 108, height: 108, borderRadius: 54,
+              width: 96, height: 96, borderRadius: 48,
               backgroundColor: COLORS.micRing1,
               transform: [{ scale: pulse }], opacity: pulseOp,
             }]} />
@@ -715,7 +721,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
               accessibilityRole="button"
               accessibilityLabel={mode === 'listening' ? 'Stop listening' : 'Start voice input'}
             >
-              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={38} color="#fff" />
+              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={34} color="#fff" />
             </TouchableOpacity>
           </View>
           <Text style={s.status}>
@@ -765,7 +771,7 @@ const s = StyleSheet.create({
   // Header
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 18, paddingBottom: 8, width: '100%',
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, width: '100%',
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerIcon: {
@@ -784,13 +790,13 @@ const s = StyleSheet.create({
 
   // Content area
   answerScroll: { flex: 1, width: '100%' },
-  answerArea: { justifyContent: 'center', paddingHorizontal: 24, flexGrow: 1 },
+  answerArea: { justifyContent: 'flex-end', paddingHorizontal: 24, flexGrow: 1, paddingBottom: 8 },
 
   // Idle state
   idleWrap: { alignItems: 'center' },
-  idleTitle: { ...TYPE.h2, color: COLORS.text, marginBottom: 8 },
-  idleText: { fontSize: 16, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 24, marginBottom: 20 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  idleTitle: { ...TYPE.h2, color: COLORS.text, marginBottom: 4 },
+  idleText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 12 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: COLORS.accentLighter, borderRadius: RADII.full,
@@ -858,21 +864,21 @@ const s = StyleSheet.create({
   },
   newQuestionText: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
 
-  // Mic button (10% bigger: 82→90, wrap 100→110)
-  micWrap: { width: 110, height: 110, justifyContent: 'center', alignItems: 'center', alignSelf: 'center' },
+  // Mic button
+  micWrap: { width: 100, height: 100, justifyContent: 'center', alignItems: 'center', alignSelf: 'center', marginTop: 4 },
   ring: { position: 'absolute' },
   mic: {
-    width: 90, height: 90, borderRadius: 45, backgroundColor: COLORS.accent,
+    width: 82, height: 82, borderRadius: 41, backgroundColor: COLORS.accent,
     justifyContent: 'center', alignItems: 'center',
     ...SHADOWS.glow,
   },
   micActive: { backgroundColor: COLORS.accentDark, transform: [{ scale: 1.06 }] },
-  status: { ...TYPE.caption, color: COLORS.textTertiary, marginTop: 12, marginBottom: 4, textAlign: 'center' },
+  status: { fontSize: 17, fontWeight: '600', color: COLORS.textSecondary, marginTop: 10, marginBottom: 4, textAlign: 'center' },
 
   // Input bar
   inputBar: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 12,
+    paddingHorizontal: 14, paddingVertical: 8,
     borderTopWidth: 1, borderTopColor: COLORS.borderLight,
     backgroundColor: COLORS.white,
   },

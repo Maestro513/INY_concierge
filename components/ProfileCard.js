@@ -187,7 +187,7 @@ function AddReminderModal({ visible, onClose, onSave }) {
 }
 
 // ── Main component ──────────────────────────────────────────────
-export default function ProfileCard({ member, onViewSOB, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder }) {
+export default function ProfileCard({ member, onViewSOB, onViewIDCard, onFindPharmacy, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -276,6 +276,28 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading, bene
 
       <AddReminderModal visible={showAddModal} onClose={() => setShowAddModal(false)} onSave={onAddReminder} />
 
+      {/* Quick Actions */}
+      <View style={styles.quickActionsRow}>
+        <TouchableOpacity onPress={onViewIDCard} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View digital ID card">
+          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.careBg }]}>
+            <Ionicons name="card-outline" size={18} color={COLORS.careVisit} />
+          </View>
+          <Text style={styles.quickActionText}>ID Card</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onFindPharmacy} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Find a pharmacy">
+          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.clinicalBg }]}>
+            <Ionicons name="storefront-outline" size={18} color={COLORS.clinical} />
+          </View>
+          <Text style={styles.quickActionText}>Pharmacy</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onViewSOB} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
+          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.savingsBg }]}>
+            <Ionicons name="document-text-outline" size={18} color={COLORS.savings} />
+          </View>
+          <Text style={styles.quickActionText}>Benefits</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Agent + View More Benefits row — right above cards */}
       <View style={styles.aboveCardsRow}>
         {member.agent ? (
@@ -284,11 +306,6 @@ export default function ProfileCard({ member, onViewSOB, benefits, loading, bene
             <Text style={styles.agent}>Agent: {member.agent}</Text>
           </View>
         ) : <View />}
-        <TouchableOpacity onPress={onViewSOB} style={styles.sobBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
-          <Ionicons name="document-text-outline" size={16} color={COLORS.accent} />
-          <Text style={styles.sobLink}>View More Benefits</Text>
-          <Ionicons name="chevron-forward" size={14} color={COLORS.accent} />
-        </TouchableOpacity>
       </View>
 
       {/* Benefits Grid */}
@@ -379,18 +396,23 @@ const styles = StyleSheet.create({
   },
   reminderText: { fontSize: 14, fontWeight: '600', color: COLORS.accentDark, flex: 1 },
 
-  // Agent + View More Benefits row (right above cards)
+  // Quick actions row
+  quickActionsRow: {
+    flexDirection: 'row', justifyContent: 'space-around',
+    marginBottom: 14,
+  },
+  quickAction: { alignItems: 'center', gap: 6 },
+  quickActionIcon: {
+    width: 48, height: 48, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  quickActionText: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
+
+  // Agent row (right above cards)
   aboveCardsRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 12,
   },
-  sobBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: COLORS.accentLight,
-    borderRadius: RADII.full,
-    paddingHorizontal: 16, paddingVertical: 10,
-  },
-  sobLink: { fontSize: 14, fontWeight: '700', color: COLORS.accent },
 
   // Loading
   loadingWrap: {

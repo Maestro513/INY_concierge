@@ -37,6 +37,26 @@ try {
   console.log('[Notifications] Native module not available. Reminders will save but won\'t send alerts.');
 }
 
+// ── Android notification channel (required for Android 8+) ───────
+export async function setupNotificationChannel() {
+  if (!notifAvailable()) return;
+  const { Platform } = require('react-native');
+  if (Platform.OS === 'android') {
+    try {
+      await Notifications.setNotificationChannelAsync('medication-reminders', {
+        name: 'Medication Reminders',
+        importance: Notifications.AndroidImportance?.MAX ?? 4,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#7B3FBF',
+        sound: 'default',
+        description: 'Daily medication reminder alerts',
+      });
+    } catch (e) {
+      console.log('[Notifications] Channel setup failed:', e.message);
+    }
+  }
+}
+
 function notifAvailable() {
   return Notifications !== null;
 }
@@ -80,16 +100,18 @@ export async function scheduleReminder(reminder) {
     await Notifications.scheduleNotificationAsync({
       identifier: notifId,
       content: {
-        title: 'Medication Reminder',
+        title: '💊 Medication Reminder',
         body: `Time to take your ${reminder.drug_name}${doseText}`,
         sound: true,
         data: { type: 'med_reminder', reminder_id: reminder.id },
+        categoryIdentifier: 'medication-reminders',
       },
       trigger: {
         type: 'daily',
         hour: reminder.time_hour,
         minute: reminder.time_minute,
         repeats: true,
+        channelId: 'medication-reminders',
       },
     });
   } catch (e) {

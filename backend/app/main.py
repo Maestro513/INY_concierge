@@ -2,7 +2,7 @@
 InsuranceNYou Backend API
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -261,6 +261,12 @@ class ProviderSearchRequest(BaseModel):
     limit: int = 200
     enrich_google: bool = True
 
+class PharmacySearchRequest(BaseModel):
+    plan_number: str = ""
+    zip_code: str
+    radius_miles: int = 10
+    limit: int = 30
+
 class SOBRequest(BaseModel):
     plan_number: str
 
@@ -371,6 +377,27 @@ async def provider_search(req: ProviderSearchRequest):
         radius_miles=req.radius_miles,
         limit=req.limit,
         enrich_google=req.enrich_google,
+    )
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+@app.post("/pharmacies/search")
+async def pharmacy_search(req: PharmacySearchRequest):
+    """
+    Search for pharmacies near a zip code.
+    Returns pharmacies sorted by: preferred first, then in-network, then distance.
+    """
+    from .pharmacy_service import search_pharmacies
+
+    result = await search_pharmacies(
+        plan_number=req.plan_number,
+        zip_code=req.zip_code,
+        radius_miles=req.radius_miles,
+        limit=req.limit,
     )
 
     if not result["success"]:
@@ -1379,31 +1406,45 @@ def _split_plan(plan_number: str) -> tuple[str, str]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEMPORARY FILE UPLOAD (remove after initial data migration)
+# DIGITAL ID CARD
 # ═══════════════════════════════════════════════════════════════════════════════
-UPLOAD_SECRET = os.getenv("UPLOAD_SECRET", "")
 
-@app.get("/admin/check-env")
-def check_env():
-    """Debug: check if env vars are loaded."""
+@app.get("/cms/id-card/{plan_number}")
+def get_id_card_data(plan_number: str):
+    """Return all data needed to render a digital insurance ID card."""
+    from .carrier_config import detect_carrier, get_carrier_config
+
+    cms = get_cms()
+    overview = cms.get_plan_overview(plan_number)
+    if not overview:
+        raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found")
+
+    medical = cms.get_medical_copays(plan_number)
+
+    carrier_key = detect_carrier(
+        overview.get("plan_name", ""),
+        overview.get("org_name", ""),
+    )
+    rx = get_carrier_config(carrier_key) if carrier_key else {}
+
     return {
-        "upload_secret_set": bool(UPLOAD_SECRET),
-        "pdfs_dir": PDFS_DIR,
-        "extracted_dir": EXTRACTED_DIR,
+        "plan_name": overview.get("plan_name", ""),
+        "org_name": overview.get("org_name", ""),
+        "contract_id": overview.get("contract_id", ""),
+        "plan_id": overview.get("plan_id", ""),
+        "carrier": carrier_key or "",
+        "effective_date": "01/01/2026",
+        "pcp_copay": medical.get("pcp_copay"),
+        "specialist_copay": medical.get("specialist_copay"),
+        "er_copay": medical.get("er_copay"),
+        "urgent_care_copay": medical.get("urgent_care_copay"),
+        "rx_bin": rx.get("rx_bin", ""),
+        "rx_pcn": rx.get("rx_pcn", ""),
+        "rx_group": rx.get("rx_group", ""),
+        "customer_service": rx.get("customer_service", ""),
+        "customer_service_tty": rx.get("customer_service_tty", "711"),
+        "pharmacy_help": rx.get("pharmacy_help", ""),
+        "prior_auth_phone": rx.get("prior_auth", ""),
+        "website": rx.get("website", ""),
     }
 
-@app.post("/admin/upload-pdf")
-async def upload_pdf(
-    file: UploadFile = File(...),
-    path: str = Form(...),
-    secret: str = Form(""),
-):
-    """Upload a PDF to the persistent disk. Requires UPLOAD_SECRET env var."""
-    if not UPLOAD_SECRET or secret != UPLOAD_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    dest = os.path.join(PDFS_DIR, path)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, "wb") as f:
-        content = await file.read()
-        f.write(content)
-    return {"uploaded": path, "size": len(content)}
