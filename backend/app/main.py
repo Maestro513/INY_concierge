@@ -2,7 +2,7 @@
 InsuranceNYou Backend API
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -810,6 +810,51 @@ def sync_pdfs_from_gdrive(body: SyncRequest):
         from .pdf_processor import process_all_pdfs
         process_all_pdfs()
     return result
+
+
+# --- Admin: upload PDFs directly ---
+
+@app.post("/admin/upload-pdf")
+async def upload_pdf(secret: str = Form(...), file: UploadFile = File(...)):
+    """Upload a PDF directly to the server."""
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    os.makedirs(PDFS_DIR, exist_ok=True)
+    dest = os.path.join(PDFS_DIR, file.filename)
+    contents = await file.read()
+    with open(dest, "wb") as f:
+        f.write(contents)
+    log.info("Uploaded PDF: %s (%d bytes)", file.filename, len(contents))
+    return {"uploaded": file.filename, "size": len(contents)}
+
+
+@app.post("/admin/upload-pdfs")
+async def upload_pdfs(secret: str = Form(...), files: list[UploadFile] = File(...)):
+    """Upload multiple PDFs, then re-extract chunks."""
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    os.makedirs(PDFS_DIR, exist_ok=True)
+    results = {"uploaded": [], "errors": []}
+    for file in files:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            results["errors"].append(f"{file.filename}: not a PDF")
+            continue
+        try:
+            dest = os.path.join(PDFS_DIR, file.filename)
+            contents = await file.read()
+            with open(dest, "wb") as f:
+                f.write(contents)
+            results["uploaded"].append(file.filename)
+            log.info("Uploaded PDF: %s (%d bytes)", file.filename, len(contents))
+        except Exception as exc:
+            results["errors"].append(f"{file.filename}: {exc}")
+    # Re-extract chunks after uploading new PDFs
+    if results["uploaded"]:
+        from .pdf_processor import process_all_pdfs
+        process_all_pdfs()
+    return results
 
 
 # --- OTC fallback from SOB extracted text ---
