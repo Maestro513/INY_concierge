@@ -28,6 +28,14 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 # CORS — comma-separated extra origins (insurancenyou.com is always allowed in prod)
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "")  # e.g. "https://staging.insurancenyou.com"
 
+# Google Drive – folder ID for SOB PDFs
+GDRIVE_FOLDER_ID = os.getenv(
+    "GDRIVE_FOLDER_ID", "1vLrYoIa3lmn9vEdZSXJ9s3p1qoomLHpO"
+)
+
+# Secret for admin endpoints (set in Render env vars)
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "Pdfs"))
