@@ -21,7 +21,7 @@ import uuid
 import anthropic
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL
+from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL, ADMIN_SECRET, GDRIVE_FOLDER_ID
 from .user_data import UserDataDB
 
 # ── Structured logging ───────────────────────────────────────────────────────
@@ -791,6 +791,25 @@ def get_sob_pdf(plan_number: str):
         filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# --- Admin: sync PDFs from Google Drive ---
+
+class SyncRequest(BaseModel):
+    secret: str = ""
+
+@app.post("/admin/sync-pdfs")
+def sync_pdfs_from_gdrive(body: SyncRequest):
+    """Download latest PDFs from the shared Google Drive folder."""
+    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    from .gdrive_sync import sync_folder
+    result = sync_folder(GDRIVE_FOLDER_ID, PDFS_DIR)
+    # Re-extract chunks after syncing new PDFs
+    if result["downloaded"] > 0:
+        from .pdf_processor import process_all_pdfs
+        process_all_pdfs()
+    return result
 
 
 # --- OTC fallback from SOB extracted text ---
