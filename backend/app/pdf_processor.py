@@ -121,10 +121,34 @@ def process_single_pdf(pdf_path: str, base_dir: str) -> list[dict]:
     return results
 
 
-def process_all_pdfs():
-    """Process all PDFs in the pdfs/ directory (including subfolders)."""
+def process_pdf_list(pdf_files: list[str]) -> dict:
+    """Process a specific list of PDF file paths. Returns summary."""
     os.makedirs(EXTRACTED_DIR, exist_ok=True)
 
+    total_plans = 0
+    errors = []
+
+    for pdf_path in sorted(pdf_files):
+        if not pdf_path.lower().endswith(".pdf"):
+            continue
+        try:
+            results = process_single_pdf(pdf_path, PDFS_DIR)
+            for data in results:
+                out_path = os.path.join(EXTRACTED_DIR, f"{data['plan_id']}.json")
+                with open(out_path, "w") as f:
+                    json.dump(data, f, indent=2)
+                total_plans += 1
+                print(f"     -> {data['plan_id']}.json")
+            print()
+        except Exception as e:
+            errors.append((pdf_path, str(e)))
+            print(f"     ERROR: {e}\n")
+
+    return {"processed": total_plans, "errors": len(errors)}
+
+
+def process_all_pdfs():
+    """Process all PDFs in the pdfs/ directory (including subfolders)."""
     pdf_files = []
     for root, dirs, files in os.walk(PDFS_DIR):
         for f in files:
@@ -141,29 +165,12 @@ def process_all_pdfs():
     print(f"  Found {len(pdf_files)} PDF(s)")
     print(f"{'='*60}\n")
 
-    total_plans = 0
-    errors = []
-
-    for pdf_path in sorted(pdf_files):
-        try:
-            results = process_single_pdf(pdf_path, PDFS_DIR)
-            for data in results:
-                out_path = os.path.join(EXTRACTED_DIR, f"{data['plan_id']}.json")
-                with open(out_path, "w") as f:
-                    json.dump(data, f, indent=2)
-                total_plans += 1
-                print(f"     -> {data['plan_id']}.json")
-            print()
-        except Exception as e:
-            errors.append((pdf_path, str(e)))
-            print(f"     ERROR: {e}\n")
+    result = process_pdf_list(pdf_files)
 
     print(f"{'='*60}")
-    print(f"  Done! {total_plans} plan files created from {len(pdf_files)} PDFs")
-    if errors:
-        print(f"  {len(errors)} error(s):")
-        for path, err in errors:
-            print(f"    - {os.path.basename(path)}: {err}")
+    print(f"  Done! {result['processed']} plan files created from {len(pdf_files)} PDFs")
+    if result["errors"]:
+        print(f"  {result['errors']} error(s)")
     print(f"{'='*60}\n")
 
 

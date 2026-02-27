@@ -798,18 +798,48 @@ def get_sob_pdf(plan_number: str):
 class SyncRequest(BaseModel):
     secret: str = ""
 
+_sync_status: dict = {"running": False, "last_result": None}
+
+def _run_sync_background():
+    """Run the full sync + process pipeline in a background thread."""
+    from .gdrive_sync import sync_folder
+    from .pdf_processor import process_pdf_list
+    try:
+        _sync_status["running"] = True
+        _sync_status["last_result"] = None
+        result = sync_folder(GDRIVE_FOLDER_ID, PDFS_DIR)
+        # Only process newly downloaded PDFs, not all 3600+
+        if result["downloaded"] > 0 and result.get("new_files"):
+            process_pdf_list(result["new_files"])
+        result.pop("new_files", None)  # Don't include file paths in status
+        _sync_status["last_result"] = result
+    except Exception as exc:
+        _sync_status["last_result"] = {"error": str(exc)}
+    finally:
+        _sync_status["running"] = False
+
 @app.post("/admin/sync-pdfs")
 def sync_pdfs_from_gdrive(body: SyncRequest):
-    """Download latest PDFs from the shared Google Drive folder."""
+    """Download latest PDFs from the shared Google Drive folder (background)."""
     if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
-    from .gdrive_sync import sync_folder
-    result = sync_folder(GDRIVE_FOLDER_ID, PDFS_DIR)
-    # Re-extract chunks after syncing new PDFs
-    if result["downloaded"] > 0:
-        from .pdf_processor import process_all_pdfs
-        process_all_pdfs()
-    return result
+    if _sync_status["running"]:
+        return {"status": "already running — check /admin/sync-status"}
+    import threading
+    t = threading.Thread(target=_run_sync_background, daemon=True)
+    t.start()
+    return {"status": "sync started in background — check /admin/sync-status for progress"}
+
+@app.post("/admin/sync-status")
+def sync_status(body: SyncRequest):
+    """Check progress of a background sync."""
+    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if _sync_status["running"]:
+        return {"status": "running"}
+    if _sync_status["last_result"] is None:
+        return {"status": "no sync has been run yet"}
+    return {"status": "complete", "result": _sync_status["last_result"]}
 
 
 # --- OTC fallback from SOB extracted text ---
