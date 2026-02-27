@@ -85,7 +85,15 @@ def _sync_recursive(service, folder_id: str, dest: str, summary: dict) -> None:
         if mime == FOLDER_MIME:
             # Recurse into subfolder
             subfolder_dest = os.path.join(dest, name)
-            os.makedirs(subfolder_dest, exist_ok=True)
+            try:
+                # If a file exists with the same name as the folder, remove it
+                if os.path.exists(subfolder_dest) and not os.path.isdir(subfolder_dest):
+                    os.remove(subfolder_dest)
+                os.makedirs(subfolder_dest, exist_ok=True)
+            except OSError as exc:
+                summary["errors"].append(f"{name}: {exc}")
+                log.exception("Failed to create subfolder %s", name)
+                continue
             log.info("Entering subfolder: %s", name)
             _sync_recursive(service, item_id, subfolder_dest, summary)
             continue
