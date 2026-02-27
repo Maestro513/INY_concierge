@@ -1,24 +1,61 @@
 """
 Download SOB PDFs from a shared Google Drive folder to the local PDFS_DIR.
 
-Usage (CLI):
-    python -m app.gdrive_sync              # uses defaults from config
-    python -m app.gdrive_sync --folder-id 1vLr...  --dest /data/Pdfs
+Uses the Google Drive API v3 with an API key (no OAuth/service-account needed).
+The folder must be shared as "Anyone with the link → Viewer" (or broader).
 
-The Google Drive folder must be shared as "Anyone with the link → Viewer".
+Usage (CLI):
+    python -m app.gdrive_sync
+    python -m app.gdrive_sync --folder-id 1vLr...  --dest /data/Pdfs
 """
 
 import argparse
 import logging
 import os
-import shutil
-import tempfile
 
-import gdown
+import requests
 
-from .config import GDRIVE_FOLDER_ID, PDFS_DIR
+from .config import GDRIVE_FOLDER_ID, GOOGLE_API_KEY, PDFS_DIR
 
 log = logging.getLogger(__name__)
+
+DRIVE_LIST_URL = "https://www.googleapis.com/drive/v3/files"
+DRIVE_DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={key}"
+
+
+def _list_files(folder_id: str, api_key: str) -> list[dict]:
+    """List all files in a Google Drive folder via the API."""
+    files = []
+    page_token = None
+    while True:
+        params = {
+            "q": f"'{folder_id}' in parents and trashed = false",
+            "key": api_key,
+            "fields": "nextPageToken, files(id, name, size, mimeType)",
+            "pageSize": 1000,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        resp = requests.get(DRIVE_LIST_URL, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        files.extend(data.get("files", []))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return files
+
+
+def _download_file(file_id: str, api_key: str, dest_path: str) -> None:
+    """Download a single file from Google Drive."""
+    url = DRIVE_DOWNLOAD_URL.format(file_id=file_id, key=api_key)
+    resp = requests.get(url, timeout=120, stream=True)
+    resp.raise_for_status()
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(dest_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            f.write(chunk)
 
 
 def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict:
@@ -26,48 +63,43 @@ def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict
 
     Returns a summary dict with counts and any errors.
     """
-    url = f"https://drive.google.com/drive/folders/{folder_id}"
     os.makedirs(dest, exist_ok=True)
-
-    # gdown.download_folder downloads into a temp dir, then we merge
-    tmp = tempfile.mkdtemp(prefix="gdrive_sync_")
     summary = {"downloaded": 0, "skipped": 0, "errors": []}
 
+    if not GOOGLE_API_KEY:
+        summary["errors"].append("GOOGLE_API_KEY not configured")
+        return summary
+
     try:
-        log.info("Downloading Google Drive folder %s → %s", folder_id, tmp)
-        paths = gdown.download_folder(
-            url=url,
-            output=tmp,
-            quiet=False,
-            remaining_ok=True,  # don't fail on quota warnings
-        )
-        if paths is None:
-            summary["errors"].append("gdown returned None – is the folder shared publicly?")
-            return summary
+        log.info("Listing files in Google Drive folder %s", folder_id)
+        files = _list_files(folder_id, GOOGLE_API_KEY)
+        log.info("Found %d files in Drive folder", len(files))
 
-        # Move downloaded files into dest, preserving subfolder structure
-        for root, _dirs, files in os.walk(tmp):
-            for fname in files:
-                src = os.path.join(root, fname)
-                rel = os.path.relpath(src, tmp)
-                dst = os.path.join(dest, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
+        for f in files:
+            fname = f["name"]
+            file_id = f["id"]
+            remote_size = int(f.get("size", 0))
+            dst = os.path.join(dest, fname)
 
+            try:
                 # Skip if identical file already exists (same size)
-                if os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(src):
+                if os.path.isfile(dst) and os.path.getsize(dst) == remote_size:
                     summary["skipped"] += 1
-                    log.debug("Skipped (unchanged): %s", rel)
+                    log.debug("Skipped (unchanged): %s", fname)
                     continue
 
-                shutil.move(src, dst)
+                log.info("Downloading: %s (%s bytes)", fname, remote_size)
+                _download_file(file_id, GOOGLE_API_KEY, dst)
                 summary["downloaded"] += 1
-                log.info("Saved: %s", rel)
+                log.info("Saved: %s", fname)
+
+            except Exception as exc:
+                summary["errors"].append(f"{fname}: {exc}")
+                log.exception("Failed to download %s", fname)
 
     except Exception as exc:
         summary["errors"].append(str(exc))
         log.exception("Google Drive sync failed")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
 
     log.info(
         "Sync complete: %d downloaded, %d skipped, %d errors",
