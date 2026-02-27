@@ -38,5 +38,5 @@ ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "Pdfs"))
+PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "pdfs"))
 EXTRACTED_DIR = os.getenv("EXTRACTED_DIR", os.path.join(BASE_DIR, "extracted"))
