@@ -20,7 +20,8 @@ from .config import GDRIVE_FOLDER_ID, GOOGLE_API_KEY, PDFS_DIR
 log = logging.getLogger(__name__)
 
 DRIVE_LIST_URL = "https://www.googleapis.com/drive/v3/files"
-DRIVE_DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={key}"
+# Public download URL for files shared as "anyone with the link"
+DRIVE_DOWNLOAD_URL = "https://drive.usercontent.google.com/download"
 
 
 def _list_files(folder_id: str, api_key: str) -> list[dict]:
@@ -47,10 +48,10 @@ def _list_files(folder_id: str, api_key: str) -> list[dict]:
     return files
 
 
-def _download_file(file_id: str, api_key: str, dest_path: str) -> None:
-    """Download a single file from Google Drive."""
-    url = DRIVE_DOWNLOAD_URL.format(file_id=file_id, key=api_key)
-    resp = requests.get(url, timeout=120, stream=True)
+def _download_file(file_id: str, dest_path: str) -> None:
+    """Download a single publicly-shared file from Google Drive."""
+    params = {"id": file_id, "export": "download", "confirm": "t"}
+    resp = requests.get(DRIVE_DOWNLOAD_URL, params=params, timeout=120, stream=True)
     resp.raise_for_status()
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     with open(dest_path, "wb") as f:
@@ -89,7 +90,7 @@ def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict
                     continue
 
                 log.info("Downloading: %s (%s bytes)", fname, remote_size)
-                _download_file(file_id, GOOGLE_API_KEY, dst)
+                _download_file(file_id, dst)
                 summary["downloaded"] += 1
                 log.info("Saved: %s", fname)
 
