@@ -21,6 +21,9 @@ ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 # Google APIs (Geocoding + Places)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# Google Drive – service account credentials (JSON string from env var)
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+
 # App environment
 APP_ENV = os.getenv("APP_ENV", "development")  # development | staging | production
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

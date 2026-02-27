@@ -1,8 +1,8 @@
 """
 Download SOB PDFs from a shared Google Drive folder to the local PDFS_DIR.
 
-Uses the Google Drive API v3 with an API key (no OAuth/service-account needed).
-The folder must be shared as "Anyone with the link → Viewer" (or broader).
+Uses the Google Drive API v3 with a service account.
+The Drive folder must be shared with the service account's client_email.
 
 Usage (CLI):
     python -m app.gdrive_sync
@@ -10,52 +10,63 @@ Usage (CLI):
 """
 
 import argparse
+import io
+import json
 import logging
 import os
 
-import requests
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
-from .config import GDRIVE_FOLDER_ID, GOOGLE_API_KEY, PDFS_DIR
+from .config import GDRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON, PDFS_DIR
 
 log = logging.getLogger(__name__)
 
-DRIVE_LIST_URL = "https://www.googleapis.com/drive/v3/files"
-DRIVE_DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={key}"
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 
-def _list_files(folder_id: str, api_key: str) -> list[dict]:
+def _get_drive_service():
+    """Build an authenticated Google Drive v3 service from the env-var JSON."""
+    if not GOOGLE_SERVICE_ACCOUNT_JSON:
+        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is not set")
+
+    info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    return build("drive", "v3", credentials=creds)
+
+
+def _list_files(service, folder_id: str) -> list[dict]:
     """List all files in a Google Drive folder via the API."""
     files = []
     page_token = None
     while True:
-        params = {
-            "q": f"'{folder_id}' in parents and trashed = false",
-            "key": api_key,
-            "fields": "nextPageToken, files(id, name, size, mimeType)",
-            "pageSize": 1000,
-        }
-        if page_token:
-            params["pageToken"] = page_token
-
-        resp = requests.get(DRIVE_LIST_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        files.extend(data.get("files", []))
-        page_token = data.get("nextPageToken")
+        resp = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                fields="nextPageToken, files(id, name, size, mimeType)",
+                pageSize=1000,
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        files.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
         if not page_token:
             break
     return files
 
 
-def _download_file(file_id: str, api_key: str, dest_path: str) -> None:
+def _download_file(service, file_id: str, dest_path: str) -> None:
     """Download a single file from Google Drive."""
-    url = DRIVE_DOWNLOAD_URL.format(file_id=file_id, key=api_key)
-    resp = requests.get(url, timeout=120, stream=True)
-    resp.raise_for_status()
+    request = service.files().get_media(fileId=file_id)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     with open(dest_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
+        downloader = MediaIoBaseDownload(f, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
 
 
 def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict:
@@ -66,13 +77,16 @@ def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict
     os.makedirs(dest, exist_ok=True)
     summary = {"downloaded": 0, "skipped": 0, "errors": []}
 
-    if not GOOGLE_API_KEY:
-        summary["errors"].append("GOOGLE_API_KEY not configured")
+    try:
+        service = _get_drive_service()
+    except Exception as exc:
+        summary["errors"].append(str(exc))
+        log.error("Google Drive auth failed: %s", exc)
         return summary
 
     try:
         log.info("Listing files in Google Drive folder %s", folder_id)
-        files = _list_files(folder_id, GOOGLE_API_KEY)
+        files = _list_files(service, folder_id)
         log.info("Found %d files in Drive folder", len(files))
 
         for f in files:
@@ -89,7 +103,7 @@ def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict
                     continue
 
                 log.info("Downloading: %s (%s bytes)", fname, remote_size)
-                _download_file(file_id, GOOGLE_API_KEY, dst)
+                _download_file(service, file_id, dst)
                 summary["downloaded"] += 1
                 log.info("Saved: %s", fname)
 
