@@ -69,9 +69,51 @@ def _download_file(service, file_id: str, dest_path: str) -> None:
             _, done = downloader.next_chunk()
 
 
+FOLDER_MIME = "application/vnd.google-apps.folder"
+
+
+def _sync_recursive(service, folder_id: str, dest: str, summary: dict) -> None:
+    """Recursively walk a Drive folder and download all files."""
+    items = _list_files(service, folder_id)
+    log.info("Found %d items in folder %s", len(items), folder_id)
+
+    for item in items:
+        name = item["name"]
+        item_id = item["id"]
+        mime = item.get("mimeType", "")
+
+        if mime == FOLDER_MIME:
+            # Recurse into subfolder
+            subfolder_dest = os.path.join(dest, name)
+            os.makedirs(subfolder_dest, exist_ok=True)
+            log.info("Entering subfolder: %s", name)
+            _sync_recursive(service, item_id, subfolder_dest, summary)
+            continue
+
+        # It's a file — download it
+        remote_size = int(item.get("size", 0))
+        dst = os.path.join(dest, name)
+
+        try:
+            if os.path.isfile(dst) and os.path.getsize(dst) == remote_size:
+                summary["skipped"] += 1
+                log.debug("Skipped (unchanged): %s", name)
+                continue
+
+            log.info("Downloading: %s (%s bytes)", name, remote_size)
+            _download_file(service, item_id, dst)
+            summary["downloaded"] += 1
+            log.info("Saved: %s", dst)
+
+        except Exception as exc:
+            summary["errors"].append(f"{name}: {exc}")
+            log.exception("Failed to download %s", name)
+
+
 def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict:
     """Download every file from a Google Drive folder into *dest*.
 
+    Recursively walks subfolders, preserving the directory structure.
     Returns a summary dict with counts and any errors.
     """
     os.makedirs(dest, exist_ok=True)
@@ -86,31 +128,7 @@ def sync_folder(folder_id: str = GDRIVE_FOLDER_ID, dest: str = PDFS_DIR) -> dict
 
     try:
         log.info("Listing files in Google Drive folder %s", folder_id)
-        files = _list_files(service, folder_id)
-        log.info("Found %d files in Drive folder", len(files))
-
-        for f in files:
-            fname = f["name"]
-            file_id = f["id"]
-            remote_size = int(f.get("size", 0))
-            dst = os.path.join(dest, fname)
-
-            try:
-                # Skip if identical file already exists (same size)
-                if os.path.isfile(dst) and os.path.getsize(dst) == remote_size:
-                    summary["skipped"] += 1
-                    log.debug("Skipped (unchanged): %s", fname)
-                    continue
-
-                log.info("Downloading: %s (%s bytes)", fname, remote_size)
-                _download_file(service, file_id, dst)
-                summary["downloaded"] += 1
-                log.info("Saved: %s", fname)
-
-            except Exception as exc:
-                summary["errors"].append(f"{fname}: {exc}")
-                log.exception("Failed to download %s", fname)
-
+        _sync_recursive(service, folder_id, dest, summary)
     except Exception as exc:
         summary["errors"].append(str(exc))
         log.exception("Google Drive sync failed")
