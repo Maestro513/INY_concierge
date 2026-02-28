@@ -11,6 +11,7 @@ from .claude_client import ask_claude, load_plan_chunks, find_relevant_chunks, _
 from .zoho_client import search_contact_by_phone
 from .providers.service import search_providers
 from .sob_parser import extract_tier_copays, load_plan_text
+from .drug_cost_engine import compute_monthly_drug_costs
 
 import json
 import os
@@ -1038,7 +1039,16 @@ def cms_my_drugs(phone: str):
 
 
 def _my_drugs_impl(member: dict):
-    """Shared implementation for drug lookup."""
+    """
+    Shared implementation for drug lookup.
+
+    Runs a month-by-month simulation (SunFire-style) through:
+      Deductible → Initial Coverage → Catastrophic
+    to compute accurate monthly drug costs.
+
+    Handles both flat copay plans (e.g. Florida Blue $35/drug) and
+    coinsurance plans (e.g. UHC 16% × estimated full drug cost).
+    """
     plan_number = member.get("plan_number", "")
     if not plan_number:
         raise HTTPException(status_code=400, detail="Member has no plan number")
@@ -1062,8 +1072,17 @@ def _my_drugs_impl(member: dict):
     sob_insulin_cap = sob_tiers.get("insulin_cap", 35) if sob_tiers else 35
     sob_source = sob_tiers is not None
 
+    # Deductible info from SOB
+    drug_deductible = float(sob_tiers.get("deductible_amount", 0)) if sob_tiers else 0.0
+    deductible_tiers = sob_tiers.get("deductible_tiers", []) if sob_tiers else []
+
+    # Parse optional estimated full drug costs from member data
+    # Format in Zoho: "Lantus:65,Ventolin:65.48,Humalog:160"
+    raw_drug_costs = member.get("drug_costs", "") or ""
+    drug_cost_map = _parse_drug_cost_map(raw_drug_costs)
+
     drugs = []
-    monthly_total = 0.0
+    engine_drugs = []  # Input for the simulation engine
 
     for med in meds:
         name = med["name"]
@@ -1088,56 +1107,52 @@ def _my_drugs_impl(member: dict):
 
         # ── Resolve cost: SOB first, CMS fallback ──
         cost_type = "copay"
-        monthly_cost = 0.0
         best_option = f"{actual_days}-day"
         copay_retail = None
         copay_mail = None
-        cost_source = "cms"  # track which source we used
+        copay_amount = None       # flat $ for IC phase
+        coinsurance_pct = None    # percentage for IC phase
+        estimated_full_cost = None
+        cost_source = "cms"
+
+        # Look up estimated full drug cost from member data
+        estimated_full_cost = _lookup_estimated_full_cost(name, drug_cost_map)
 
         # Try SOB first (SOB governs over CMS)
         sob_cost = None
         if sob_tiers and tier is not None:
             sob_cost = _resolve_sob_cost(sob_tiers, tier, is_mail, actual_days)
         elif sob_tiers and not found_in_formulary:
-            # Drug not on formulary — use Tier 4 (Non-Preferred) from SOB as proxy
-            # Non-formulary drugs typically cost the non-preferred tier amount
             sob_cost = _resolve_sob_cost(sob_tiers, 4, is_mail, actual_days)
             if sob_cost:
-                tier = 4  # Assign non-preferred tier for display
-                found_in_formulary = True  # We have a cost to show
+                tier = 4
+                found_in_formulary = True
                 cost_source = "sob-nonformulary"
 
         if sob_cost and sob_cost.get("type") == "copay" and sob_cost.get("amount") is not None:
-            # SOB has a flat dollar copay — use it
+            # SOB has a flat dollar copay
             copay_retail = sob_cost["amount"]
+            copay_amount = float(sob_cost["amount"])
             cost_type = "copay"
             cost_source = cost_source if cost_source == "sob-nonformulary" else "sob"
-
             if is_mail:
                 copay_mail = copay_retail
-                fill_cost = float(copay_retail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
                 best_option = f"{actual_days}-day mail"
-            else:
-                fill_cost = float(copay_retail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
 
         elif sob_cost and sob_cost.get("type") == "coinsurance":
-            # SOB has percentage — use it, with cap if available
+            # SOB has percentage (e.g. 16% for UHC Tier 3)
             cost_type = "coinsurance"
+            coinsurance_pct = sob_cost.get("pct")
             cost_source = cost_source if cost_source == "sob-nonformulary" else "sob"
             copay_retail = sob_cost.get("raw", "N/A")
+
             if sob_cost.get("cap") is not None:
-                # "25% up to $35" → use the cap as the cost
-                monthly_cost = float(sob_cost["cap"]) / (actual_days / 30.0)
-            else:
-                # Pure percentage without cap — can't calculate exact dollar amount
-                monthly_cost = 0.0
+                # "25% up to $35" — cap acts as max copay
+                copay_amount = float(sob_cost["cap"])
+                cost_type = "copay"  # effectively a capped copay
 
         elif found_in_formulary and result:
-            # SOB not available or no data for this tier — fall back to CMS
+            # Fall back to CMS
             cost_source = "cms"
             copay_retail = result.get("copay_preferred") or result.get("copay_30day_preferred")
             copay_mail = result.get("copay_mail") or result.get("copay_90day_mail")
@@ -1146,30 +1161,56 @@ def _my_drugs_impl(member: dict):
             cost_max = result.get("cost_max_30day")
 
             if is_mail and copay_mail is not None and isinstance(copay_mail, (int, float)):
-                fill_cost = float(copay_mail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
+                copay_amount = float(copay_mail)
                 cost_type = cost_type_mail
                 best_option = f"{actual_days}-day mail"
             elif cost_type_retail == "copay" and isinstance(copay_retail, (int, float)):
-                fill_cost = float(copay_retail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
+                copay_amount = float(copay_retail)
                 cost_type = cost_type_retail
             elif cost_type_retail == "coinsurance":
                 cost_type = "coinsurance"
+                pct_str = str(copay_retail or "")
+                pct_match = re.match(r'([\d.]+)%?', pct_str)
+                if pct_match:
+                    coinsurance_pct = float(pct_match.group(1))
                 if cost_max is not None and cost_max > 0:
-                    monthly_cost = float(cost_max) / (actual_days / 30.0)
-                else:
-                    monthly_cost = 0.0
+                    copay_amount = float(cost_max)
 
-        # IRA insulin cap: $35/month (or SOB insulin_cap) is the MAX, not a minimum
-        if is_insulin and monthly_cost > float(sob_insulin_cap):
-            monthly_cost = float(sob_insulin_cap)
+        # Compute the monthly IC (Initial Coverage) cost
+        monthly_cost = _compute_ic_monthly_cost(
+            cost_type=cost_type,
+            copay_amount=copay_amount,
+            coinsurance_pct=coinsurance_pct,
+            estimated_full_cost=estimated_full_cost,
+            days_supply=actual_days,
+            is_insulin=is_insulin,
+            insulin_cap=float(sob_insulin_cap),
+        )
+
+        # Determine deductible applicability
+        ded_applies = result.get("deductible_applies", False) if result and "error" not in result else False
+        if tier is not None and tier in deductible_tiers:
+            ded_applies = True
+
+        # Build engine input for simulation
+        engine_drugs.append({
+            "name": name,
+            "tier": tier,
+            "cost_type": cost_type,
+            "copay_amount": copay_amount,
+            "coinsurance_pct": coinsurance_pct,
+            "estimated_full_cost": estimated_full_cost,
+            "is_insulin": is_insulin,
+            "deductible_applies": ded_applies,
+        })
 
         # Build display string
         if found_in_formulary or cost_source == "sob-nonformulary":
-            if cost_type == "coinsurance" and not is_insulin and sob_cost and sob_cost.get("cap") is None:
+            if cost_type == "coinsurance" and monthly_cost > 0:
+                # We computed the coinsurance dollar amount — show it
+                copay_display = "$" + str(int(round(monthly_cost)))
+            elif cost_type == "coinsurance" and monthly_cost == 0:
+                # No estimated full cost — show percentage
                 copay_display = str(copay_retail or "N/A")
             else:
                 copay_display = "$" + str(int(round(monthly_cost)))
@@ -1184,6 +1225,8 @@ def _my_drugs_impl(member: dict):
                 "copay_30day": copay_retail,
                 "copay_90day_mail": copay_mail,
                 "cost_type": cost_type,
+                "coinsurance_pct": coinsurance_pct,
+                "estimated_full_cost": estimated_full_cost,
                 "is_insulin": is_insulin,
                 "monthly_cost": round(monthly_cost, 2),
                 "best_option": best_option,
@@ -1191,11 +1234,10 @@ def _my_drugs_impl(member: dict):
                 "prior_auth": result.get("prior_auth", False) if result and "error" not in result else False,
                 "step_therapy": result.get("step_therapy", False) if result and "error" not in result else False,
                 "quantity_limit": result.get("quantity_limit", False) if result and "error" not in result else False,
-                "deductible_applies": result.get("deductible_applies", False) if result and "error" not in result else False,
+                "deductible_applies": ded_applies,
                 "found": True,
                 "cost_source": cost_source,
             })
-            monthly_total += monthly_cost
         else:
             drugs.append({
                 "drug_name": name,
@@ -1211,14 +1253,118 @@ def _my_drugs_impl(member: dict):
                 "cost_source": "none",
             })
 
+    # ── Run month-by-month simulation ──
+    # This models Deductible → Initial Coverage → Catastrophic across 12 months
+    simulation = compute_monthly_drug_costs(
+        drugs=engine_drugs,
+        drug_deductible=drug_deductible,
+        deductible_tiers=deductible_tiers,
+        insulin_cap=float(sob_insulin_cap),
+    )
+
+    # Use current month from simulation (accounts for deductible phase)
+    import datetime
+    current_month = datetime.date.today().month
+    current_month_data = simulation["monthly_breakdown"][current_month - 1] if simulation["monthly_breakdown"] else None
+    sim_monthly_total = current_month_data["total"] if current_month_data else 0.0
+
+    # Update per-drug monthly_cost with simulation-aware values
+    if current_month_data:
+        for i, drug_entry in enumerate(drugs):
+            if drug_entry.get("found") and i < len(current_month_data["drugs"]):
+                sim_drug = current_month_data["drugs"][i]
+                drug_entry["monthly_cost"] = sim_drug["member_cost"]
+                drug_entry["coverage_phase"] = sim_drug["phase"]
+                # Update display
+                if sim_drug["member_cost"] > 0:
+                    drug_entry["copay_display"] = "$" + str(int(round(sim_drug["member_cost"])))
+                elif drug_entry["cost_type"] == "coinsurance" and drug_entry.get("coinsurance_pct"):
+                    drug_entry["copay_display"] = f"{drug_entry['coinsurance_pct']:.0f}%"
+
+    # Calculate totals from simulation
+    monthly_total = sim_monthly_total
+
     return {
         "plan_number": plan_number,
         "medications": drugs,
-        "monthly_total": monthly_total,
-        "monthly_display": "$" + str(int(monthly_total)),
+        "monthly_total": round(monthly_total, 2),
+        "monthly_display": "$" + str(int(round(monthly_total))),
         "has_medications": True,
         "cost_source": "sob" if sob_source else "cms",
+        "current_month": current_month,
+        "drug_deductible": drug_deductible,
+        "deductible_tiers": deductible_tiers,
+        "simulation": {
+            "annual_total": simulation["annual_total"],
+            "average_monthly": simulation["average_monthly"],
+            "monthly_breakdown": simulation["monthly_breakdown"],
+        },
     }
+
+
+def _parse_drug_cost_map(raw: str) -> dict:
+    """
+    Parse estimated full drug costs from a string.
+    Format: "Lantus:65,Ventolin:65.48,Humalog:160"
+    Returns dict mapping lowercase drug name fragments to float costs.
+    """
+    cost_map = {}
+    if not raw or not raw.strip():
+        return cost_map
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if ":" not in pair:
+            continue
+        name_part, cost_part = pair.split(":", 1)
+        try:
+            cost_map[name_part.strip().lower()] = float(cost_part.strip())
+        except ValueError:
+            continue
+    return cost_map
+
+
+def _lookup_estimated_full_cost(drug_name: str, cost_map: dict) -> float | None:
+    """
+    Look up estimated full drug cost from the cost map.
+    Matches on partial name (e.g. "lantus" matches "Lantus SOLN 100UNIT/ML").
+    """
+    lower_name = drug_name.lower()
+    for key, cost in cost_map.items():
+        if key in lower_name or lower_name in key:
+            return cost
+    return None
+
+
+def _compute_ic_monthly_cost(
+    cost_type: str,
+    copay_amount: float | None,
+    coinsurance_pct: float | None,
+    estimated_full_cost: float | None,
+    days_supply: int,
+    is_insulin: bool,
+    insulin_cap: float,
+) -> float:
+    """
+    Compute the monthly cost in the Initial Coverage phase.
+
+    For flat copay: monthly = copay / (days_supply / 30)
+    For coinsurance: monthly = (pct/100 × estimated_full_cost) / (days_supply / 30)
+    """
+    months_per_fill = days_supply / 30.0
+    monthly_cost = 0.0
+
+    if cost_type == "copay" and copay_amount is not None:
+        monthly_cost = float(copay_amount) / months_per_fill
+    elif cost_type == "coinsurance" and coinsurance_pct is not None:
+        if estimated_full_cost is not None and estimated_full_cost > 0:
+            fill_cost = (coinsurance_pct / 100.0) * estimated_full_cost
+            monthly_cost = fill_cost / months_per_fill
+
+    # IRA insulin cap
+    if is_insulin and monthly_cost > insulin_cap:
+        monthly_cost = insulin_cap
+
+    return round(monthly_cost, 2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
