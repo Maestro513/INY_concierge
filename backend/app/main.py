@@ -160,7 +160,10 @@ def get_sms():
 
 # ── JWT Auth Dependency ──────────────────────────────────────────────────────
 def get_current_user(request: Request) -> dict:
-    """FastAPI dependency — validates Bearer token, returns JWT payload."""
+    """FastAPI dependency — validates Bearer token, returns JWT payload.
+    Skipped entirely in development so you don't need to auth while editing the app."""
+    if APP_ENV == "development":
+        return {"sub": "dev", "type": "access"}
     return require_auth(request, jwt_secret=JWT_SECRET)
 
 
