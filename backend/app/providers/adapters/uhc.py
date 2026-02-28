@@ -12,7 +12,7 @@ Single call:
 Returns PractitionerRole + Practitioner + Location all in one bundle.
 
 Auth: OAuth2 client credentials → Bearer token.
-Base: https://flex.optum.com/fhirpublic
+Base: https://flex.optum.com/fhirpublic/{payer}
 Token: https://flex.optum.com/authz/{payer}/oauth/token
 """
 
@@ -25,11 +25,11 @@ from .base import BaseAdapter, ProviderResult, resolve_specialty
 logger = logging.getLogger(__name__)
 
 # Config from env
-UHC_PAYER_ID = os.getenv("UHC_PAYER_ID", "uhc")
+UHC_PAYER_ID = os.getenv("UHC_PAYER_ID", "hsid")
 UHC_CLIENT_ID = os.getenv("UHC_CLIENT_ID", "")
 UHC_CLIENT_SECRET = os.getenv("UHC_CLIENT_SECRET", "")
 
-UHC_BASE = os.getenv("UHC_BASE_URL", "https://flex.optum.com/fhirpublic")
+UHC_BASE = os.getenv("UHC_BASE_URL", f"https://flex.optum.com/fhirpublic/{UHC_PAYER_ID}")
 UHC_TOKEN_URL = f"https://flex.optum.com/authz/{UHC_PAYER_ID}/oauth/token"
 
 HEADERS = {"Accept": "application/fhir+json"}
@@ -49,6 +49,7 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
         raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
 
     print(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
+    print(f"[UHC] client_id length={len(UHC_CLIENT_ID)}, secret length={len(UHC_CLIENT_SECRET)}")
     resp = await client.post(
         UHC_TOKEN_URL,
         data={
@@ -59,6 +60,8 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15.0,
     )
+    if resp.status_code != 200:
+        print(f"[UHC] Token error {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
     token_data = resp.json()
 
