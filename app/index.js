@@ -79,19 +79,15 @@ export default function PhoneScreen() {
       });
       const data = await res.json();
 
-      if (data.found) {
-        // Navigate with session_id — phone stays server-side
+      if (res.status === 429) {
+        setError("Too many attempts. Please wait a few minutes and try again.");
+      } else if (data.found) {
+        // OTP sent — navigate to verification screen
         router.push({
-          pathname: '/home',
+          pathname: '/otp',
           params: {
+            phone: rawDigits,
             firstName: data.first_name,
-            lastName: data.last_name,
-            planName: data.plan_name,
-            planNumber: data.plan_number,
-            agent: data.agent,
-            medicareNumber: data.medicare_number || '',
-            sessionId: data.session_id || '',
-            zipCode: data.zip_code || '',
           },
         });
       } else {

@@ -2,7 +2,7 @@
 InsuranceNYou Backend API
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,6 +11,9 @@ from .claude_client import ask_claude, load_plan_chunks, find_relevant_chunks, _
 from .zoho_client import search_contact_by_phone
 from .providers.service import search_providers
 from .sob_parser import extract_tier_copays, load_plan_text
+from .drug_cost_engine import compute_monthly_drug_costs
+from .auth import generate_otp, verify_otp, create_tokens, decode_token, require_auth
+from .sms_provider import create_sms_provider
 
 import json
 import os
@@ -21,7 +24,11 @@ import uuid
 import anthropic
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL, ADMIN_SECRET, GDRIVE_FOLDER_ID
+from .config import (
+    ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL,
+    ADMIN_SECRET, GDRIVE_FOLDER_ID, JWT_SECRET, JWT_ACCESS_TTL, JWT_REFRESH_TTL,
+    OTP_TTL, OTP_MAX_ATTEMPTS, OTP_MAX_SENDS, OTP_SEND_WINDOW,
+)
 from .user_data import UserDataDB
 
 # ── Structured logging ───────────────────────────────────────────────────────
@@ -32,7 +39,13 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="InsuranceNYou API", version="0.6.0")
+app = FastAPI(title="InsuranceNYou API", version="0.7.0")
+
+# ── JWT Secret validation ────────────────────────────────────────────────────
+if APP_ENV == "production" and not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
+if not JWT_SECRET:
+    log.warning("JWT_SECRET not set — using insecure default for development only")
 
 # ── CORS — env-based ─────────────────────────────────────────────────────────
 _default_prod_origins = [
@@ -131,6 +144,27 @@ def _session_phone(session_id: str) -> str:
     # Touch timestamp to extend TTL on activity
     session["ts"] = time.time()
     return session["phone"]
+
+
+# ── SMS Provider — lazy init ─────────────────────────────────────────────────
+_sms = None
+
+
+def get_sms():
+    global _sms
+    if _sms is None:
+        _sms = create_sms_provider()
+        log.info(f"SMS provider loaded: {type(_sms).__name__}")
+    return _sms
+
+
+# ── JWT Auth Dependency ──────────────────────────────────────────────────────
+def get_current_user(request: Request) -> dict:
+    """FastAPI dependency — validates Bearer token, returns JWT payload.
+    Skipped entirely in development so you don't need to auth while editing the app."""
+    if APP_ENV == "development":
+        return {"sub": "dev", "type": "access"}
+    return require_auth(request, jwt_secret=JWT_SECRET)
 
 
 # CMS Lookup — lazy init so server starts even if DB missing
@@ -275,6 +309,16 @@ class DrugLookupRequest(BaseModel):
     drug_name: str
 
 
+# --- OTP / Auth Models ---
+
+class OTPVerifyRequest(BaseModel):
+    phone: str
+    code: str
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 # --- Reminder / Usage Models ---
 
 class ReminderCreate(BaseModel):
@@ -326,9 +370,12 @@ def metrics():
     }
 
 
-@app.post("/auth/lookup", response_model=LookupResponse)
+@app.post("/auth/lookup")
 def lookup_member(req: LookupRequest):
-    """Look up a member by phone number in Zoho CRM."""
+    """
+    Step 1: Look up member by phone, send OTP.
+    Returns only {found, first_name} — no sensitive data until OTP verified.
+    """
     try:
         member = search_contact_by_phone(req.phone)
     except Exception as e:
@@ -336,28 +383,117 @@ def lookup_member(req: LookupRequest):
         raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
 
     if member is None:
-        return LookupResponse(found=False)
+        return {"found": False}
 
-    # Create session so frontend doesn't need to pass phone around
-    sid = create_session(req.phone, member)
+    # Store member data in a pending session (will be promoted after OTP verify)
+    create_session(req.phone, member)
 
-    return LookupResponse(
-        found=True,
-        first_name=member["first_name"],
-        last_name=member["last_name"],
-        plan_name=member["plan_name"],
-        plan_number=member["plan_number"],
-        agent=member["agent"] or "",
-        medicare_number=member.get("medicare_number", "") or "",
-        phone=member["phone"] or member["mobile"],
-        medications=member.get("medications", "") or "",
-        zip_code=member.get("zip_code", "") or "",
-        session_id=sid,
+    # Generate + send OTP
+    code = generate_otp(
+        req.phone,
+        otp_ttl=OTP_TTL,
+        max_sends=OTP_MAX_SENDS,
+        send_window=OTP_SEND_WINDOW,
     )
+    if code is None:
+        raise HTTPException(status_code=429, detail="Too many verification attempts. Please wait a few minutes.")
+
+    sms = get_sms()
+    if not sms.send_otp(req.phone, code):
+        raise HTTPException(status_code=500, detail="Unable to send verification code. Please try again.")
+
+    return {
+        "found": True,
+        "first_name": member["first_name"],
+        "otp_sent": True,
+    }
+
+
+@app.post("/auth/verify-otp")
+def verify_otp_endpoint(req: OTPVerifyRequest):
+    """
+    Step 2: Verify OTP → return JWT tokens + full member data.
+    """
+    if not verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS):
+        raise HTTPException(status_code=401, detail="Invalid or expired code. Please try again.")
+
+    # Find the pending session with this phone's member data
+    member_data = None
+    for sid, entry in _sessions.items():
+        if entry["phone"] == req.phone:
+            member_data = entry["data"]
+            break
+
+    if not member_data:
+        # Session expired between lookup and verify — re-fetch from Zoho
+        try:
+            member_data = search_contact_by_phone(req.phone)
+        except Exception as e:
+            log.error(f"Zoho re-fetch failed after OTP verify: {e}")
+            raise HTTPException(status_code=500, detail="Verification succeeded but couldn't load your account. Please try again.")
+        if not member_data:
+            raise HTTPException(status_code=404, detail="Account not found.")
+
+    # Create a real session for session-based endpoints
+    sid = create_session(req.phone, member_data)
+
+    # Generate JWT tokens
+    tokens = create_tokens(
+        req.phone, member_data,
+        jwt_secret=JWT_SECRET,
+        access_ttl=JWT_ACCESS_TTL,
+        refresh_ttl=JWT_REFRESH_TTL,
+    )
+
+    log.info(f"OTP verified, JWT issued for phone ending {req.phone[-4:]}")
+
+    return {
+        **tokens,
+        "first_name": member_data["first_name"],
+        "last_name": member_data["last_name"],
+        "plan_name": member_data["plan_name"],
+        "plan_number": member_data["plan_number"],
+        "agent": member_data.get("agent", "") or "",
+        "medicare_number": member_data.get("medicare_number", "") or "",
+        "medications": member_data.get("medications", "") or "",
+        "zip_code": member_data.get("zip_code", "") or "",
+        "session_id": sid,
+    }
+
+
+@app.post("/auth/refresh")
+def refresh_token_endpoint(req: RefreshRequest):
+    """Exchange a refresh token for a new access token."""
+    payload = decode_token(req.refresh_token, jwt_secret=JWT_SECRET, expected_type="refresh")
+    phone = payload["sub"]
+
+    # Find member data from an active session
+    member_data = None
+    for entry in _sessions.values():
+        if entry["phone"] == phone:
+            member_data = entry["data"]
+            break
+
+    if not member_data:
+        # Session gone — re-fetch from Zoho
+        try:
+            member_data = search_contact_by_phone(phone)
+        except Exception:
+            raise HTTPException(status_code=401, detail="Unable to refresh. Please log in again.")
+        if not member_data:
+            raise HTTPException(status_code=401, detail="Account not found. Please log in again.")
+
+    tokens = create_tokens(
+        phone, member_data,
+        jwt_secret=JWT_SECRET,
+        access_ttl=JWT_ACCESS_TTL,
+        refresh_ttl=JWT_REFRESH_TTL,
+    )
+    return tokens
 
 
 @app.post("/ask", response_model=AskResponse)
-def ask_question(req: AskRequest):
+def ask_question(req: AskRequest, _user: dict = Depends(get_current_user)):
     """Ask a question about a member's plan benefits."""
     plan_id = normalize_plan_id(req.plan_number)
     result = ask_claude(question=req.question, plan_number=plan_id)
@@ -365,7 +501,7 @@ def ask_question(req: AskRequest):
 
 
 @app.post("/providers/search")
-async def provider_search(req: ProviderSearchRequest):
+async def provider_search(req: ProviderSearchRequest, _user: dict = Depends(get_current_user)):
     """
     Search for in-network providers by specialty near a zip code.
     Returns providers enriched with Google ratings and reviews.
@@ -386,7 +522,7 @@ async def provider_search(req: ProviderSearchRequest):
 
 
 @app.post("/pharmacies/search")
-async def pharmacy_search(req: PharmacySearchRequest):
+async def pharmacy_search(req: PharmacySearchRequest, _user: dict = Depends(get_current_user)):
     """
     Search for pharmacies near a zip code.
     Returns pharmacies sorted by: preferred first, then in-network, then distance.
@@ -657,7 +793,7 @@ Return ONLY the JSON. No markdown fences, no explanation."""
 
 
 @app.post("/sob/summary")
-def get_sob_summary(req: SOBRequest):
+def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     """
     Get structured SOB benefits for a plan.
     Uses Claude to parse raw SOB text into medical/drug categories
@@ -780,7 +916,7 @@ def _find_sob_pdf(plan_number: str) -> str | None:
 
 @app.get("/sob/pdf/{plan_number}")
 def get_sob_pdf(plan_number: str):
-    """Serve the actual SOB PDF file for download."""
+    """Serve the actual SOB PDF file for download (public — CMS documents)."""
     path = _find_sob_pdf(plan_number)
     if not path:
         raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
@@ -884,7 +1020,7 @@ def _otc_from_sob_text(plan_number: str) -> dict | None:
 # --- CMS Benefits Endpoints ---
 
 @app.get("/cms/benefits/{plan_number}")
-def cms_benefits(plan_number: str):
+def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
     """Full plan benefits from CMS data."""
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
@@ -903,56 +1039,56 @@ def cms_benefits(plan_number: str):
 
 
 @app.get("/cms/benefits/{plan_number}/medical")
-def cms_medical(plan_number: str):
+def cms_medical(plan_number: str, _user: dict = Depends(get_current_user)):
     """PCP, specialist, ER, urgent care copays."""
     cms = get_cms()
     return cms.get_medical_copays(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/dental")
-def cms_dental(plan_number: str):
+def cms_dental(plan_number: str, _user: dict = Depends(get_current_user)):
     """Dental preventive + comprehensive benefits."""
     cms = get_cms()
     return cms.get_dental_benefits(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/otc")
-def cms_otc(plan_number: str):
+def cms_otc(plan_number: str, _user: dict = Depends(get_current_user)):
     """OTC allowance amount and delivery method."""
     cms = get_cms()
     return cms.get_otc_allowance(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/vision")
-def cms_vision(plan_number: str):
+def cms_vision(plan_number: str, _user: dict = Depends(get_current_user)):
     """Eye exam + eyewear vision benefits."""
     cms = get_cms()
     return cms.get_vision_benefits(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/hearing")
-def cms_hearing(plan_number: str):
+def cms_hearing(plan_number: str, _user: dict = Depends(get_current_user)):
     """Hearing exam + hearing aid benefits."""
     cms = get_cms()
     return cms.get_hearing_benefits(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/flex")
-def cms_flex(plan_number: str):
+def cms_flex(plan_number: str, _user: dict = Depends(get_current_user)):
     """Flex card / SSBCI supplemental benefits."""
     cms = get_cms()
     return cms.get_flex_ssbci(plan_number)
 
 
 @app.get("/cms/benefits/{plan_number}/giveback")
-def cms_giveback(plan_number: str):
+def cms_giveback(plan_number: str, _user: dict = Depends(get_current_user)):
     """Part B premium giveback amount."""
     cms = get_cms()
     return cms.get_part_b_giveback(plan_number)
 
 
 @app.post("/cms/drug")
-def cms_drug_lookup(req: DrugLookupRequest):
+def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_user)):
     """Look up drug by name — returns tier, copay, restrictions."""
     cms = get_cms()
     result = cms.get_drug_by_name(req.plan_number, req.drug_name)
@@ -962,8 +1098,8 @@ def cms_drug_lookup(req: DrugLookupRequest):
 
 
 @app.get("/cms/drug/{plan_number}/{drug_name}")
-def cms_drug_lookup_get(plan_number: str, drug_name: str):
-    """GET version for easy browser testing. Example: /cms/drug/H1036-077/Eliquis"""
+def cms_drug_lookup_get(plan_number: str, drug_name: str, _user: dict = Depends(get_current_user)):
+    """GET version. Example: /cms/drug/H1036-077/Eliquis"""
     cms = get_cms()
     result = cms.get_drug_by_name(plan_number, drug_name)
     if "error" in result:
@@ -1009,7 +1145,7 @@ def _resolve_sob_cost(tier_copays: dict, tier: int, is_mail: bool, days_supply: 
 
 
 @app.get("/cms/my-drugs-session/{session_id}")
-def cms_my_drugs_session(session_id: str):
+def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user)):
     """Session-based drug lookup — no phone in URL."""
     session = get_session(session_id)
     if not session:
@@ -1018,7 +1154,7 @@ def cms_my_drugs_session(session_id: str):
 
 
 @app.get("/cms/my-drugs/{phone}")
-def cms_my_drugs(phone: str):
+def cms_my_drugs(phone: str, _user: dict = Depends(get_current_user)):
     """
     Pull member's medications from Zoho, look up each in CMS formulary.
     SOB (Summary of Benefits) governs over CMS for tier copays.
@@ -1038,7 +1174,16 @@ def cms_my_drugs(phone: str):
 
 
 def _my_drugs_impl(member: dict):
-    """Shared implementation for drug lookup."""
+    """
+    Shared implementation for drug lookup.
+
+    Runs a month-by-month simulation (SunFire-style) through:
+      Deductible → Initial Coverage → Catastrophic
+    to compute accurate monthly drug costs.
+
+    Handles both flat copay plans (e.g. Florida Blue $35/drug) and
+    coinsurance plans (e.g. UHC 16% × estimated full drug cost).
+    """
     plan_number = member.get("plan_number", "")
     if not plan_number:
         raise HTTPException(status_code=400, detail="Member has no plan number")
@@ -1062,8 +1207,17 @@ def _my_drugs_impl(member: dict):
     sob_insulin_cap = sob_tiers.get("insulin_cap", 35) if sob_tiers else 35
     sob_source = sob_tiers is not None
 
+    # Deductible info from SOB
+    drug_deductible = float(sob_tiers.get("deductible_amount", 0)) if sob_tiers else 0.0
+    deductible_tiers = sob_tiers.get("deductible_tiers", []) if sob_tiers else []
+
+    # Parse optional estimated full drug costs from member data
+    # Format in Zoho: "Lantus:65,Ventolin:65.48,Humalog:160"
+    raw_drug_costs = member.get("drug_costs", "") or ""
+    drug_cost_map = _parse_drug_cost_map(raw_drug_costs)
+
     drugs = []
-    monthly_total = 0.0
+    engine_drugs = []  # Input for the simulation engine
 
     for med in meds:
         name = med["name"]
@@ -1088,56 +1242,52 @@ def _my_drugs_impl(member: dict):
 
         # ── Resolve cost: SOB first, CMS fallback ──
         cost_type = "copay"
-        monthly_cost = 0.0
         best_option = f"{actual_days}-day"
         copay_retail = None
         copay_mail = None
-        cost_source = "cms"  # track which source we used
+        copay_amount = None       # flat $ for IC phase
+        coinsurance_pct = None    # percentage for IC phase
+        estimated_full_cost = None
+        cost_source = "cms"
+
+        # Look up estimated full drug cost from member data
+        estimated_full_cost = _lookup_estimated_full_cost(name, drug_cost_map)
 
         # Try SOB first (SOB governs over CMS)
         sob_cost = None
         if sob_tiers and tier is not None:
             sob_cost = _resolve_sob_cost(sob_tiers, tier, is_mail, actual_days)
         elif sob_tiers and not found_in_formulary:
-            # Drug not on formulary — use Tier 4 (Non-Preferred) from SOB as proxy
-            # Non-formulary drugs typically cost the non-preferred tier amount
             sob_cost = _resolve_sob_cost(sob_tiers, 4, is_mail, actual_days)
             if sob_cost:
-                tier = 4  # Assign non-preferred tier for display
-                found_in_formulary = True  # We have a cost to show
+                tier = 4
+                found_in_formulary = True
                 cost_source = "sob-nonformulary"
 
         if sob_cost and sob_cost.get("type") == "copay" and sob_cost.get("amount") is not None:
-            # SOB has a flat dollar copay — use it
+            # SOB has a flat dollar copay
             copay_retail = sob_cost["amount"]
+            copay_amount = float(sob_cost["amount"])
             cost_type = "copay"
             cost_source = cost_source if cost_source == "sob-nonformulary" else "sob"
-
             if is_mail:
                 copay_mail = copay_retail
-                fill_cost = float(copay_retail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
                 best_option = f"{actual_days}-day mail"
-            else:
-                fill_cost = float(copay_retail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
 
         elif sob_cost and sob_cost.get("type") == "coinsurance":
-            # SOB has percentage — use it, with cap if available
+            # SOB has percentage (e.g. 16% for UHC Tier 3)
             cost_type = "coinsurance"
+            coinsurance_pct = sob_cost.get("pct")
             cost_source = cost_source if cost_source == "sob-nonformulary" else "sob"
             copay_retail = sob_cost.get("raw", "N/A")
+
             if sob_cost.get("cap") is not None:
-                # "25% up to $35" → use the cap as the cost
-                monthly_cost = float(sob_cost["cap"]) / (actual_days / 30.0)
-            else:
-                # Pure percentage without cap — can't calculate exact dollar amount
-                monthly_cost = 0.0
+                # "25% up to $35" — cap acts as max copay
+                copay_amount = float(sob_cost["cap"])
+                cost_type = "copay"  # effectively a capped copay
 
         elif found_in_formulary and result:
-            # SOB not available or no data for this tier — fall back to CMS
+            # Fall back to CMS
             cost_source = "cms"
             copay_retail = result.get("copay_preferred") or result.get("copay_30day_preferred")
             copay_mail = result.get("copay_mail") or result.get("copay_90day_mail")
@@ -1146,30 +1296,56 @@ def _my_drugs_impl(member: dict):
             cost_max = result.get("cost_max_30day")
 
             if is_mail and copay_mail is not None and isinstance(copay_mail, (int, float)):
-                fill_cost = float(copay_mail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
+                copay_amount = float(copay_mail)
                 cost_type = cost_type_mail
                 best_option = f"{actual_days}-day mail"
             elif cost_type_retail == "copay" and isinstance(copay_retail, (int, float)):
-                fill_cost = float(copay_retail)
-                months_per_fill = actual_days / 30.0
-                monthly_cost = fill_cost / months_per_fill
+                copay_amount = float(copay_retail)
                 cost_type = cost_type_retail
             elif cost_type_retail == "coinsurance":
                 cost_type = "coinsurance"
+                pct_str = str(copay_retail or "")
+                pct_match = re.match(r'([\d.]+)%?', pct_str)
+                if pct_match:
+                    coinsurance_pct = float(pct_match.group(1))
                 if cost_max is not None and cost_max > 0:
-                    monthly_cost = float(cost_max) / (actual_days / 30.0)
-                else:
-                    monthly_cost = 0.0
+                    copay_amount = float(cost_max)
 
-        # IRA insulin cap: $35/month (or SOB insulin_cap) is the MAX, not a minimum
-        if is_insulin and monthly_cost > float(sob_insulin_cap):
-            monthly_cost = float(sob_insulin_cap)
+        # Compute the monthly IC (Initial Coverage) cost
+        monthly_cost = _compute_ic_monthly_cost(
+            cost_type=cost_type,
+            copay_amount=copay_amount,
+            coinsurance_pct=coinsurance_pct,
+            estimated_full_cost=estimated_full_cost,
+            days_supply=actual_days,
+            is_insulin=is_insulin,
+            insulin_cap=float(sob_insulin_cap),
+        )
+
+        # Determine deductible applicability
+        ded_applies = result.get("deductible_applies", False) if result and "error" not in result else False
+        if tier is not None and tier in deductible_tiers:
+            ded_applies = True
+
+        # Build engine input for simulation
+        engine_drugs.append({
+            "name": name,
+            "tier": tier,
+            "cost_type": cost_type,
+            "copay_amount": copay_amount,
+            "coinsurance_pct": coinsurance_pct,
+            "estimated_full_cost": estimated_full_cost,
+            "is_insulin": is_insulin,
+            "deductible_applies": ded_applies,
+        })
 
         # Build display string
         if found_in_formulary or cost_source == "sob-nonformulary":
-            if cost_type == "coinsurance" and not is_insulin and sob_cost and sob_cost.get("cap") is None:
+            if cost_type == "coinsurance" and monthly_cost > 0:
+                # We computed the coinsurance dollar amount — show it
+                copay_display = "$" + str(int(round(monthly_cost)))
+            elif cost_type == "coinsurance" and monthly_cost == 0:
+                # No estimated full cost — show percentage
                 copay_display = str(copay_retail or "N/A")
             else:
                 copay_display = "$" + str(int(round(monthly_cost)))
@@ -1184,6 +1360,8 @@ def _my_drugs_impl(member: dict):
                 "copay_30day": copay_retail,
                 "copay_90day_mail": copay_mail,
                 "cost_type": cost_type,
+                "coinsurance_pct": coinsurance_pct,
+                "estimated_full_cost": estimated_full_cost,
                 "is_insulin": is_insulin,
                 "monthly_cost": round(monthly_cost, 2),
                 "best_option": best_option,
@@ -1191,11 +1369,10 @@ def _my_drugs_impl(member: dict):
                 "prior_auth": result.get("prior_auth", False) if result and "error" not in result else False,
                 "step_therapy": result.get("step_therapy", False) if result and "error" not in result else False,
                 "quantity_limit": result.get("quantity_limit", False) if result and "error" not in result else False,
-                "deductible_applies": result.get("deductible_applies", False) if result and "error" not in result else False,
+                "deductible_applies": ded_applies,
                 "found": True,
                 "cost_source": cost_source,
             })
-            monthly_total += monthly_cost
         else:
             drugs.append({
                 "drug_name": name,
@@ -1211,14 +1388,120 @@ def _my_drugs_impl(member: dict):
                 "cost_source": "none",
             })
 
+    # ── Run month-by-month simulation ──
+    # This models Deductible → Initial Coverage → Catastrophic across 12 months
+    simulation = compute_monthly_drug_costs(
+        drugs=engine_drugs,
+        drug_deductible=drug_deductible,
+        deductible_tiers=deductible_tiers,
+        insulin_cap=float(sob_insulin_cap),
+    )
+
+    # Use current month from simulation (accounts for deductible phase)
+    import datetime
+    current_month = datetime.date.today().month
+    current_month_data = simulation["monthly_breakdown"][current_month - 1] if simulation["monthly_breakdown"] else None
+    sim_monthly_total = current_month_data["total"] if current_month_data else 0.0
+
+    # Update per-drug monthly_cost with simulation-aware values
+    if current_month_data:
+        for i, drug_entry in enumerate(drugs):
+            if drug_entry.get("found") and i < len(current_month_data["drugs"]):
+                sim_drug = current_month_data["drugs"][i]
+                drug_entry["monthly_cost"] = sim_drug["member_cost"]
+                drug_entry["coverage_phase"] = sim_drug["phase"]
+                # Update display
+                if sim_drug["member_cost"] > 0:
+                    drug_entry["copay_display"] = "$" + str(int(round(sim_drug["member_cost"])))
+                elif drug_entry["cost_type"] == "coinsurance" and drug_entry.get("coinsurance_pct"):
+                    drug_entry["copay_display"] = f"{drug_entry['coinsurance_pct']:.0f}%"
+
+    # Calculate totals from simulation
+    monthly_total = sim_monthly_total
+
     return {
         "plan_number": plan_number,
         "medications": drugs,
-        "monthly_total": monthly_total,
-        "monthly_display": "$" + str(int(monthly_total)),
+        "monthly_total": round(monthly_total, 2),
+        "monthly_display": "$" + str(int(round(monthly_total))),
+        "estimated_annual_drug_cost": simulation["annual_total"],
+        "annual_display": "$" + str(int(round(simulation["annual_total"]))),
         "has_medications": True,
         "cost_source": "sob" if sob_source else "cms",
+        "current_month": current_month,
+        "drug_deductible": drug_deductible,
+        "deductible_tiers": deductible_tiers,
+        "simulation": {
+            "annual_total": simulation["annual_total"],
+            "average_monthly": simulation["average_monthly"],
+            "monthly_breakdown": simulation["monthly_breakdown"],
+        },
     }
+
+
+def _parse_drug_cost_map(raw: str) -> dict:
+    """
+    Parse estimated full drug costs from a string.
+    Format: "Lantus:65,Ventolin:65.48,Humalog:160"
+    Returns dict mapping lowercase drug name fragments to float costs.
+    """
+    cost_map = {}
+    if not raw or not raw.strip():
+        return cost_map
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if ":" not in pair:
+            continue
+        name_part, cost_part = pair.split(":", 1)
+        try:
+            cost_map[name_part.strip().lower()] = float(cost_part.strip())
+        except ValueError:
+            continue
+    return cost_map
+
+
+def _lookup_estimated_full_cost(drug_name: str, cost_map: dict) -> float | None:
+    """
+    Look up estimated full drug cost from the cost map.
+    Matches on partial name (e.g. "lantus" matches "Lantus SOLN 100UNIT/ML").
+    """
+    lower_name = drug_name.lower()
+    for key, cost in cost_map.items():
+        if key in lower_name or lower_name in key:
+            return cost
+    return None
+
+
+def _compute_ic_monthly_cost(
+    cost_type: str,
+    copay_amount: float | None,
+    coinsurance_pct: float | None,
+    estimated_full_cost: float | None,
+    days_supply: int,
+    is_insulin: bool,
+    insulin_cap: float,
+) -> float:
+    """
+    Compute the monthly cost in the Initial Coverage phase.
+
+    For flat copay: monthly = copay / (days_supply / 30)
+    For coinsurance: monthly = (pct/100 × estimated_full_cost) / (days_supply / 30)
+    """
+    months_per_fill = days_supply / 30.0
+    monthly_cost = 0.0
+
+    if cost_type == "copay" and copay_amount is not None:
+        monthly_cost = float(copay_amount) / months_per_fill
+    elif cost_type == "coinsurance" and coinsurance_pct is not None:
+        if estimated_full_cost is not None and estimated_full_cost > 0:
+            fill_cost = (coinsurance_pct / 100.0) * estimated_full_cost
+            monthly_cost = fill_cost / months_per_fill
+
+    # IRA insulin cap
+    if is_insulin and monthly_cost > insulin_cap:
+        monthly_cost = insulin_cap
+
+    return round(monthly_cost, 2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1226,7 +1509,7 @@ def _my_drugs_impl(member: dict):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/reminders/{session_id}")
-def list_reminders(session_id: str):
+def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
     """List all medication reminders for this member."""
     phone = _session_phone(session_id)
     db = get_user_db()
@@ -1234,7 +1517,7 @@ def list_reminders(session_id: str):
 
 
 @app.post("/reminders/{session_id}")
-def create_reminder(session_id: str, req: ReminderCreate):
+def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(get_current_user)):
     """Create a single medication reminder."""
     phone = _session_phone(session_id)
     if not 0 <= req.time_hour <= 23:
@@ -1256,7 +1539,7 @@ def create_reminder(session_id: str, req: ReminderCreate):
 
 
 @app.post("/reminders/{session_id}/bulk")
-def create_reminders_bulk(session_id: str, req: BulkReminderCreate):
+def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict = Depends(get_current_user)):
     """Create multiple reminders at once (agent onboarding)."""
     phone = _session_phone(session_id)
     db = get_user_db()
@@ -1269,7 +1552,7 @@ def create_reminders_bulk(session_id: str, req: BulkReminderCreate):
 
 
 @app.put("/reminders/{session_id}/{reminder_id}")
-def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate):
+def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _user: dict = Depends(get_current_user)):
     """Update a reminder (toggle, reschedule, etc.)."""
     phone = _session_phone(session_id)
     db = get_user_db()
@@ -1280,7 +1563,7 @@ def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate):
 
 
 @app.delete("/reminders/{session_id}/{reminder_id}")
-def delete_reminder(session_id: str, reminder_id: int):
+def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get_current_user)):
     """Delete a medication reminder."""
     phone = _session_phone(session_id)
     db = get_user_db()
@@ -1298,7 +1581,7 @@ VALID_USAGE_CATEGORIES = {"otc", "dental", "flex", "vision", "hearing"}
 
 
 @app.post("/usage/{session_id}")
-def log_usage(session_id: str, req: UsageCreate):
+def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_current_user)):
     """Log a benefits usage entry (e.g. OTC purchase, dental visit)."""
     phone = _session_phone(session_id)
     cat = req.category.lower()
@@ -1319,7 +1602,7 @@ def log_usage(session_id: str, req: UsageCreate):
 
 
 @app.get("/usage/{session_id}")
-def get_usage(session_id: str, category: Optional[str] = None):
+def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Depends(get_current_user)):
     """Get all usage entries for this member, optionally filtered by category."""
     phone = _session_phone(session_id)
     db = get_user_db()
@@ -1328,7 +1611,7 @@ def get_usage(session_id: str, category: Optional[str] = None):
 
 
 @app.delete("/usage/{session_id}/{usage_id}")
-def delete_usage(session_id: str, usage_id: int):
+def delete_usage(session_id: str, usage_id: int, _user: dict = Depends(get_current_user)):
     """Delete a usage entry (undo mistake)."""
     phone = _session_phone(session_id)
     db = get_user_db()
@@ -1339,7 +1622,7 @@ def delete_usage(session_id: str, usage_id: int):
 
 
 @app.get("/usage/{session_id}/summary")
-def usage_summary(session_id: str):
+def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     """
     Get per-category spending summary: spent vs. cap for current period.
     Cross-references CMS benefit caps with logged usage.
@@ -1459,7 +1742,7 @@ def _split_plan(plan_number: str) -> tuple[str, str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/cms/id-card/{plan_number}")
-def get_id_card_data(plan_number: str):
+def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
     """Return all data needed to render a digital insurance ID card."""
     from .carrier_config import detect_carrier, get_carrier_config
 

@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
-import { API_URL, fetchWithTimeout } from '../constants/api';
+import { API_URL, authFetch } from '../constants/api';
 
 export default function DoctorResults() {
   const { specialty, zipCode, planName } = useLocalSearchParams();
@@ -22,7 +22,7 @@ export default function DoctorResults() {
   const searchProviders = async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetchWithTimeout(`${API_URL}/providers/search`, {
+      const res = await authFetch(`${API_URL}/providers/search`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan_name: planName, specialty, zip_code: zipCode, radius_miles: 25, limit: 50, enrich_google: true }),
       }, 30000);
