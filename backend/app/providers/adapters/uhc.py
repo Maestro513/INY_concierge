@@ -25,7 +25,7 @@ from .base import BaseAdapter, ProviderResult, resolve_specialty
 logger = logging.getLogger(__name__)
 
 # Config from env
-UHC_PAYER_ID = os.getenv("UHC_PAYER_ID", "uhc")
+UHC_PAYER_ID = os.getenv("UHC_PAYER_ID", "hsid")
 UHC_CLIENT_ID = os.getenv("UHC_CLIENT_ID", "")
 UHC_CLIENT_SECRET = os.getenv("UHC_CLIENT_SECRET", "")
 
