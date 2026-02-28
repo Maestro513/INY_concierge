@@ -51,9 +51,9 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 
 # OTP settings
-OTP_TTL = int(os.getenv("OTP_TTL", "300"))                  # 5 minutes
-OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))   # lockout after 5 wrong guesses
-OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "5"))         # max 5 sends per window
+OTP_TTL = int(os.getenv("OTP_TTL", "180"))                  # 3 minutes
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "4"))   # lockout after 4 wrong guesses
+OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "4"))         # max 4 sends per window
 OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
 
 # Paths
