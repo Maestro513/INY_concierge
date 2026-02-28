@@ -49,6 +49,7 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
         raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
 
     print(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
+    print(f"[UHC] client_id length={len(UHC_CLIENT_ID)}, secret length={len(UHC_CLIENT_SECRET)}")
     resp = await client.post(
         UHC_TOKEN_URL,
         data={
@@ -59,6 +60,8 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15.0,
     )
+    if resp.status_code != 200:
+        print(f"[UHC] Token error {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
     token_data = resp.json()
 
