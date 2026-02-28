@@ -1289,6 +1289,8 @@ def _my_drugs_impl(member: dict):
         "medications": drugs,
         "monthly_total": round(monthly_total, 2),
         "monthly_display": "$" + str(int(round(monthly_total))),
+        "estimated_annual_drug_cost": simulation["annual_total"],
+        "annual_display": "$" + str(int(round(simulation["annual_total"]))),
         "has_medications": True,
         "cost_source": "sob" if sob_source else "cms",
         "current_month": current_month,
