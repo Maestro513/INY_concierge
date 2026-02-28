@@ -28,8 +28,41 @@ from .config import (
     ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL,
     ADMIN_SECRET, GDRIVE_FOLDER_ID, JWT_SECRET, JWT_ACCESS_TTL, JWT_REFRESH_TTL,
     OTP_TTL, OTP_MAX_ATTEMPTS, OTP_MAX_SENDS, OTP_SEND_WINDOW,
+    SENTRY_DSN,
 )
 from .user_data import UserDataDB
+from .audit import get_audit_log, mask_pii_in_string, mask_phone
+from .encryption import get_cipher
+
+# ── Sentry error monitoring ──────────────────────────────────────────────────
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=APP_ENV,
+        traces_sample_rate=0.2 if APP_ENV == "production" else 1.0,
+        profiles_sample_rate=0.1 if APP_ENV == "production" else 0.0,
+        integrations=[
+            StarletteIntegration(),
+            FastApiIntegration(),
+        ],
+        # Scrub sensitive data from error reports
+        before_send=_sentry_before_send,
+        send_default_pii=False,
+    )
+
+def _sentry_before_send(event, hint):
+    """Strip PII from Sentry events before sending."""
+    # Remove phone numbers and Medicare numbers from breadcrumbs/messages
+    if "logentry" in event and "message" in event["logentry"]:
+        msg = event["logentry"]["message"]
+        msg = re.sub(r'\b\d{10}\b', '***PHONE***', msg)
+        msg = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', msg)
+        event["logentry"]["message"] = msg
+    return event
 
 # ── Structured logging ───────────────────────────────────────────────────────
 logging.basicConfig(
@@ -61,7 +94,7 @@ if APP_ENV == "production":
         allow_origins=_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["*"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )
 else:
     # Dev: allow any localhost origin
@@ -89,7 +122,9 @@ async def metrics_middleware(request: Request, call_next):
     _request_metrics["latency_sum"] += elapsed
     if response.status_code >= 500:
         _request_metrics["errors"] += 1
-    log.info(f"{request.method} {request.url.path} → {response.status_code} ({elapsed:.3f}s)")
+    # Mask PII from URL paths before logging (e.g. /cms/my-drugs/5551234567)
+    path = mask_pii_in_string(str(request.url.path))
+    log.info(f"{request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
     return response
 
 # ── Session store (in-memory with TTL) ───────────────────────────────────────
@@ -371,7 +406,7 @@ def metrics():
 
 
 @app.post("/auth/lookup")
-def lookup_member(req: LookupRequest):
+def lookup_member(req: LookupRequest, request: Request):
     """
     Step 1: Look up member by phone, send OTP.
     Returns only {found, first_name} — no sensitive data until OTP verified.
@@ -383,6 +418,11 @@ def lookup_member(req: LookupRequest):
         raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
 
     if member is None:
+        get_audit_log().record(
+            actor=req.phone, action="auth_lookup", resource="member",
+            ip_address=request.client.host if request.client else "",
+            detail="not_found",
+        )
         return {"found": False}
 
     # Store member data in a pending session (will be promoted after OTP verify)
@@ -402,6 +442,12 @@ def lookup_member(req: LookupRequest):
     if not sms.send_otp(req.phone, code):
         raise HTTPException(status_code=500, detail="Unable to send verification code. Please try again.")
 
+    get_audit_log().record(
+        actor=req.phone, action="auth_lookup", resource="member",
+        ip_address=request.client.host if request.client else "",
+        detail="otp_sent",
+    )
+
     return {
         "found": True,
         "first_name": member["first_name"],
@@ -410,11 +456,16 @@ def lookup_member(req: LookupRequest):
 
 
 @app.post("/auth/verify-otp")
-def verify_otp_endpoint(req: OTPVerifyRequest):
+def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     Step 2: Verify OTP → return JWT tokens + full member data.
     """
     if not verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS):
+        get_audit_log().record(
+            actor=req.phone, action="auth_verify_otp", resource="member",
+            ip_address=request.client.host if request.client else "",
+            detail="failed",
+        )
         raise HTTPException(status_code=401, detail="Invalid or expired code. Please try again.")
 
     # Find the pending session with this phone's member data
@@ -445,7 +496,13 @@ def verify_otp_endpoint(req: OTPVerifyRequest):
         refresh_ttl=JWT_REFRESH_TTL,
     )
 
-    log.info(f"OTP verified, JWT issued for phone ending {req.phone[-4:]}")
+    log.info(f"OTP verified, JWT issued for phone ending ***{req.phone[-4:]}")
+
+    get_audit_log().record(
+        actor=req.phone, action="auth_verify_otp", resource="member",
+        ip_address=request.client.host if request.client else "",
+        detail="success",
+    )
 
     return {
         **tokens,

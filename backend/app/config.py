@@ -56,6 +56,13 @@ OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "4"))   # lockout after 4 w
 OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "4"))         # max 4 sends per window
 OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
 
+# Sentry
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")  # Set in Render env vars for production
+
+# Field-level encryption for PHI at rest (medications, Medicare numbers)
+# Generate with: python -c "from app.encryption import generate_key; print(generate_key())"
+FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "pdfs"))

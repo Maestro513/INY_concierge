@@ -4,8 +4,32 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Text, TextInput } from 'react-native';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import * as Sentry from '@sentry/react-native';
 import { COLORS } from '../constants/theme';
 import { setupNotificationChannel } from '../utils/notifications';
+
+// ── Sentry error monitoring ─────────────────────────────────────
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: __DEV__ ? 'development' : 'production',
+    tracesSampleRate: __DEV__ ? 1.0 : 0.2,
+    // Don't send PII
+    beforeSend(event) {
+      // Strip phone numbers from breadcrumbs
+      if (event.breadcrumbs) {
+        event.breadcrumbs = event.breadcrumbs.map((b) => {
+          if (b.message) {
+            b.message = b.message.replace(/\b\d{10}\b/g, '***PHONE***');
+          }
+          return b;
+        });
+      }
+      return event;
+    },
+  });
+}
 
 // expo-notifications requires a dev build (not available in Expo Go).
 // Notification handler is set up in utils/notifications.js when reminders are created.
