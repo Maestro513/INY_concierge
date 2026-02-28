@@ -50,12 +50,14 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
 
     print(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
     print(f"[UHC] client_id length={len(UHC_CLIENT_ID)}, secret length={len(UHC_CLIENT_SECRET)}")
+    scope = os.getenv("UHC_SCOPE", "read")
     resp = await client.post(
         UHC_TOKEN_URL,
         data={
             "grant_type": "client_credentials",
             "client_id": UHC_CLIENT_ID,
             "client_secret": UHC_CLIENT_SECRET,
+            "scope": scope,
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15.0,
