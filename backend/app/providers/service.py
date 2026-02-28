@@ -8,6 +8,7 @@ import logging
 from .adapters.base import ProviderResult, resolve_specialty
 from .adapters.humana import HumanaAdapter
 from .adapters.uhc import UHCAdapter
+from .adapters.healthspring import HealthspringAdapter
 from .enrichment.geocoding import geocode_zip, geocode_address, haversine_miles
 from .enrichment.google_places import enrich_providers
 from .enrichment.nppes import bulk_lookup_npis
@@ -20,8 +21,7 @@ CARRIER_MAP = {
     "uhc": UHCAdapter,
     "united": UHCAdapter,
     "aarp": UHCAdapter,
-    # Phase 2:
-    # "healthspring": HealthspringAdapter,
+    "healthspring": HealthspringAdapter,
     # "devoted": DevotedAdapter,
     # "wellcare": WellcareAdapter,
     # "centene": WellcareAdapter,
