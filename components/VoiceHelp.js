@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { CALL_NUMBER } from '../constants/data';
-import { API_URL, fetchWithTimeout } from '../constants/api';
+import { API_URL, authFetch } from '../constants/api';
 
 // --- Pharmacy search detection ---
 
@@ -155,7 +155,7 @@ function formatDrugResponse(data) {
 
 async function lookupDrug(planNumber, drugName) {
   try {
-    const res = await fetchWithTimeout(`${API_URL}/cms/drug/${encodeURIComponent(planNumber)}/${encodeURIComponent(drugName)}`);
+    const res = await authFetch(`${API_URL}/cms/drug/${encodeURIComponent(planNumber)}/${encodeURIComponent(drugName)}`);
     if (!res.ok) return null;
     const data = await res.json();
     if (data.error) return null;
@@ -229,7 +229,7 @@ function formatGivebackResponse(data) {
 
 async function lookupBenefit(planNumber, config) {
   try {
-    const res = await fetchWithTimeout(`${API_URL}/cms/benefits/${encodeURIComponent(planNumber)}/${config.endpoint}`);
+    const res = await authFetch(`${API_URL}/cms/benefits/${encodeURIComponent(planNumber)}/${config.endpoint}`);
     if (!res.ok) return null;
     return config.format(await res.json());
   } catch (err) { console.log('Benefit lookup error:', err); return null; }
@@ -366,7 +366,7 @@ function detectUsageIntent(text) {
 
 async function askBackend(question, planId) {
   try {
-    const res = await fetchWithTimeout(`${API_URL}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, plan_number: planId }) }, 30000);
+    const res = await authFetch(`${API_URL}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, plan_number: planId }) }, 30000);
     const data = await res.json();
     return data.answer;
   } catch (err) {
@@ -394,7 +394,7 @@ async function handleReminderVoice(intent, sessionId, onCreated) {
   }
 
   try {
-    const res = await fetchWithTimeout(`${API_URL}/reminders/${sessionId}`, {
+    const res = await authFetch(`${API_URL}/reminders/${sessionId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -431,7 +431,7 @@ async function handleUsageVoice(intent, sessionId, onLogged) {
   const categoryLabels = { otc: 'OTC', dental: 'Dental', flex: 'Flex Card', vision: 'Vision', hearing: 'Hearing' };
 
   try {
-    const res = await fetchWithTimeout(`${API_URL}/usage/${sessionId}`, {
+    const res = await authFetch(`${API_URL}/usage/${sessionId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

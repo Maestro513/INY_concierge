@@ -1,14 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, ActivityIndicator } from 'react-native';
 import GradientBg from '../components/GradientBg';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
+import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 
 export default function OTPScreen() {
-  const { phone } = useLocalSearchParams();
+  const { phone, firstName } = useLocalSearchParams();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [resending, setResending] = useState(false);
   const refs = useRef([]);
   const router = useRouter();
 
@@ -27,9 +31,91 @@ export default function OTPScreen() {
     if (!/^\d?$/.test(v)) return;
     const n = [...otp]; n[i] = v; setOtp(n);
     if (v && i < 5) refs.current[i + 1]?.focus();
+    setError('');
   };
   const handleKey = (i, k) => { if (k === 'Backspace' && !otp[i] && i > 0) refs.current[i - 1]?.focus(); };
   const filled = otp.every((d) => d !== '');
+
+  // Format phone for display
+  const displayPhone = phone
+    ? `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`
+    : '';
+
+  const handleVerify = async () => {
+    if (!filled) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const code = otp.join('');
+      const res = await fetchWithTimeout(`${API_URL}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code }),
+      });
+
+      if (res.status === 401) {
+        setError('Invalid or expired code. Please try again.');
+        setOtp(['', '', '', '', '', '']);
+        refs.current[0]?.focus();
+        return;
+      }
+
+      const data = await res.json();
+
+      if (data.access_token) {
+        // Store JWT tokens
+        await setTokens(data.access_token, data.refresh_token);
+
+        // Navigate to home with member data
+        router.replace({
+          pathname: '/home',
+          params: {
+            firstName: data.first_name,
+            lastName: data.last_name,
+            planName: data.plan_name,
+            planNumber: data.plan_number,
+            agent: data.agent || '',
+            medicareNumber: data.medicare_number || '',
+            sessionId: data.session_id || '',
+            zipCode: data.zip_code || '',
+          },
+        });
+      } else {
+        setError('Verification failed. Please try again.');
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        setError('Request timed out. Please try again.');
+      } else {
+        setError("Can't connect right now. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    setError('');
+    try {
+      const res = await fetchWithTimeout(`${API_URL}/auth/lookup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      if (res.status === 429) {
+        setError('Too many attempts. Please wait a few minutes.');
+      } else {
+        setOtp(['', '', '', '', '', '']);
+        refs.current[0]?.focus();
+      }
+    } catch {
+      setError("Couldn't resend code. Please try again.");
+    } finally {
+      setResending(false);
+    }
+  };
 
   return (
     <GradientBg style={s.gradient}>
@@ -49,7 +135,7 @@ export default function OTPScreen() {
             <Text style={s.title}>Verify your number</Text>
             <Text style={s.subtitle}>
               We sent a 6-digit code to{'\n'}
-              <Text style={{ fontWeight: '700', color: COLORS.text }}>{phone}</Text>
+              <Text style={{ fontWeight: '700', color: COLORS.text }}>{displayPhone}</Text>
             </Text>
 
             {/* OTP Input Card */}
@@ -66,24 +152,38 @@ export default function OTPScreen() {
                     keyboardType="number-pad"
                     maxLength={1}
                     selectTextOnFocus
+                    editable={!loading}
                   />
                 ))}
               </View>
             </View>
 
+            {error ? (
+              <View style={s.errorWrap}>
+                <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
+                <Text style={s.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
             <TouchableOpacity
-              style={[s.button, !filled && s.buttonDisabled]}
-              onPress={() => filled && router.replace('/home')}
-              disabled={!filled}
+              style={[s.button, (!filled || loading) && s.buttonDisabled]}
+              onPress={handleVerify}
+              disabled={!filled || loading}
               activeOpacity={0.8}
             >
-              <Text style={s.buttonText}>Verify</Text>
-              <Ionicons name="checkmark" size={18} color={COLORS.white} style={{ marginLeft: 6 }} />
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <>
+                  <Text style={s.buttonText}>Verify</Text>
+                  <Ionicons name="checkmark" size={18} color={COLORS.white} style={{ marginLeft: 6 }} />
+                </>
+              )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={s.resendWrap} activeOpacity={0.7}>
+            <TouchableOpacity style={s.resendWrap} activeOpacity={0.7} onPress={handleResend} disabled={resending}>
               <Text style={s.resendText}>
-                Didn't get it? <Text style={s.resendLink}>Resend code</Text>
+                Didn't get it? <Text style={s.resendLink}>{resending ? 'Sending...' : 'Resend code'}</Text>
               </Text>
             </TouchableOpacity>
           </Animated.View>
@@ -136,6 +236,16 @@ const s = StyleSheet.create({
     borderColor: COLORS.accent,
     backgroundColor: COLORS.accentLighter,
   },
+
+  // Error
+  errorWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: COLORS.errorBg,
+    borderRadius: RADII.sm,
+    paddingHorizontal: 14, paddingVertical: 12,
+    marginBottom: 16,
+  },
+  errorText: { fontSize: 14, color: COLORS.error, flex: 1, lineHeight: 20 },
 
   // Button
   button: {

@@ -6,7 +6,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
-import { API_URL, fetchWithTimeout } from '../constants/api';
+import { API_URL, authFetch } from '../constants/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 48;
@@ -41,7 +41,7 @@ export default function DigitalIDScreen() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/cms/id-card/${encodeURIComponent(planNumber)}`);
+      const res = await authFetch(`${API_URL}/cms/id-card/${encodeURIComponent(planNumber)}`);
       if (!res.ok) throw new Error('Failed to load card data');
       const data = await res.json();
       setCardData(data);

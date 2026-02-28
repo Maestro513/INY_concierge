@@ -39,6 +39,23 @@ GDRIVE_FOLDER_ID = os.getenv(
 # Secret for admin endpoints (set in Render env vars)
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
+# JWT Authentication
+JWT_SECRET = os.getenv("JWT_SECRET", "")  # MUST be set in production
+JWT_ACCESS_TTL = int(os.getenv("JWT_ACCESS_TTL", "7200"))         # 2 hours
+JWT_REFRESH_TTL = int(os.getenv("JWT_REFRESH_TTL", "2592000"))    # 30 days
+
+# SMS Provider
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "console")  # "twilio" or "console"
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+
+# OTP settings
+OTP_TTL = int(os.getenv("OTP_TTL", "300"))                  # 5 minutes
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))   # lockout after 5 wrong guesses
+OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "5"))         # max 5 sends per window
+OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "pdfs"))

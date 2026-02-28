@@ -3,7 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
-import { API_URL, fetchWithTimeout } from '../constants/api';
+import { API_URL, authFetch } from '../constants/api';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
@@ -67,7 +67,7 @@ export default function HomeScreen() {
     if (!planNumber) return;
     setSobLoading(true);
     try {
-      const res = await fetchWithTimeout(`${API_URL}/sob/summary`, {
+      const res = await authFetch(`${API_URL}/sob/summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan_number: planNumber }),
@@ -109,14 +109,14 @@ export default function HomeScreen() {
     setBenefitsError(false);
     try {
       const [benefitsRes, drugsRes] = await Promise.all([
-        fetchWithTimeout(`${API_URL}/cms/benefits/${planNumber}`)
+        authFetch(`${API_URL}/cms/benefits/${planNumber}`)
           .then(r => {
             if (!r.ok) { console.warn(`Benefits fetch failed: ${r.status}`); return null; }
             return r.json();
           })
           .catch((err) => { console.warn('Benefits fetch error:', err); return null; }),
         sessionId
-          ? fetchWithTimeout(`${API_URL}/cms/my-drugs-session/${sessionId}`)
+          ? authFetch(`${API_URL}/cms/my-drugs-session/${sessionId}`)
               .then(r => {
                 if (!r.ok) { console.warn(`Drugs fetch failed: ${r.status}`); return null; }
                 return r.json();
@@ -149,7 +149,7 @@ export default function HomeScreen() {
     if (cached) setReminders(cached);
 
     try {
-      const res = await fetchWithTimeout(`${API_URL}/reminders/${sessionId}`);
+      const res = await authFetch(`${API_URL}/reminders/${sessionId}`);
       if (!res.ok) throw new Error('Reminders fetch failed');
       const data = await res.json();
       setReminders(data.reminders);
@@ -168,7 +168,7 @@ export default function HomeScreen() {
     await requestNotificationPermissions();
 
     try {
-      const res = await fetchWithTimeout(`${API_URL}/reminders/${sessionId}`, {
+      const res = await authFetch(`${API_URL}/reminders/${sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reminderData),
@@ -200,7 +200,7 @@ export default function HomeScreen() {
     });
 
     try {
-      await fetchWithTimeout(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
+      await authFetch(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
@@ -230,7 +230,7 @@ export default function HomeScreen() {
     cancelReminder(reminderId);
 
     try {
-      await fetchWithTimeout(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
+      await authFetch(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
         method: 'DELETE',
       });
     } catch (err) {
@@ -247,7 +247,7 @@ export default function HomeScreen() {
     if (cached) setUsageSummary(cached);
 
     try {
-      const res = await fetchWithTimeout(`${API_URL}/usage/${sessionId}/summary`);
+      const res = await authFetch(`${API_URL}/usage/${sessionId}/summary`);
       if (!res.ok) throw new Error('Usage summary fetch failed');
       const data = await res.json();
       setUsageSummary(data.summary);
@@ -261,7 +261,7 @@ export default function HomeScreen() {
 
   const handleLogUsage = useCallback(async (usageData) => {
     try {
-      const res = await fetchWithTimeout(`${API_URL}/usage/${sessionId}`, {
+      const res = await authFetch(`${API_URL}/usage/${sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(usageData),
