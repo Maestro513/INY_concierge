@@ -298,33 +298,60 @@ class CMSLookup:
         }
 
         if cost:
-            # Preferred retail: cost_type 0=copay, 1=coinsurance
-            cost_type = str(cost.get("cost_type_pref", "0")).strip()
-            if cost_type == "0" or cost_type == "":
-                retail_cost = self._safe_float(cost.get("cost_amt_pref"))
-                result["copay_preferred"] = retail_cost
-                result["copay_30day_preferred"] = retail_cost
+            # Retail pharmacy cost: use non-preferred (standard retail) as primary,
+            # fall back to preferred if nonpref is empty/zero.
+            # Many plans don't have a preferred pharmacy tier, so cost_amt_pref = $0.
+            nonpref_amt = self._safe_float(cost.get("cost_amt_nonpref"))
+            pref_amt = self._safe_float(cost.get("cost_amt_pref"))
+            nonpref_type = str(cost.get("cost_type_nonpref", "")).strip()
+            pref_type = str(cost.get("cost_type_pref", "")).strip()
+
+            # Pick the best retail cost: nonpref (standard) first, pref as fallback
+            if nonpref_amt is not None and nonpref_amt > 0:
+                retail_amt = nonpref_amt
+                retail_type = nonpref_type if nonpref_type else "0"
+            elif pref_amt is not None and pref_amt > 0:
+                retail_amt = pref_amt
+                retail_type = pref_type if pref_type else "0"
+            else:
+                retail_amt = pref_amt  # may be 0 or None
+                retail_type = pref_type if pref_type else "0"
+
+            if retail_type == "0" or retail_type == "":
+                result["copay_preferred"] = retail_amt
+                result["copay_30day_preferred"] = retail_amt
                 result["cost_type"] = "copay"
                 result["cost_type_30day"] = "copay"
             else:
-                pct = self._safe_float(cost.get("cost_amt_pref"))
-                pct_str = f"{pct}%" if pct else None
+                pct_str = f"{retail_amt}%" if retail_amt else None
                 result["copay_preferred"] = pct_str
                 result["copay_30day_preferred"] = pct_str
                 result["cost_type"] = "coinsurance"
                 result["cost_type_30day"] = "coinsurance"
                 result["cost_max_30day"] = self._safe_float(cost.get("cost_max_amt_pref"))
 
-            # Mail: use mail columns
-            mail_type = str(cost.get("cost_type_mail_pref", "0")).strip()
+            # Mail pharmacy cost: same logic — nonpref first, pref fallback
+            mail_nonpref_amt = self._safe_float(cost.get("cost_amt_mail_nonpref"))
+            mail_pref_amt = self._safe_float(cost.get("cost_amt_mail_pref"))
+            mail_nonpref_type = str(cost.get("cost_type_mail_nonpref", "")).strip()
+            mail_pref_type = str(cost.get("cost_type_mail_pref", "")).strip()
+
+            if mail_nonpref_amt is not None and mail_nonpref_amt > 0:
+                mail_amt = mail_nonpref_amt
+                mail_type = mail_nonpref_type if mail_nonpref_type else "0"
+            elif mail_pref_amt is not None and mail_pref_amt > 0:
+                mail_amt = mail_pref_amt
+                mail_type = mail_pref_type if mail_pref_type else "0"
+            else:
+                mail_amt = mail_pref_amt
+                mail_type = mail_pref_type if mail_pref_type else "0"
+
             if mail_type == "0" or mail_type == "":
-                mail_cost = self._safe_float(cost.get("cost_amt_mail_pref"))
-                result["copay_mail"] = mail_cost
-                result["copay_90day_mail"] = mail_cost
+                result["copay_mail"] = mail_amt
+                result["copay_90day_mail"] = mail_amt
                 result["cost_type_90day"] = "copay"
             else:
-                pct = self._safe_float(cost.get("cost_amt_mail_pref"))
-                pct_str = f"{pct}%" if pct else None
+                pct_str = f"{mail_amt}%" if mail_amt else None
                 result["copay_mail"] = pct_str
                 result["copay_90day_mail"] = pct_str
                 result["cost_type_90day"] = "coinsurance"
