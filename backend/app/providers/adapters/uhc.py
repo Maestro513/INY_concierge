@@ -11,10 +11,8 @@ Single call:
 
 Returns PractitionerRole + Practitioner + Location all in one bundle.
 
-Public endpoint (no auth required per CMS interoperability rules):
+Auth: OAuth2 client credentials → Bearer token.
 Base: https://flex.optum.com/fhirpublic
-
-Auth (optional): OAuth2 client credentials → Bearer token.
 Token: https://flex.optum.com/authz/{payer}/oauth/token
 """
 
@@ -41,15 +39,14 @@ TIMEOUT = 30.0
 _token_cache = {"access_token": "", "expires_at": 0}
 
 
-async def _get_access_token(client: httpx.AsyncClient) -> str | None:
-    """Get OAuth2 token via client credentials grant. Caches until expiry.
-    Returns None if no credentials are configured (public endpoint mode)."""
-    if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
-        return None
-
+async def _get_access_token(client: httpx.AsyncClient) -> str:
+    """Get OAuth2 token via client credentials grant. Caches until expiry."""
     now = time.time()
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
+
+    if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
+        raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
 
     print(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
     resp = await client.post(
@@ -104,11 +101,10 @@ class UHCAdapter(BaseAdapter):
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                 token = await _get_access_token(client)
-                auth_headers = {**HEADERS}
-                if token:
-                    auth_headers["Authorization"] = f"Bearer {token}"
-                else:
-                    print("[UHC] No credentials configured — using public endpoint")
+                auth_headers = {
+                    **HEADERS,
+                    "Authorization": f"Bearer {token}",
+                }
 
                 # Single call with _include — gets everything in one bundle
                 results = await self._search_with_include(
