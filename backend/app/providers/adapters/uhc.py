@@ -11,8 +11,10 @@ Single call:
 
 Returns PractitionerRole + Practitioner + Location all in one bundle.
 
-Auth: OAuth2 client credentials → Bearer token.
-Base: https://flex.optum.com/fhir/{payer}/R4
+Public endpoint (no auth required per CMS interoperability rules):
+Base: https://flex.optum.com/fhirpublic
+
+Auth (optional): OAuth2 client credentials → Bearer token.
 Token: https://flex.optum.com/authz/{payer}/oauth/token
 """
 
@@ -29,7 +31,7 @@ UHC_PAYER_ID = os.getenv("UHC_PAYER_ID", "uhc")
 UHC_CLIENT_ID = os.getenv("UHC_CLIENT_ID", "")
 UHC_CLIENT_SECRET = os.getenv("UHC_CLIENT_SECRET", "")
 
-UHC_BASE = f"https://flex.optum.com/fhir/{UHC_PAYER_ID}/R4"
+UHC_BASE = os.getenv("UHC_BASE_URL", "https://flex.optum.com/fhirpublic")
 UHC_TOKEN_URL = f"https://flex.optum.com/authz/{UHC_PAYER_ID}/oauth/token"
 
 HEADERS = {"Accept": "application/fhir+json"}
@@ -39,14 +41,15 @@ TIMEOUT = 30.0
 _token_cache = {"access_token": "", "expires_at": 0}
 
 
-async def _get_access_token(client: httpx.AsyncClient) -> str:
-    """Get OAuth2 token via client credentials grant. Caches until expiry."""
+async def _get_access_token(client: httpx.AsyncClient) -> str | None:
+    """Get OAuth2 token via client credentials grant. Caches until expiry.
+    Returns None if no credentials are configured (public endpoint mode)."""
+    if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
+        return None
+
     now = time.time()
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
-
-    if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
-        raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
 
     print(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
     resp = await client.post(
@@ -101,10 +104,11 @@ class UHCAdapter(BaseAdapter):
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                 token = await _get_access_token(client)
-                auth_headers = {
-                    **HEADERS,
-                    "Authorization": f"Bearer {token}",
-                }
+                auth_headers = {**HEADERS}
+                if token:
+                    auth_headers["Authorization"] = f"Bearer {token}"
+                else:
+                    print("[UHC] No credentials configured — using public endpoint")
 
                 # Single call with _include — gets everything in one bundle
                 results = await self._search_with_include(
