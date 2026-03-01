@@ -531,6 +531,49 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     }
 
 
+@app.post("/auth/dev-login")
+def dev_login(req: LookupRequest, request: Request):
+    """
+    Dev-only: skip OTP and return JWT + member data directly.
+    Only available when APP_ENV == "development".
+    """
+    if APP_ENV != "development":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    try:
+        member = search_contact_by_phone(req.phone)
+    except Exception as e:
+        log.error(f"Dev-login Zoho lookup failed: {e}")
+        raise HTTPException(status_code=500, detail="Lookup failed")
+
+    if member is None:
+        return {"found": False}
+
+    sid = create_session(req.phone, member)
+    tokens = create_tokens(
+        req.phone, member,
+        jwt_secret=JWT_SECRET,
+        access_ttl=JWT_ACCESS_TTL,
+        refresh_ttl=JWT_REFRESH_TTL,
+    )
+
+    log.info(f"[DEV] Auto-login for phone ending ***{req.phone[-4:]}")
+
+    return {
+        **tokens,
+        "found": True,
+        "first_name": member["first_name"],
+        "last_name": member["last_name"],
+        "plan_name": member["plan_name"],
+        "plan_number": member["plan_number"],
+        "agent": member.get("agent", "") or "",
+        "medicare_number": member.get("medicare_number", "") or "",
+        "medications": member.get("medications", "") or "",
+        "zip_code": member.get("zip_code", "") or "",
+        "session_id": sid,
+    }
+
+
 @app.post("/auth/refresh")
 def refresh_token_endpoint(req: RefreshRequest):
     """Exchange a refresh token for a new access token."""

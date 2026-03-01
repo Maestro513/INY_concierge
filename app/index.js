@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
-import { API_URL, fetchWithTimeout } from '../constants/api';
+import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
 import GradientBg from '../components/GradientBg';
 
@@ -72,27 +72,42 @@ export default function PhoneScreen() {
     setError('');
 
     try {
-      const res = await fetchWithTimeout(`${API_URL}/auth/lookup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: rawDigits }),
-      });
-      const data = await res.json();
-
-      if (res.status === 429) {
-        setError("Too many attempts. Please wait a few minutes and try again.");
-      } else if (data.found) {
-        // OTP sent — navigate to verification screen
-        router.push({
-          pathname: '/otp',
-          params: {
-            phone: rawDigits,
-            firstName: data.first_name,
-          },
+      // In dev mode, skip OTP — call dev-login to get tokens directly
+      if (__DEV__) {
+        const res = await fetchWithTimeout(`${API_URL}/auth/dev-login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: rawDigits }),
         });
-      } else {
-        setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
+        const data = await res.json();
+
+        if (res.status === 429) {
+          setError("Too many attempts. Please wait a few minutes and try again.");
+        } else if (data.found && data.access_token) {
+          await setTokens(data.access_token, data.refresh_token);
+          router.replace({
+            pathname: '/home',
+            params: {
+              firstName: data.first_name,
+              lastName: data.last_name,
+              planName: data.plan_name,
+              planNumber: data.plan_number,
+              agent: data.agent || '',
+              medicareNumber: data.medicare_number || '',
+              sessionId: data.session_id || '',
+              zipCode: data.zip_code || '',
+            },
+          });
+        } else if (data.found === false) {
+          setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
+        } else {
+          // dev-login not available, fall through to normal flow
+          await handleNormalLookup();
+        }
+        return;
       }
+
+      await handleNormalLookup();
     } catch (err) {
       if (err.name === 'AbortError') {
         setError("Request timed out. Please check your connection and try again.");
@@ -101,6 +116,29 @@ export default function PhoneScreen() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleNormalLookup = async () => {
+    const res = await fetchWithTimeout(`${API_URL}/auth/lookup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: rawDigits }),
+    });
+    const data = await res.json();
+
+    if (res.status === 429) {
+      setError("Too many attempts. Please wait a few minutes and try again.");
+    } else if (data.found) {
+      router.push({
+        pathname: '/otp',
+        params: {
+          phone: rawDigits,
+          firstName: data.first_name,
+        },
+      });
+    } else {
+      setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
     }
   };
 
