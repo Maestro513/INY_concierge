@@ -349,8 +349,8 @@ function buildBenefitCards(data, drugsData) {
   // --- Row 2: Rx cost + supplementals ---
   if (drugsData && drugsData.has_medications) {
     row2.push({
-      label: 'Est. Monthly Rx',
-      in_network: String(drugsData.monthly_display) + '/mo',
+      label: 'Est. Annual Rx',
+      in_network: String(drugsData.annual_display) + '/yr',
     });
   }
 
