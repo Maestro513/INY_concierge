@@ -1,26 +1,25 @@
 """
-Sync missing SOB PDFs from medicareadvantage.com.
+Sync missing SOB PDFs from medicareadvantage.com sitemap.
 
 Workflow:
-  1. Fetch the sitemap to discover all plan URLs
-  2. Scan local pdfs/ and extracted/ to know what we already have
-  3. Optionally query the CMS SQLite DB for existing plan IDs
+  1. Scan your local Pdfs folder to find all plan IDs you already have
+  2. Fetch the sitemap to discover all available plan URLs
+  3. Diff them — figure out what's missing
   4. Visit each missing plan's page, find the SOB PDF link, download it
+     into the same Pdfs folder
 
-Usage:
+Usage (run from your local machine):
   pip install requests beautifulsoup4 lxml
-  python scripts/sync_missing_sobs.py
-  python scripts/sync_missing_sobs.py --dry-run          # just show what's missing
-  python scripts/sync_missing_sobs.py --carrier humana    # filter by carrier
-  python scripts/sync_missing_sobs.py --state NY          # filter by state
-  python scripts/sync_missing_sobs.py --limit 10          # download at most 10
+  python sync_missing_sobs.py --dry-run                    # see what's missing
+  python sync_missing_sobs.py                              # download missing
+  python sync_missing_sobs.py --limit 10                   # download 10 at a time
+  python sync_missing_sobs.py --pdfs-dir "D:\\other\\path"  # custom folder
 """
 
 import argparse
 import json
 import os
 import re
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -29,14 +28,9 @@ from xml.etree import ElementTree
 import requests
 from bs4 import BeautifulSoup
 
-# ── Paths ────────────────────────────────────────────────────────────────────
+# ── Default paths (Windows) ─────────────────────────────────────────────────
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = SCRIPT_DIR.parent / "backend"
-PDFS_DIR = Path(os.getenv("PDFS_DIR", BACKEND_DIR / "pdfs"))
-EXTRACTED_DIR = Path(os.getenv("EXTRACTED_DIR", BACKEND_DIR / "extracted"))
-CMS_DB_PATH = BACKEND_DIR / "cms_benefits.db"
-OUTPUT_DIR = PDFS_DIR / "sitemap_downloads"
+DEFAULT_PDFS_DIR = r"C:\Users\tank5\OneDrive\Concierge\backend\Pdfs"
 
 SITEMAP_URL = "https://www.medicareadvantage.com/plans-sitemap.xml"
 
@@ -48,12 +42,89 @@ HEADERS = {
     )
 }
 
-# ── Step 1: Parse sitemap ────────────────────────────────────────────────────
+
+# ── Plan ID extraction from filenames ────────────────────────────────────────
+
+
+def extract_plan_ids_from_filename(filename: str) -> list[str]:
+    """
+    Pull H/R-number plan IDs from any carrier filename format.
+    Returns normalized two-segment IDs like H1234-567.
+    """
+    name = os.path.splitext(filename)[0]
+
+    # Humana compact: H0028007000SB26 -> H0028-007
+    compact = re.match(r"^(H\d{4})(\d{3})\d{3}SB", name, re.IGNORECASE)
+    if compact:
+        return [f"{compact.group(1)}-{compact.group(2)}"]
+
+    # Three-segment: H1234-567-890 or R1234-567-890
+    three_seg = re.findall(r"[HR]\d{4}-\d{3}-\d{3}", name)
+    if three_seg:
+        # Normalize to two-segment
+        return list(dict.fromkeys(f"{m.rsplit('-', 1)[0]}" for m in three_seg))
+
+    # Two-segment with dash: H7617-038
+    two_seg = re.findall(r"[HR]\d{4}-\d{3}", name)
+    if two_seg:
+        return list(dict.fromkeys(two_seg))
+
+    # Aetna underscore: H1610_001
+    y_match = re.findall(r"(H\d{4})_(\d{3})", name)
+    if y_match:
+        return [f"{h}-{seg}" for h, seg in dict.fromkeys(y_match)]
+
+    return []
+
+
+# ── Step 1: Scan local PDFs ─────────────────────────────────────────────────
+
+
+def scan_existing_pdfs(pdfs_dir: Path) -> dict[str, Path]:
+    """
+    Walk the Pdfs folder (including subfolders) and build a map of
+    plan_id -> folder_path for every PDF we already have.
+
+    Returns: { "H1234-567": Path("C:/Users/.../Pdfs/Humana"), ... }
+    """
+    existing = {}  # plan_id -> parent folder path
+
+    if not pdfs_dir.is_dir():
+        print(f"  WARNING: Pdfs directory not found: {pdfs_dir}")
+        return existing
+
+    pdf_count = 0
+    for pdf in pdfs_dir.rglob("*.pdf"):
+        ids = extract_plan_ids_from_filename(pdf.name)
+        for pid in ids:
+            if pid not in existing:
+                existing[pid] = pdf.parent
+            pdf_count += 1
+
+    print(f"  Scanned {pdf_count} PDF files")
+    print(f"  Found {len(existing)} unique plan IDs on disk")
+
+    # Show subfolder breakdown
+    folders = {}
+    for pid, folder in existing.items():
+        rel = folder.relative_to(pdfs_dir) if folder != pdfs_dir else Path(".")
+        folder_name = str(rel)
+        folders[folder_name] = folders.get(folder_name, 0) + 1
+
+    if folders:
+        print(f"  Folders:")
+        for folder, count in sorted(folders.items()):
+            print(f"    {folder}: {count} plans")
+
+    return existing
+
+
+# ── Step 2: Fetch sitemap ────────────────────────────────────────────────────
 
 
 def fetch_sitemap(url: str = SITEMAP_URL) -> list[dict]:
     """Fetch sitemap XML and extract plan URLs with metadata."""
-    print(f"\n[1/4] Fetching sitemap: {url}")
+    print(f"\n[2/4] Fetching sitemap: {url}")
     resp = requests.get(url, headers=HEADERS, timeout=30)
     resp.raise_for_status()
 
@@ -81,17 +152,26 @@ def fetch_sitemap(url: str = SITEMAP_URL) -> list[dict]:
         parts = full_id.split("-")
         plan_id = f"{parts[0]}-{parts[1]}"
 
-        # Try to extract state/carrier from URL path
+        # Try to extract state from URL path (e.g. /ny/ or /florida/)
         state = ""
         state_match = re.search(r"/([a-z]{2})/", loc)
         if state_match:
             state = state_match.group(1).upper()
+
+        # Try to extract carrier from URL
+        carrier = ""
+        for c in ["humana", "aetna", "uhc", "united", "devoted", "wellcare",
+                   "cigna", "zing", "healthspring", "anthem", "blue"]:
+            if c in loc.lower():
+                carrier = c.capitalize()
+                break
 
         plans.append({
             "url": loc,
             "plan_id": plan_id,
             "full_id": full_id,
             "state": state,
+            "carrier": carrier,
         })
 
     # Deduplicate by plan_id (keep first URL)
@@ -106,80 +186,7 @@ def fetch_sitemap(url: str = SITEMAP_URL) -> list[dict]:
     return unique
 
 
-# ── Step 2: Scan what we already have ────────────────────────────────────────
-
-
-def get_existing_plan_ids() -> set[str]:
-    """Collect plan IDs from existing PDFs, extracted JSONs, and CMS DB."""
-    existing = set()
-
-    # From PDF filenames in pdfs/ directory
-    if PDFS_DIR.is_dir():
-        pdf_count = 0
-        for pdf in PDFS_DIR.rglob("*.pdf"):
-            ids = _extract_plan_ids_from_filename(pdf.name)
-            for pid in ids:
-                existing.add(pid)
-                pdf_count += 1
-        print(f"  PDFs on disk: {pdf_count} files -> {len(existing)} plan IDs")
-
-    # From extracted JSON files
-    json_count = 0
-    if EXTRACTED_DIR.is_dir():
-        for jf in EXTRACTED_DIR.glob("*.json"):
-            plan_id = jf.stem  # filename without extension
-            if re.match(r"[HR]\d{4}-\d{3}", plan_id):
-                existing.add(plan_id)
-                json_count += 1
-    print(f"  Extracted JSONs: {json_count} files")
-
-    # From CMS database
-    if CMS_DB_PATH.is_file():
-        try:
-            conn = sqlite3.connect(str(CMS_DB_PATH))
-            rows = conn.execute(
-                "SELECT DISTINCT contract_id, plan_id FROM plan_formulary"
-            ).fetchall()
-            db_count = 0
-            for cid, pid in rows:
-                existing.add(f"{cid}-{pid}")
-                db_count += 1
-            conn.close()
-            print(f"  CMS database: {db_count} plan IDs")
-        except Exception as e:
-            print(f"  CMS database: skipped ({e})")
-
-    return existing
-
-
-def _extract_plan_ids_from_filename(filename: str) -> list[str]:
-    """Extract plan IDs from PDF filename (matches pdf_processor.py logic)."""
-    name = os.path.splitext(filename)[0]
-
-    # Humana compact: H0028007000SB26 -> H0028-007
-    compact = re.match(r"^(H\d{4})(\d{3})\d{3}SB", name, re.IGNORECASE)
-    if compact:
-        return [f"{compact.group(1)}-{compact.group(2)}"]
-
-    # Three-segment: H1234-567-890
-    three_seg = re.findall(r"[HR]\d{4}-\d{3}-\d{3}", name)
-    if three_seg:
-        return [f"{m.rsplit('-', 1)[0]}" for m in three_seg]
-
-    # Two-segment: H7617-038
-    two_seg = re.findall(r"[HR]\d{4}-\d{3}", name)
-    if two_seg:
-        return list(dict.fromkeys(two_seg))
-
-    # Aetna underscore: H1610_001
-    y_match = re.findall(r"(H\d{4})_(\d{3})", name)
-    if y_match:
-        return [f"{h}-{seg}" for h, seg in dict.fromkeys(y_match)]
-
-    return []
-
-
-# ── Step 3: Find and download SOB PDFs from plan pages ───────────────────────
+# ── Step 3: Find SOB link on plan page ───────────────────────────────────────
 
 
 def find_sob_link(plan_url: str) -> str | None:
@@ -198,40 +205,52 @@ def find_sob_link(plan_url: str) -> str | None:
         text = (a.get_text() or "").lower()
         href = a["href"].lower()
 
-        if any(
-            kw in text or kw in href
-            for kw in ["summary of benefits", "sob", "summary-of-benefits"]
-        ):
+        if any(kw in text or kw in href for kw in [
+            "summary of benefits", "summary-of-benefits",
+            "sob", "plan-document",
+        ]):
             link = a["href"]
             # Make absolute
             if link.startswith("/"):
                 link = f"https://www.medicareadvantage.com{link}"
-            if link.endswith(".pdf") or "pdf" in link.lower():
+            # Accept PDF links or links that look like document endpoints
+            if ".pdf" in link.lower() or "document" in link.lower():
                 return link
 
     return None
 
 
+# ── Step 4: Download ─────────────────────────────────────────────────────────
+
+
 def download_pdf(url: str, dest: Path) -> bool:
     """Download a PDF file, following redirects."""
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=60, stream=True)
+        resp = requests.get(url, headers=HEADERS, timeout=60, stream=True,
+                            allow_redirects=True)
         resp.raise_for_status()
 
-        # Verify it's actually a PDF
+        # Check we actually got a PDF
         content_type = resp.headers.get("Content-Type", "")
-        if "pdf" not in content_type and not url.endswith(".pdf"):
+        first_bytes = b""
+        chunks = []
+        for chunk in resp.iter_content(chunk_size=8192):
+            chunks.append(chunk)
+            if not first_bytes:
+                first_bytes = chunk[:5]
+
+        if first_bytes[:4] != b"%PDF" and "pdf" not in content_type:
             print(f"    SKIP: not a PDF (Content-Type: {content_type})")
             return False
 
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(".tmp")
         with open(tmp, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
+            for chunk in chunks:
                 f.write(chunk)
         tmp.rename(dest)
         size_kb = dest.stat().st_size / 1024
-        print(f"    Downloaded: {dest.name} ({size_kb:.0f} KB)")
+        print(f"    OK: {dest.name} ({size_kb:.0f} KB)")
         return True
 
     except Exception as e:
@@ -239,30 +258,52 @@ def download_pdf(url: str, dest: Path) -> bool:
         return False
 
 
-# ── Main pipeline ────────────────────────────────────────────────────────────
+# ── Decide download folder ───────────────────────────────────────────────────
+
+
+def pick_download_folder(plan: dict, pdfs_dir: Path) -> Path:
+    """
+    Decide which subfolder to save a new PDF into.
+    Uses carrier name if available, otherwise puts in root Pdfs/ folder.
+    """
+    carrier = plan.get("carrier", "")
+    if carrier:
+        return pdfs_dir / carrier
+    return pdfs_dir
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Download missing SOB PDFs from medicareadvantage.com sitemap"
+        description="Download missing SOB PDFs by cross-referencing the sitemap"
     )
+    parser.add_argument("--pdfs-dir", type=str, default=DEFAULT_PDFS_DIR,
+                        help=f"Path to your Pdfs folder (default: {DEFAULT_PDFS_DIR})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Only show what's missing, don't download")
     parser.add_argument("--carrier", type=str, default="",
-                        help="Filter sitemap URLs by carrier name in path")
+                        help="Filter sitemap by carrier name")
     parser.add_argument("--state", type=str, default="",
                         help="Filter by state code (e.g. NY, FL)")
     parser.add_argument("--limit", type=int, default=0,
-                        help="Max number of PDFs to download (0 = unlimited)")
+                        help="Max PDFs to download (0 = all)")
     parser.add_argument("--delay", type=float, default=2.0,
-                        help="Seconds between requests (be respectful)")
-    parser.add_argument("--output-dir", type=str, default="",
-                        help="Override output directory for downloaded PDFs")
+                        help="Seconds between requests (default: 2)")
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir) if args.output_dir else OUTPUT_DIR
+    pdfs_dir = Path(args.pdfs_dir)
 
-    # Step 1: Get all plans from sitemap
+    print("=" * 60)
+    print("  SOB PDF Sync — medicareadvantage.com sitemap")
+    print("=" * 60)
+
+    # Step 1: Scan local PDFs
+    print(f"\n[1/4] Scanning local PDFs: {pdfs_dir}")
+    existing = scan_existing_pdfs(pdfs_dir)
+
+    # Step 2: Fetch sitemap
     sitemap_plans = fetch_sitemap()
 
     # Apply filters
@@ -280,51 +321,45 @@ def main():
         print("\nNo plans found in sitemap matching filters.")
         return
 
-    # Step 2: Find what we already have
-    print(f"\n[2/4] Scanning existing plan data...")
-    existing_ids = get_existing_plan_ids()
-    print(f"  Total existing plan IDs: {len(existing_ids)}")
-
-    # Step 3: Compute the diff
+    # Step 3: Compute diff
     print(f"\n[3/4] Computing missing plans...")
-    missing = [p for p in sitemap_plans if p["plan_id"] not in existing_ids]
+    missing = [p for p in sitemap_plans if p["plan_id"] not in existing]
     already_have = len(sitemap_plans) - len(missing)
 
-    print(f"  Sitemap plans:  {len(sitemap_plans)}")
+    print(f"  Sitemap total:  {len(sitemap_plans)}")
     print(f"  Already have:   {already_have}")
-    print(f"  Missing:        {len(missing)}")
+    print(f"  MISSING:        {len(missing)}")
 
     if not missing:
         print("\nAll plans accounted for! Nothing to download.")
         return
 
+    # Dry run — just list what's missing
     if args.dry_run:
-        print(f"\n[DRY RUN] Missing plan IDs:")
-        for p in missing[:50]:
-            print(f"  {p['plan_id']}  {p['url']}")
-        if len(missing) > 50:
-            print(f"  ... and {len(missing) - 50} more")
+        print(f"\n--- DRY RUN: Missing plan IDs ---")
+        for p in missing[:100]:
+            print(f"  {p['plan_id']:15s}  {p.get('carrier',''):12s}  {p['url']}")
+        if len(missing) > 100:
+            print(f"  ... and {len(missing) - 100} more")
 
-        # Save full list to a JSON
-        out_file = output_dir / "_missing_plans.json"
-        out_file.parent.mkdir(parents=True, exist_ok=True)
+        # Save full list
+        out_file = pdfs_dir / "_missing_plans.json"
         with open(out_file, "w") as f:
             json.dump(missing, f, indent=2)
         print(f"\n  Full list saved to: {out_file}")
         return
 
-    # Step 4: Download missing SOBs
+    # Step 4: Download
     limit = args.limit if args.limit > 0 else len(missing)
     to_download = missing[:limit]
 
     print(f"\n[4/4] Downloading SOBs for {len(to_download)} missing plans...")
-    print(f"  Output: {output_dir}")
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     results = {"downloaded": 0, "no_sob_link": 0, "failed": 0, "details": []}
 
     for i, plan in enumerate(to_download, 1):
         plan_id = plan["plan_id"]
+        full_id = plan["full_id"]
         url = plan["url"]
         print(f"\n  [{i}/{len(to_download)}] {plan_id}")
         print(f"    Page: {url}")
@@ -332,27 +367,29 @@ def main():
         # Find SOB link on the plan page
         sob_url = find_sob_link(url)
         if not sob_url:
-            print(f"    No SOB PDF link found on page")
+            print(f"    No SOB PDF link found")
             results["no_sob_link"] += 1
-            results["details"].append({"plan_id": plan_id, "status": "no_sob_link"})
+            results["details"].append({"plan_id": plan_id, "status": "no_sob_link",
+                                       "url": url})
             time.sleep(args.delay)
             continue
 
-        print(f"    SOB: {sob_url}")
+        print(f"    SOB link: {sob_url}")
 
-        # Download the PDF
-        pdf_name = f"{plan_id}_SOB.pdf"
-        dest = output_dir / pdf_name
+        # Pick folder and filename
+        folder = pick_download_folder(plan, pdfs_dir)
+        pdf_name = f"{full_id}_SOB_2026.pdf"
+        dest = folder / pdf_name
 
         if dest.is_file():
-            print(f"    Already downloaded: {pdf_name}")
+            print(f"    Already exists: {dest}")
             results["downloaded"] += 1
-            results["details"].append({"plan_id": plan_id, "status": "already_exists"})
+            results["details"].append({"plan_id": plan_id, "status": "exists"})
         elif download_pdf(sob_url, dest):
             results["downloaded"] += 1
             results["details"].append({
                 "plan_id": plan_id, "status": "downloaded",
-                "sob_url": sob_url, "file": str(dest),
+                "file": str(dest), "sob_url": sob_url,
             })
         else:
             results["failed"] += 1
@@ -363,18 +400,18 @@ def main():
         time.sleep(args.delay)
 
     # Summary
-    print(f"\n{'='*50}")
-    print(f"  Download Summary")
+    print(f"\n{'=' * 60}")
+    print(f"  DONE")
     print(f"  Downloaded:    {results['downloaded']}")
     print(f"  No SOB link:   {results['no_sob_link']}")
     print(f"  Failed:        {results['failed']}")
-    print(f"{'='*50}")
+    print(f"{'=' * 60}")
 
     # Save summary
-    summary_path = output_dir / "_download_summary.json"
+    summary_path = pdfs_dir / "_download_summary.json"
     with open(summary_path, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\n  Summary saved to: {summary_path}")
+    print(f"\n  Summary: {summary_path}")
 
 
 if __name__ == "__main__":
