@@ -38,6 +38,8 @@ from .config import (
     OTP_TTL,
     PDFS_DIR,
     SENTRY_DSN,
+    TEST_OTP,
+    TEST_PHONE,
 )
 from .drug_cost_engine import compute_monthly_drug_costs
 from .encryption import get_cipher
@@ -424,11 +426,26 @@ def lookup_member(req: LookupRequest, request: Request):
     Step 1: Look up member by phone, send OTP.
     Returns only {found, first_name} — no sensitive data until OTP verified.
     """
-    try:
-        member = search_contact_by_phone(req.phone)
-    except Exception as e:
-        log.error(f"Zoho lookup failed: {e}")
-        raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
+    # Test account — skip Zoho lookup and SMS, use hardcoded demo data
+    is_test = TEST_PHONE and req.phone == TEST_PHONE
+
+    if is_test:
+        member = {
+            "first_name": "Test",
+            "last_name": "User",
+            "plan_name": "Demo Plan",
+            "plan_number": "H0000-000-000",
+            "agent": "",
+            "medicare_number": "",
+            "medications": "",
+            "zip_code": "10001",
+        }
+    else:
+        try:
+            member = search_contact_by_phone(req.phone)
+        except Exception as e:
+            log.error(f"Zoho lookup failed: {e}")
+            raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
 
     if member is None:
         get_audit_log().record(
@@ -441,24 +458,25 @@ def lookup_member(req: LookupRequest, request: Request):
     # Store member data in a pending session (will be promoted after OTP verify)
     create_session(req.phone, member)
 
-    # Generate + send OTP
-    code = generate_otp(
-        req.phone,
-        otp_ttl=OTP_TTL,
-        max_sends=OTP_MAX_SENDS,
-        send_window=OTP_SEND_WINDOW,
-    )
-    if code is None:
-        raise HTTPException(status_code=429, detail="Too many verification attempts. Please wait a few minutes.")
+    if not is_test:
+        # Generate + send OTP (skipped for test account — uses TEST_OTP instead)
+        code = generate_otp(
+            req.phone,
+            otp_ttl=OTP_TTL,
+            max_sends=OTP_MAX_SENDS,
+            send_window=OTP_SEND_WINDOW,
+        )
+        if code is None:
+            raise HTTPException(status_code=429, detail="Too many verification attempts. Please wait a few minutes.")
 
-    sms = get_sms()
-    if not sms.send_otp(req.phone, code):
-        raise HTTPException(status_code=500, detail="Unable to send verification code. Please try again.")
+        sms = get_sms()
+        if not sms.send_otp(req.phone, code):
+            raise HTTPException(status_code=500, detail="Unable to send verification code. Please try again.")
 
     get_audit_log().record(
         actor=req.phone, action="auth_lookup", resource="member",
         ip_address=request.client.host if request.client else "",
-        detail="otp_sent",
+        detail="otp_sent" if not is_test else "test_account",
     )
 
     return {
@@ -473,7 +491,11 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     Step 2: Verify OTP → return JWT tokens + full member data.
     """
-    if not verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS):
+    # Test account — accept TEST_OTP without going through the OTP store
+    is_test = TEST_PHONE and TEST_OTP and req.phone == TEST_PHONE
+    otp_valid = (is_test and req.code == TEST_OTP) or verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
+
+    if not otp_valid:
         get_audit_log().record(
             actor=req.phone, action="auth_verify_otp", resource="member",
             ip_address=request.client.host if request.client else "",

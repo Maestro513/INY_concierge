@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
-import { API_URL, fetchWithTimeout } from '../constants/api';
+import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
 import GradientBg from '../components/GradientBg';
 
@@ -82,7 +82,6 @@ export default function PhoneScreen() {
       if (res.status === 429) {
         setError("Too many attempts. Please wait a few minutes and try again.");
       } else if (data.found) {
-        // OTP sent — navigate to verification screen
         router.push({
           pathname: '/otp',
           params: {
