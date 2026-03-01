@@ -1,5 +1,11 @@
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+let AsyncStorage = null;
+try {
+  AsyncStorage = require('@react-native-async-storage/async-storage').default;
+} catch (e) {
+  console.log('[API] AsyncStorage native module not available. Token persistence disabled.');
+}
 
 // ── API Configuration ──────────────────────────────────────────
 const DEV_IPS = ['192.168.1.188', '192.168.1.50'];
@@ -41,13 +47,16 @@ let _refreshToken = null;
 export async function setTokens(access, refresh) {
   _accessToken = access;
   _refreshToken = refresh;
-  await AsyncStorage.multiSet([
-    [TOKEN_KEY, access],
-    [REFRESH_KEY, refresh],
-  ]);
+  if (AsyncStorage) {
+    await AsyncStorage.multiSet([
+      [TOKEN_KEY, access],
+      [REFRESH_KEY, refresh],
+    ]);
+  }
 }
 
 export async function loadTokens() {
+  if (!AsyncStorage) return { access: null, refresh: null };
   try {
     const [[, access], [, refresh]] = await AsyncStorage.multiGet([TOKEN_KEY, REFRESH_KEY]);
     _accessToken = access;
@@ -61,7 +70,9 @@ export async function loadTokens() {
 export async function clearTokens() {
   _accessToken = null;
   _refreshToken = null;
-  await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_KEY]);
+  if (AsyncStorage) {
+    await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_KEY]);
+  }
 }
 
 export function getAccessToken() {
