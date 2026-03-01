@@ -33,6 +33,7 @@ from bs4 import BeautifulSoup
 DEFAULT_PDFS_DIR = r"C:\Users\tank5\OneDrive\Concierge\backend\Pdfs"
 
 SITEMAP_URL = "https://www.medicareadvantage.com/plans-sitemap.xml"
+DEFAULT_SITEMAP_FILE = r"C:\Users\tank5\Downloads\plans-sitemap.xml"
 
 HEADERS = {
     "User-Agent": (
@@ -122,13 +123,15 @@ def scan_existing_pdfs(pdfs_dir: Path) -> dict[str, Path]:
 # ── Step 2: Fetch sitemap ────────────────────────────────────────────────────
 
 
-def fetch_sitemap(url: str = SITEMAP_URL) -> list[dict]:
-    """Fetch sitemap XML and extract plan URLs with metadata."""
-    print(f"\n[2/4] Fetching sitemap: {url}")
-    resp = requests.get(url, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
+def fetch_sitemap(local_file: str = DEFAULT_SITEMAP_FILE) -> list[dict]:
+    """Read sitemap XML from a local file and extract plan URLs with metadata."""
+    print(f"\n[2/4] Reading local sitemap: {local_file}")
+    if not Path(local_file).is_file():
+        print(f"  ERROR: File not found: {local_file}")
+        print(f"  Download it from your browser first: {SITEMAP_URL}")
+        return []
 
-    root = ElementTree.fromstring(resp.content)
+    root = ElementTree.parse(local_file).getroot()
 
     # Handle XML namespaces (sitemaps use xmlns)
     ns = ""
@@ -289,6 +292,8 @@ def main():
                         help="Filter by state code (e.g. NY, FL)")
     parser.add_argument("--limit", type=int, default=0,
                         help="Max PDFs to download (0 = all)")
+    parser.add_argument("--sitemap", type=str, default=DEFAULT_SITEMAP_FILE,
+                        help=f"Path to local sitemap XML (default: {DEFAULT_SITEMAP_FILE})")
     parser.add_argument("--delay", type=float, default=2.0,
                         help="Seconds between requests (default: 2)")
     args = parser.parse_args()
@@ -303,8 +308,8 @@ def main():
     print(f"\n[1/4] Scanning local PDFs: {pdfs_dir}")
     existing = scan_existing_pdfs(pdfs_dir)
 
-    # Step 2: Fetch sitemap
-    sitemap_plans = fetch_sitemap()
+    # Step 2: Read local sitemap
+    sitemap_plans = fetch_sitemap(args.sitemap)
 
     # Apply filters
     if args.carrier:
