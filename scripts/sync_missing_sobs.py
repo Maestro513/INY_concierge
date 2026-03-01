@@ -264,14 +264,36 @@ def download_pdf(url: str, dest: Path) -> bool:
 # ── Decide download folder ───────────────────────────────────────────────────
 
 
-def pick_download_folder(plan: dict, pdfs_dir: Path) -> Path:
+def build_prefix_folder_map(existing: dict[str, Path]) -> dict[str, Path]:
+    """
+    Build a map of H-number prefix -> folder from existing PDFs.
+    E.g. if H1045-057 is in UHC/MAPD, then prefix "H1045" -> UHC/MAPD.
+    Uses the most common folder for each prefix (majority vote).
+    """
+    from collections import Counter
+    prefix_folders = {}  # prefix -> Counter of folders
+    for plan_id, folder in existing.items():
+        prefix = plan_id.split("-")[0]  # e.g. "H1045"
+        if prefix not in prefix_folders:
+            prefix_folders[prefix] = Counter()
+        prefix_folders[prefix][folder] += 1
+
+    # Pick the most common folder for each prefix
+    return {prefix: counter.most_common(1)[0][0]
+            for prefix, counter in prefix_folders.items()}
+
+
+def pick_download_folder(plan: dict, pdfs_dir: Path,
+                         prefix_map: dict[str, Path]) -> Path:
     """
     Decide which subfolder to save a new PDF into.
-    Uses carrier name if available, otherwise puts in root Pdfs/ folder.
+    Matches by H-number prefix — if existing plans with the same prefix
+    live in a folder, new ones go there too.
+    Falls back to root Pdfs/ folder if no match found.
     """
-    carrier = plan.get("carrier", "")
-    if carrier:
-        return pdfs_dir / carrier
+    prefix = plan["plan_id"].split("-")[0]  # e.g. "H1045"
+    if prefix in prefix_map:
+        return prefix_map[prefix]
     return pdfs_dir
 
 
@@ -307,6 +329,7 @@ def main():
     # Step 1: Scan local PDFs
     print(f"\n[1/4] Scanning local PDFs: {pdfs_dir}")
     existing = scan_existing_pdfs(pdfs_dir)
+    prefix_map = build_prefix_folder_map(existing)
 
     # Step 2: Read local sitemap
     sitemap_plans = fetch_sitemap(args.sitemap)
@@ -382,7 +405,7 @@ def main():
         print(f"    SOB link: {sob_url}")
 
         # Pick folder and filename
-        folder = pick_download_folder(plan, pdfs_dir)
+        folder = pick_download_folder(plan, pdfs_dir, prefix_map)
         pdf_name = f"{full_id}_SOB_2026.pdf"
         dest = folder / pdf_name
 
