@@ -144,13 +144,13 @@ def fetch_sitemap(local_file: str = DEFAULT_SITEMAP_FILE) -> list[dict]:
         if not loc:
             continue
 
-        # Extract plan ID from URL path
-        # Patterns: /plans/H1234-567-000  or  /enrollment/H1234-567
-        match = re.search(r"/([HR]\d{4}-\d{3}(?:-\d{3})?)", loc)
+        # Extract plan ID from URL path (case-insensitive)
+        # Patterns: /plans/...-h1045-057-000  or  /enrollment/H1234-567
+        match = re.search(r"([HhRr]\d{4}-\d{3}(?:-\d{3})?)", loc)
         if not match:
             continue
 
-        full_id = match.group(1)
+        full_id = match.group(1).upper()
         # Normalize to two-segment for matching: H1234-567
         parts = full_id.split("-")
         plan_id = f"{parts[0]}-{parts[1]}"
