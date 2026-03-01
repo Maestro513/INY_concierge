@@ -2,39 +2,63 @@
 InsuranceNYou Backend API
 """
 
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
-from .claude_client import ask_claude, load_plan_chunks, find_relevant_chunks, _find_extracted_file
-from .zoho_client import search_contact_by_phone
-from .providers.service import search_providers
-from .sob_parser import extract_tier_copays, load_plan_text
-from .drug_cost_engine import compute_monthly_drug_costs
-from .auth import generate_otp, verify_otp, create_tokens, decode_token, require_auth
-from .sms_provider import create_sms_provider
-
 import json
+import logging
 import os
 import re
-import logging
 import time
 import uuid
+from typing import Optional
+
 import anthropic
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from .audit import get_audit_log, mask_phone, mask_pii_in_string
+from .auth import create_tokens, decode_token, generate_otp, require_auth, verify_otp
+from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
-    ANTHROPIC_API_KEY, EXTRACTED_DIR, PDFS_DIR, APP_ENV, CORS_ORIGINS, LOG_LEVEL,
-    ADMIN_SECRET, GDRIVE_FOLDER_ID, JWT_SECRET, JWT_ACCESS_TTL, JWT_REFRESH_TTL,
-    OTP_TTL, OTP_MAX_ATTEMPTS, OTP_MAX_SENDS, OTP_SEND_WINDOW,
+    ADMIN_SECRET,
+    ANTHROPIC_API_KEY,
+    APP_ENV,
+    CORS_ORIGINS,
+    EXTRACTED_DIR,
+    GDRIVE_FOLDER_ID,
+    JWT_ACCESS_TTL,
+    JWT_REFRESH_TTL,
+    JWT_SECRET,
+    LOG_LEVEL,
+    OTP_MAX_ATTEMPTS,
+    OTP_MAX_SENDS,
+    OTP_SEND_WINDOW,
+    OTP_TTL,
+    PDFS_DIR,
     SENTRY_DSN,
 )
-from .user_data import UserDataDB
-from .audit import get_audit_log, mask_pii_in_string, mask_phone
+from .drug_cost_engine import compute_monthly_drug_costs
 from .encryption import get_cipher
+from .providers.service import search_providers
+from .sms_provider import create_sms_provider
+from .sob_parser import extract_tier_copays, load_plan_text
+from .user_data import UserDataDB
+from .zoho_client import search_contact_by_phone
 
 # ── Sentry error monitoring ──────────────────────────────────────────────────
+
+def _sentry_before_send(event, hint):
+    """Strip PII from Sentry events before sending."""
+    # Remove phone numbers and Medicare numbers from breadcrumbs/messages
+    if "logentry" in event and "message" in event["logentry"]:
+        msg = event["logentry"]["message"]
+        msg = re.sub(r'\b\d{10}\b', '***PHONE***', msg)
+        msg = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', msg)
+        event["logentry"]["message"] = msg
+    return event
+
 if SENTRY_DSN:
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -49,20 +73,9 @@ if SENTRY_DSN:
             StarletteIntegration(),
             FastApiIntegration(),
         ],
-        # Scrub sensitive data from error reports
         before_send=_sentry_before_send,
         send_default_pii=False,
     )
-
-def _sentry_before_send(event, hint):
-    """Strip PII from Sentry events before sending."""
-    # Remove phone numbers and Medicare numbers from breadcrumbs/messages
-    if "logentry" in event and "message" in event["logentry"]:
-        msg = event["logentry"]["message"]
-        msg = re.sub(r'\b\d{10}\b', '***PHONE***', msg)
-        msg = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', msg)
-        event["logentry"]["message"] = msg
-    return event
 
 # ── Structured logging ───────────────────────────────────────────────────────
 logging.basicConfig(
@@ -1070,7 +1083,7 @@ def _otc_from_sob_text(plan_number: str) -> dict | None:
                     period = "Yearly"
                 return {"amount": f"${amt}", "period": period}
     except Exception as e:
-        log.warning(f"OTC SOB fallback failed for {pid}: {e}")
+        log.warning(f"OTC SOB fallback failed for {plan_number}: {e}")
     return None
 
 

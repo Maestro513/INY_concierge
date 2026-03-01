@@ -7,9 +7,10 @@ file doesn't exist or isn't a valid SQLite database.
 
 import os
 import sqlite3
+
 import pytest
 
-from app.cms_lookup import CMSLookup, INSULIN_NAMES
+from app.cms_lookup import INSULIN_NAMES, CMSLookup
 
 # Check if CMS DB exists AND is a valid SQLite file
 _DB_PATH = os.path.join(

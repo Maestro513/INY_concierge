@@ -3,7 +3,8 @@ Tests for helper functions in main.py.
 """
 
 import pytest
-from app.main import parse_medications, normalize_plan_id
+
+from app.main import normalize_plan_id, parse_medications
 
 
 class TestNormalizePlanId:

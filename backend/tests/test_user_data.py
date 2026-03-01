@@ -3,8 +3,9 @@ Tests for UserDataDB — medication reminders + benefits usage tracking.
 """
 
 import os
-import pytest
 import tempfile
+
+import pytest
 
 from app.user_data import UserDataDB
 

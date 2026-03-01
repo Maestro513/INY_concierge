@@ -4,9 +4,11 @@ Tests for HIPAA compliance modules: encryption, audit logging, PII masking.
 
 import os
 import tempfile
+
 import pytest
+
+from app.audit import AuditLog, mask_medicare, mask_phone, mask_pii_in_string
 from app.encryption import FieldCipher, generate_key
-from app.audit import AuditLog, mask_phone, mask_medicare, mask_pii_in_string
 
 
 class TestFieldEncryption:

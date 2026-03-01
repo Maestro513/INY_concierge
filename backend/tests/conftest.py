@@ -4,6 +4,7 @@ Shared fixtures for backend tests.
 
 import os
 import sys
+
 import pytest
 
 # Ensure the backend package is importable

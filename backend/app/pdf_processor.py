@@ -14,11 +14,13 @@ Usage:
   python -m app.pdf_processor
 """
 
+import json
 import os
 import re
-import json
+
 import fitz  # PyMuPDF
-from .config import PDFS_DIR, EXTRACTED_DIR
+
+from .config import EXTRACTED_DIR, PDFS_DIR
 
 
 def extract_plan_ids(filename: str) -> list[str]:
@@ -161,7 +163,7 @@ def process_all_pdfs():
         return
 
     print(f"\n{'='*60}")
-    print(f"  InsuranceNYou SOB PDF Processor")
+    print("  InsuranceNYou SOB PDF Processor")
     print(f"  Found {len(pdf_files)} PDF(s)")
     print(f"{'='*60}\n")
 

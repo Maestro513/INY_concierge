@@ -13,8 +13,8 @@ Usage:
 """
 
 import base64
-import os
 import logging
+import os
 
 log = logging.getLogger(__name__)
 

@@ -13,12 +13,12 @@ Audit logs are append-only and stored in a separate SQLite DB.
 In production, these should also be shipped to a SIEM/log aggregator.
 """
 
-import sqlite3
-import os
 import logging
+import os
+import re
+import sqlite3
 import threading
 import time
-import re
 from datetime import datetime
 
 log = logging.getLogger(__name__)

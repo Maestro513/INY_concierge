@@ -8,9 +8,9 @@ Fixes from v1:
 - Dental/Hearing/Ambulance use targeted extraction
 """
 
-import re
 import json
 import os
+import re
 
 # Try relative import for production, fallback for standalone test
 try:
@@ -195,116 +195,150 @@ def extract_plan_meta(text: str) -> dict:
 
 def _find_pcp(text: str) -> str | None:
     m = re.search(r'Primary\s+Care\s+Provider\s*\(PCP\)\s*:\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'\nPCP\s*\n\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r"PCP'?s?\s+office\s*\n\s*(\$\d+)\s*copay", text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_specialist(text: str) -> str | None:
     m = re.search(r'Specialist\s*:\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'\nSpecialist\s*\n\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r"Specialist'?s?\s+office\s*\n\s*(\$\d+)\s*copay", text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_emergency(text: str) -> str | None:
     # "$150 copay for emergency care" (Aetna) - most specific, try first
     m = re.search(r'(\$\d+)\s+copay\s+for\s+emergency\s+(?:care|services)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "Emergency services at emergency room\n$100 copay" (Humana)
     m = re.search(r'Emergency\s+services\s+at\s+emergency\s+room\s*\n\s*(\$\d+)\s+copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "Emergency Care\n$150 copay per stay" (Devoted) - require start of line or after section break
     m = re.search(r'\nEmergency\s+Care\s*\n\s*(\$\d+)\s+copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "EMERGENCY CARE\n...\n$100 copay" section header
     m = re.search(r'EMERGENCY\s+CARE\s*\n[^\n]*?(\$\d+)\s+copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_urgent(text: str) -> str | None:
     m = re.search(r'(\$\d+)\s+copay\s+for\s+urgent\s+care', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Urgent\s+Care\s+Center[^\n]*?(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Urgent\s+care\s+center\s*\n\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_ambulance(text: str) -> str | None:
     m = re.search(r'Ground\s*\n\s*(\$\d+)\s+copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Ground\s+Ambulance\s*:\s*\n?\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'(\$\d+)\s+copay\s+for\s+ground\s+ambulance', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'(\$\d+)\s+copay\s+for\s+ambulance', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Ambulance\s*\n\s*\(ground[^)]*\)\s*\n\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_hearing_exam(text: str) -> str | None:
     # "Routine hearing exam\n$0 copay" (Aetna - newline before cost)
     m = re.search(r'Routine\s+[Hh]earing\s+[Ee]xam\s*:?\s*\n?\s*(\$\d+)\s*copay', text)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "Routine Hearing Exam: $0 copay" (Devoted)
     m = re.search(r'Routine\s+Hearing\s+Exam\s*:\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "$0 copay for fitting/evaluation, routine hearing exams" (Humana)
     m = re.search(r'(\$\d+)\s+copay\s+for\s+(?:fitting/evaluation,\s+)?routine\s+hearing\s+exam', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_hearing_aids(text: str) -> str | None:
     m = re.search(r'Hearing\s+aids.*?\$([0-9,]+)\s+per\s+ear', text, re.IGNORECASE | re.DOTALL)
-    if m: return f"${m.group(1)}"
+    if m:
+        return f"${m.group(1)}"
     m = re.search(r'Hearing\s+[Aa]ids\s*\n[^\n]*?(\$\d+)\s+copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'(\$[0-9,]+)\s+maximum\s+benefit\s+coverage\s+amount\s+for\s+each\s+(?:prescription\s+)?hearing\s+aid', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_dental(text: str) -> str | None:
     m = re.search(r'(\$\d+)\s+copay\s+for\s+preventive\s+(?:dental\s+)?services', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Medicare[\u2011\-]covered\s+dental\s*\n\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'dental\s+benefit.*?(\$\d+)\s+copay\s+for\s+(?:comprehensive\s+oral\s+exam|prophylaxis|cleaning)', text, re.IGNORECASE | re.DOTALL)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'\$([0-9,]+)\s+yearly\s+allowance\s+toward\s+(?:Preventive\s+)?Dental', text, re.IGNORECASE)
-    if m: return f"${m.group(1)} allowance"
+    if m:
+        return f"${m.group(1)} allowance"
     return None
 
 
 def _find_vision_exam(text: str) -> str | None:
     m = re.search(r'Routine\s+(?:[Ee]ye|[Vv]ision)\s+[Ee]xam[^\n]*?(\$\d+)\s*copay', text)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Routine\s+(?:Eye|Vision)\s+Exam\s*:\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
 def _find_vision_eyewear(text: str) -> str | None:
     m = re.search(r'(\$[0-9,]+)\s+(?:for\s+covered\s+prescription\s+eyewear|each\s+year\s+for\s+eyeglasses)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'(\$[0-9,]+)\s+maximum\s+benefit\s+coverage\s+amount\s+per\s+year\s+for\s+contact', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Up\s+to\s+(\$[0-9,]+)\s+each\s+year\s+for\s+eyeglasses', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'(?:allowance\)?)\s+of\s+(\$[0-9,]+)\s+for\s+covered', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
@@ -325,7 +359,8 @@ def _find_inpatient(text: str) -> str | None:
 def _find_outpatient(text: str) -> str | None:
     # "Outpatient Hospital: $195 copay" (Devoted)
     m = re.search(r'Outpatient\s+Hospital\s*:\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
 
     # Check if there's a section header (Humana uses OUTPATIENT HOSPITAL COVERAGE)
     section = re.search(
@@ -342,7 +377,8 @@ def _find_outpatient(text: str) -> str | None:
 
     # "Outpatient hospital\n$0 copay" or "Outpatient hospital Coverage...\n$0 copay" (Aetna)
     m = re.search(r'Outpatient\s+[Hh]ospital(?:\s+[Cc]overage[^\n]*)?\s*\n\s*(\$\d+)\s*copay', text)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
 
     return None
 
@@ -350,16 +386,20 @@ def _find_outpatient(text: str) -> str | None:
 def _find_surgery(text: str) -> str | None:
     # "Ambulatory Surgical Center (ASC): $195 copay" (Devoted)
     m = re.search(r'Ambulatory\s+Surgical\s+Center\s*\(ASC\)\s*:\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "Ambulatory surgical center\n$0 copay" (Aetna)
     m = re.search(r'Ambulatory\s+[Ss]urgical\s+[Cc]enter\s*\n\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # "AMBULATORY SURGERY CENTER\nSurgery services\n$20 copay" (Humana)
     m = re.search(r'AMBULATORY\s+SURGERY\s+CENTER\s*\n[^\n]*?\n\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     # Generic "Surgery services\n$60 copay"
     m = re.search(r'Surgery\s+services\s*\n\s*(\$\d+)', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
@@ -383,13 +423,17 @@ def _find_snf(text: str) -> str | None:
 
 def _find_mental_outpatient(text: str) -> str | None:
     m = re.search(r'Outpatient\s+[Mm]ental\s+[Hh]ealth[^\n]*?\n\s*(\$\d+)\s*copay', text)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Mental\s+[Hh]ealth\s+[Tt]herapy\s+visits\s*\n\s*(\$\d+)\s*copay', text)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Outpatient\s+Mental\s+Health\s+Services[^\n]*?\n?\s*:\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'Outpatient\s+Mental\s+Health\s+Services[^\n]*?\n\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 
@@ -409,11 +453,14 @@ def _find_mental_inpatient(text: str) -> str | None:
 
 def _find_preventive(text: str) -> str | None:
     m = re.search(r'Preventive\s+[Cc]are\s*\n\s*(\$\d+)\s*copay', text)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     m = re.search(r'covers\s+many\s+preventive\s+services\s+at\s+no\s+cost', text, re.IGNORECASE)
-    if m: return "$0"
+    if m:
+        return "$0"
     m = re.search(r'PREVENTIVE\s+CARE\s*\n\s*(\$\d+)\s*copay', text, re.IGNORECASE)
-    if m: return m.group(1)
+    if m:
+        return m.group(1)
     return None
 
 

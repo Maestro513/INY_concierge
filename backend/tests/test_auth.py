@@ -3,18 +3,19 @@ Tests for OTP generation, verification, and JWT token management.
 """
 
 import time
-import pytest
 from unittest.mock import patch
+
+import pytest
 from fastapi import HTTPException
 
 from app.auth import (
-    generate_otp,
-    verify_otp,
+    _hash_code,
+    _otp_send_log,
+    _otp_store,
     create_tokens,
     decode_token,
-    _hash_code,
-    _otp_store,
-    _otp_send_log,
+    generate_otp,
+    verify_otp,
 )
 
 

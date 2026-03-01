@@ -16,10 +16,12 @@ Base: https://flex.optum.com/fhirpublic/R4
 Token: https://flex.optum.com/authz/{payer}/oauth/token
 """
 
-import httpx
 import logging
 import os
 import time
+
+import httpx
+
 from .base import BaseAdapter, ProviderResult, resolve_specialty
 
 logger = logging.getLogger(__name__)

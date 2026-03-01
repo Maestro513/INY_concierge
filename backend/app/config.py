@@ -4,6 +4,7 @@ App configuration from environment variables.
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load .env from the backend/ directory (parent of this file's directory)
