@@ -6,13 +6,14 @@ then cross-references with CMS pharmacy network data to show
 in-network / preferred status for the member's plan.
 """
 
-import httpx
 import logging
-import sqlite3
 import os
+import sqlite3
 from functools import lru_cache
 
-from .config import GOOGLE_API_KEY, BASE_DIR
+import httpx
+
+from .config import BASE_DIR, GOOGLE_API_KEY
 from .providers.enrichment.geocoding import geocode_zip, haversine_miles
 
 logger = logging.getLogger(__name__)

@@ -16,12 +16,13 @@ Key lookups:
   - get_full_benefits(contract_id, plan_id) → all of the above combined
 """
 
-import sqlite3
-import os
 import logging
+import os
+import sqlite3
 import threading
-import requests
 from typing import Optional
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -141,7 +142,6 @@ class CMSLookup:
         )
 
         # From PBP Section A (plan metadata)
-        pbp_seg = seg.lstrip("0") or "0"
         section_a = self._query_one(
             """SELECT pbp_a_org_name, pbp_a_org_marketing_name, pbp_a_plan_name,
                       pbp_a_special_need_flag, pbp_a_plan_type,
@@ -416,8 +416,6 @@ class CMSLookup:
         )
         if not puf:
             return {"error": f"Plan {plan_number} not found"}
-
-        formulary_id = puf["formulary_id"]
 
         # Try RxNorm API for RXCUIs
         rxcuis = self.get_rxcui_by_name(drug_name)

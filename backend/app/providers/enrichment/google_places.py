@@ -4,9 +4,10 @@ Looks up providers by name + location to get ratings, reviews, and Maps links.
 Uses Places API (New) for better data and lower cost.
 """
 
-import httpx
 import logging
 from urllib.parse import quote
+
+import httpx
 
 from app.config import GOOGLE_API_KEY
 

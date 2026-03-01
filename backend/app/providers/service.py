@@ -5,11 +5,12 @@ enriches results with NPPES/Google data, calculates distances.
 """
 
 import logging
+
 from .adapters.base import ProviderResult, resolve_specialty
+from .adapters.healthspring import HealthspringAdapter
 from .adapters.humana import HumanaAdapter
 from .adapters.uhc import UHCAdapter
-from .adapters.healthspring import HealthspringAdapter
-from .enrichment.geocoding import geocode_zip, geocode_address, haversine_miles
+from .enrichment.geocoding import geocode_address, geocode_zip, haversine_miles
 from .enrichment.google_places import enrich_providers
 from .enrichment.nppes import bulk_lookup_npis
 

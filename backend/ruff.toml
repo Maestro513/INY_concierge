@@ -1,0 +1,14 @@
+# Ruff linter config for backend
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "F401",   # unused import — some are side-effect imports
+    "E402",   # module-level import not at top
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F811"]  # allow fixture redefinition in tests

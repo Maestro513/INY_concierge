@@ -47,7 +47,7 @@ class ConsoleProvider(SMSProvider):
     """Dev-only — prints OTP to server logs instead of sending SMS."""
 
     def send_otp(self, phone: str, code: str) -> bool:
-        log.info(f"[DEV OTP] Phone: {phone} → Code: {code}")
+        log.info(f"[DEV OTP] Phone: ***-***-{phone[-4:]} → Code: {code}")
         return True
 
 

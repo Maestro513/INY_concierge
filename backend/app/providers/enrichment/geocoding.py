@@ -3,10 +3,11 @@ Geocoding service for zip code → lat/long conversion and distance calculation.
 Uses Google Geocoding API + haversine formula for distance.
 """
 
-import httpx
 import logging
 import math
 from functools import lru_cache
+
+import httpx
 
 from app.config import GOOGLE_API_KEY
 

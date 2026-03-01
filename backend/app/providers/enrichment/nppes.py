@@ -4,8 +4,9 @@ Free, no auth required. Used to supplement carriers that don't provide
 NUCC specialty codes or accepting patients data.
 """
 
-import httpx
 import logging
+
+import httpx
 
 logger = logging.getLogger(__name__)
 

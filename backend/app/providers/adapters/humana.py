@@ -11,8 +11,10 @@ Chained params (location.address-postalcode) timeout — do NOT use them.
 """
 
 import asyncio
-import httpx
 import logging
+
+import httpx
+
 from .base import BaseAdapter, ProviderResult, resolve_specialty
 
 logger = logging.getLogger(__name__)
@@ -271,7 +273,7 @@ class HumanaAdapter(BaseAdapter):
                         loc_ids, locations = await self._get_locations_by_state(client, state)
 
                 if not loc_ids:
-                    print(f"[HUMANA] No locations found at all")
+                    print("[HUMANA] No locations found at all")
                     return []
 
                 # ── STEP 2: Find PractitionerRoles at those locations ──

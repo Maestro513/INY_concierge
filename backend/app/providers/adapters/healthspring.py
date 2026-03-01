@@ -17,8 +17,10 @@ Accept: application/json
 """
 
 import asyncio
-import httpx
 import logging
+
+import httpx
+
 from .base import BaseAdapter, ProviderResult, resolve_specialty
 
 logger = logging.getLogger(__name__)

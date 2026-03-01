@@ -2,9 +2,11 @@
 Claude API client for answering member questions about their SOB.
 """
 
-import os
 import json
+import os
+
 import anthropic
+
 from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR
 
 
