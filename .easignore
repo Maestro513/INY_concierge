@@ -2,6 +2,7 @@ backend/
 .git/
 .claude/
 .expo/
+.vercel/
 android/
 ios/
 __pycache__/
