@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .admin_router import router as admin_router
 from .audit import get_audit_log, mask_phone, mask_pii_in_string
 from .auth import create_tokens, decode_token, generate_otp, require_auth, verify_otp
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
@@ -41,7 +42,6 @@ from .config import (
     TEST_OTP,
     TEST_PHONE,
 )
-from .admin_router import router as admin_router
 from .drug_cost_engine import compute_monthly_drug_costs
 from .encryption import get_cipher
 from .providers.service import search_providers
@@ -133,8 +133,8 @@ if not os.path.isdir(_admin_dist):
     _admin_dist = "/opt/render/project/src/admin/dist"
 
 if os.path.isdir(_admin_dist):
-    from starlette.staticfiles import StaticFiles
     from starlette.responses import FileResponse as StarletteFileResponse
+    from starlette.staticfiles import StaticFiles
 
     # Mount static assets (JS, CSS, images)
     _assets_dir = os.path.join(_admin_dist, "assets")

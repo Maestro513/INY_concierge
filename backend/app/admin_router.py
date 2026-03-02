@@ -452,7 +452,6 @@ _start_time = time.time()
 @router.get("/system/health")
 async def system_health(payload: dict = Depends(require_admin)):
     """System health check."""
-    import shutil
     disk = shutil.disk_usage(EXTRACTED_DIR if os.path.isdir(EXTRACTED_DIR) else "/")
     return {
         "status": "healthy",

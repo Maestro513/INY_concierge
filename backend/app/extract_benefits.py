@@ -51,7 +51,6 @@ def _repair_json(raw: str) -> dict | None:
 
     # Close any unterminated strings — find odd number of unescaped quotes
     in_string = False
-    last_quote_pos = -1
     i = 0
     while i < len(text):
         ch = text[i]
@@ -60,8 +59,6 @@ def _repair_json(raw: str) -> dict | None:
             continue
         if ch == '"':
             in_string = not in_string
-            if in_string:
-                last_quote_pos = i
         i += 1
 
     if in_string:
