@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, Filter, MoreHorizontal, Phone, MapPin,
   ChevronLeft, ChevronRight, Eye, Pencil, Shield,
-  KeyRound, Pill, Send, FileText, Check, ChevronsUpDown,
+  KeyRound, Pill, Send, FileText, Check,
   UserPlus, Hash,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

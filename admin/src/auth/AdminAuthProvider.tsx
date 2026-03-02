@@ -17,19 +17,15 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    token: localStorage.getItem('admin_token'),
-    loading: true,
+  const [state, setState] = useState<AuthState>(() => {
+    const token = localStorage.getItem('admin_token');
+    return { user: null, token, loading: !!token };
   });
 
   // Fetch the current user profile on mount (if token exists)
   useEffect(() => {
     const token = localStorage.getItem('admin_token');
-    if (!token) {
-      setState((s) => ({ ...s, loading: false }));
-      return;
-    }
+    if (!token) return;
 
     client
       .get(ENDPOINTS.ME)
@@ -65,6 +61,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAdminAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAdminAuth must be used inside AdminAuthProvider');

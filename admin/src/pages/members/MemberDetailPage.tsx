@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Phone, MapPin, Mail, Calendar, Shield,
-  KeyRound, Pill, Send, FileText, Clock, Check, X,
-  Plus, Trash2, ChevronRight, Activity, Eye,
+  KeyRound, Pill, Send, FileText, Check,
+  Plus, Trash2, Activity, Eye,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -64,7 +64,7 @@ const ACTIVITY_ICONS: Record<string, typeof Activity> = {
 };
 
 export default function MemberDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: _id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   // In production, this will be a TanStack Query hook

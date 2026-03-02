@@ -23,8 +23,9 @@ export default function LoginPage() {
     try {
       await login(email, password);
       navigate('/admin', { replace: true });
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid credentials');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setError(axiosErr.response?.data?.detail || 'Invalid credentials');
     } finally {
       setLoading(false);
     }
