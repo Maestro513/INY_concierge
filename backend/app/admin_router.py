@@ -1,0 +1,545 @@
+"""
+Admin portal API router.
+
+All endpoints under /api/admin/* — separate auth from mobile app.
+"""
+
+import glob
+import json
+import logging
+import os
+import shutil
+import tarfile
+import tempfile
+import time
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from pydantic import BaseModel
+
+from . import admin_db
+from .admin_auth import (
+    authenticate_admin,
+    bootstrap_super_admin,
+    create_admin_tokens,
+    decode_admin_token,
+    hash_password,
+    require_admin,
+    require_role,
+)
+from .auth import generate_otp
+from .config import ADMIN_SECRET, EXTRACTED_DIR, PDFS_DIR
+from .sms_provider import create_sms_provider
+from .zoho_client import search_contact_by_phone
+
+log = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+# ── Request / Response models ────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class CreateAdminRequest(BaseModel):
+    email: str
+    password: str
+    first_name: str = ""
+    last_name: str = ""
+    role: str = "viewer"
+
+
+class UpdateAdminRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class CreateMemberRequest(BaseModel):
+    first_name: str
+    last_name: str
+    phone: str                          # E.164 or raw digits — used for OTP login
+    medicare_number: str = ""           # MBI — will be encrypted at rest
+    zip_code: str = ""
+    carrier: str = ""
+    plan_name: str = ""
+    plan_number: str = ""               # Links SOB extraction → member app
+    send_verification: bool = True      # Send OTP to phone after creation
+
+
+class SendOTPRequest(BaseModel):
+    phone: str
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  AUTH ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.post("/auth/login")
+async def admin_login(body: LoginRequest, request: Request):
+    """Admin email + password login."""
+    result = authenticate_admin(body.email, body.password)
+    admin_db.record_login_event(
+        phone=body.email, ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent", ""), success=True,
+    )
+    return result
+
+
+@router.post("/auth/refresh")
+async def admin_refresh(request: Request):
+    """Refresh admin access token using refresh token."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing refresh token.")
+    token = auth_header[7:]
+    payload = decode_admin_token(token, expected_type="admin_refresh")
+    user = admin_db.get_admin_user_by_id(int(payload["sub"]))
+    if not user or not user["is_active"]:
+        raise HTTPException(status_code=401, detail="Account not found or deactivated.")
+    return create_admin_tokens(user)
+
+
+@router.get("/auth/me")
+async def admin_me(payload: dict = Depends(require_admin)):
+    """Get current admin user profile."""
+    user = admin_db.get_admin_user_by_id(int(payload["sub"]))
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin user not found.")
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "first_name": user["first_name"],
+        "last_name": user["last_name"],
+        "role": user["role"],
+        "is_active": bool(user["is_active"]),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  ADMIN USER MANAGEMENT (super_admin only)
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/users")
+async def list_admins(payload: dict = Depends(require_role("super_admin"))):
+    """List all admin users."""
+    return admin_db.list_admin_users()
+
+
+@router.post("/users")
+async def create_admin(body: CreateAdminRequest,
+                       payload: dict = Depends(require_role("super_admin"))):
+    """Create a new admin user."""
+    existing = admin_db.get_admin_user_by_email(body.email)
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered.")
+    pw_hash = hash_password(body.password)
+    user = admin_db.create_admin_user(
+        email=body.email, password_hash=pw_hash,
+        first_name=body.first_name, last_name=body.last_name, role=body.role,
+    )
+    return {"id": user["id"], "email": user["email"], "role": user["role"]}
+
+
+@router.patch("/users/{user_id}")
+async def update_admin(user_id: int, body: UpdateAdminRequest,
+                       payload: dict = Depends(require_role("super_admin"))):
+    """Update an admin user."""
+    fields = body.model_dump(exclude_none=True)
+    if "password" in fields:
+        fields["password_hash"] = hash_password(fields.pop("password"))
+    user = admin_db.update_admin_user(user_id, **fields)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"id": user["id"], "email": user["email"], "role": user["role"],
+            "is_active": bool(user["is_active"])}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  MEMBER MANAGEMENT
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _normalize_phone(raw: str) -> str:
+    """Strip to digits only, ensure 10-digit US phone."""
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits
+
+
+@router.post("/members/create")
+async def create_member(body: CreateMemberRequest,
+                        payload: dict = Depends(require_admin)):
+    """
+    Create a new member account.
+    - Saves to Zoho CRM (or local store if Zoho unavailable)
+    - Optionally sends OTP verification code to member's phone
+    """
+    phone = _normalize_phone(body.phone)
+    if len(phone) != 10:
+        raise HTTPException(status_code=400, detail="Phone must be a valid 10-digit US number.")
+
+    # Check if member already exists
+    existing = None
+    try:
+        existing = search_contact_by_phone(phone)
+    except Exception:
+        log.warning("Zoho lookup failed for %s, continuing with creation", phone)
+
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Member with phone {phone} already exists.")
+
+    # TODO: Create contact in Zoho CRM via zoho_client.create_contact()
+    # For now, we log the creation and return the data
+    member_data = {
+        "phone": phone,
+        "first_name": body.first_name,
+        "last_name": body.last_name,
+        "medicare_number": body.medicare_number,  # Will be encrypted by zoho_client
+        "zip_code": body.zip_code,
+        "carrier": body.carrier,
+        "plan_name": body.plan_name,
+        "plan_number": body.plan_number,
+    }
+    log.info("Admin %s created member: %s %s (%s)",
+             payload.get("sub"), body.first_name, body.last_name, phone)
+
+    # Send OTP verification if requested
+    otp_sent = False
+    if body.send_verification:
+        try:
+            code = generate_otp(phone)
+            if code:
+                sms = create_sms_provider()
+                otp_sent = sms.send_otp(phone, code)
+                log.info("OTP sent to new member %s: %s", phone, "success" if otp_sent else "failed")
+        except Exception as e:
+            log.error("Failed to send OTP to %s: %s", phone, e)
+
+    return {
+        "success": True,
+        "member": member_data,
+        "otp_sent": otp_sent,
+        "message": f"Member created. {'Verification code sent to ' + phone if otp_sent else 'OTP send failed — member can request code from the app.'}",
+    }
+
+
+@router.post("/members/send-otp")
+async def admin_send_otp(body: SendOTPRequest,
+                         payload: dict = Depends(require_admin)):
+    """Send OTP login code to a member's phone (triggered by admin)."""
+    phone = _normalize_phone(body.phone)
+    if len(phone) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    try:
+        code = generate_otp(phone)
+        if not code:
+            raise HTTPException(status_code=429, detail="Too many OTP requests. Try again later.")
+        sms = create_sms_provider()
+        sent = sms.send_otp(phone, code)
+        if not sent:
+            raise HTTPException(status_code=500, detail="SMS delivery failed.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("OTP send error for %s: %s", phone, e)
+        raise HTTPException(status_code=500, detail="Failed to send OTP.")
+
+    log.info("Admin %s sent OTP to member %s", payload.get("sub"), phone)
+    return {"success": True, "message": f"Verification code sent to {phone}."}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  ANALYTICS ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/analytics/logins")
+async def analytics_logins(days: int = 30, payload: dict = Depends(require_admin)):
+    """Login statistics for the given period."""
+    return admin_db.get_login_stats(days)
+
+
+@router.get("/analytics/enrollments")
+async def analytics_enrollments(days: int = 30, payload: dict = Depends(require_admin)):
+    """Enrollment stats (placeholder — will pull from Zoho)."""
+    # TODO: Pull from Zoho CRM contact creation dates
+    return {"total_new": 0, "days": days, "note": "Coming soon — Zoho CRM integration"}
+
+
+@router.get("/analytics/features")
+async def analytics_features(days: int = 30, payload: dict = Depends(require_admin)):
+    """Feature usage from search_events table."""
+    return admin_db.get_search_stats(days)
+
+
+@router.get("/analytics/carriers")
+async def analytics_carriers(payload: dict = Depends(require_admin)):
+    """Carrier distribution from extracted JSONs."""
+    carrier_counts: dict[str, int] = {}
+    if os.path.isdir(EXTRACTED_DIR):
+        for fname in os.listdir(EXTRACTED_DIR):
+            if not fname.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(EXTRACTED_DIR, fname)) as f:
+                    data = json.load(f)
+                org = data.get("organization_name", "Other")
+                # Simplify carrier name
+                for c in ["Humana", "Aetna", "UHC", "UnitedHealthcare", "Wellcare",
+                           "Devoted", "Cigna", "Molina", "Centene", "Elevance", "BCBS"]:
+                    if c.lower() in org.lower():
+                        org = c
+                        break
+                carrier_counts[org] = carrier_counts.get(org, 0) + 1
+            except Exception:
+                continue
+    sorted_carriers = sorted(carrier_counts.items(), key=lambda x: x[1], reverse=True)
+    total = sum(v for _, v in sorted_carriers)
+    return [
+        {"carrier": c, "count": n, "percentage": round(n / total * 100, 1) if total else 0}
+        for c, n in sorted_carriers[:20]
+    ]
+
+
+@router.get("/analytics/states")
+async def analytics_states(payload: dict = Depends(require_admin)):
+    """State distribution — placeholder until Zoho CRM enrichment."""
+    return {"note": "Coming soon — requires Zoho CRM address data"}
+
+
+@router.get("/analytics/age-groups")
+async def analytics_age_groups(payload: dict = Depends(require_admin)):
+    """Age group distribution — placeholder."""
+    return {"note": "Coming soon — requires Zoho CRM DOB data"}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  PLANS & EXTRACTION ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/plans")
+async def list_plans(search: str = "", page: int = 1, per_page: int = 50,
+                     payload: dict = Depends(require_admin)):
+    """List all plans with extraction status."""
+    plans = []
+    if not os.path.isdir(EXTRACTED_DIR):
+        return {"data": [], "total": 0, "page": page, "per_page": per_page}
+
+    for fname in sorted(os.listdir(EXTRACTED_DIR)):
+        if not fname.endswith(".json") or fname.endswith("_benefits.json"):
+            continue
+        # Skip non-plan files
+        if fname in ("AGREEMENT-FOR-USE.json",):
+            continue
+        plan_number = fname.replace(".json", "")
+        try:
+            with open(os.path.join(EXTRACTED_DIR, fname)) as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+
+        plan_name = data.get("plan_name", plan_number)
+        carrier = data.get("organization_name", "Unknown")
+
+        # Check if benefits file exists (naming: {plan_number}_benefits.json)
+        benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_number}_benefits.json")
+        has_benefits = os.path.isfile(benefits_path)
+
+        # Check if PDF exists (search all carrier subdirs)
+        has_pdf = False
+        if os.path.isdir(PDFS_DIR):
+            for carrier_dir in os.listdir(PDFS_DIR):
+                carrier_path = os.path.join(PDFS_DIR, carrier_dir)
+                if os.path.isdir(carrier_path):
+                    for pdf in os.listdir(carrier_path):
+                        if plan_number in pdf:
+                            has_pdf = True
+                            break
+                if has_pdf:
+                    break
+
+        entry = {
+            "plan_number": plan_number,
+            "plan_name": plan_name,
+            "carrier": carrier,
+            "plan_type": data.get("plan_type", ""),
+            "has_extraction": True,
+            "has_benefits": has_benefits,
+            "has_pdf": has_pdf,
+        }
+
+        # Search filter
+        if search:
+            q = search.lower()
+            if not (q in plan_number.lower() or q in plan_name.lower() or q in carrier.lower()):
+                continue
+
+        plans.append(entry)
+
+    total = len(plans)
+    start = (page - 1) * per_page
+    return {
+        "data": plans[start:start + per_page],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+@router.get("/plans/{plan_number}")
+async def get_plan_detail(plan_number: str, payload: dict = Depends(require_admin)):
+    """Get full plan data including extracted JSON and benefits."""
+    extracted_path = os.path.join(EXTRACTED_DIR, f"{plan_number}.json")
+    benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_number}_benefits.json")
+
+    if not os.path.isfile(extracted_path):
+        raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found.")
+
+    with open(extracted_path) as f:
+        extracted = json.load(f)
+
+    benefits = None
+    if os.path.isfile(benefits_path):
+        with open(benefits_path) as f:
+            benefits = json.load(f)
+
+    return {"plan_number": plan_number, "extracted": extracted, "benefits": benefits}
+
+
+@router.get("/extractions/stats")
+async def extraction_stats(payload: dict = Depends(require_admin)):
+    """Overview of extraction pipeline status."""
+    total_extracted = 0
+    total_benefits = 0
+    total_pdfs = 0
+
+    if os.path.isdir(EXTRACTED_DIR):
+        for f in os.listdir(EXTRACTED_DIR):
+            if f.endswith(".json"):
+                if f.endswith("_benefits.json"):
+                    total_benefits += 1
+                elif f not in ("AGREEMENT-FOR-USE.json",):
+                    total_extracted += 1
+
+    if os.path.isdir(PDFS_DIR):
+        for carrier_dir in os.listdir(PDFS_DIR):
+            carrier_path = os.path.join(PDFS_DIR, carrier_dir)
+            if os.path.isdir(carrier_path):
+                total_pdfs += len([f for f in os.listdir(carrier_path) if f.endswith(".pdf")])
+
+    return {
+        "total_pdfs": total_pdfs,
+        "total_extracted": total_extracted,
+        "total_benefits": total_benefits,
+        "missing_extraction": max(0, total_pdfs - total_extracted),
+        "missing_benefits": max(0, total_extracted - total_benefits),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  SYSTEM HEALTH
+# ════════════════════════════════════════════════════════════════════════════
+
+_start_time = time.time()
+
+
+@router.get("/system/health")
+async def system_health(payload: dict = Depends(require_admin)):
+    """System health check."""
+    import shutil
+    disk = shutil.disk_usage(EXTRACTED_DIR if os.path.isdir(EXTRACTED_DIR) else "/")
+    return {
+        "status": "healthy",
+        "uptime_seconds": int(time.time() - _start_time),
+        "disk_usage_gb": round(disk.used / (1024**3), 1),
+        "disk_total_gb": round(disk.total / (1024**3), 1),
+        "extracted_dir": EXTRACTED_DIR,
+        "pdfs_dir": PDFS_DIR,
+    }
+
+
+@router.get("/system/metrics")
+async def system_metrics(payload: dict = Depends(require_admin)):
+    """Basic system metrics."""
+    return {
+        "uptime_seconds": int(time.time() - _start_time),
+        "login_stats": admin_db.get_login_stats(1),
+        "search_stats": admin_db.get_search_stats(1),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  DATA UPLOAD (one-time migration — upload extracted JSONs to Render disk)
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.post("/upload/extracted")
+async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
+    """
+    Upload a tar.gz of extracted JSON files to EXTRACTED_DIR.
+
+    Auth: ADMIN_SECRET header (same as sync endpoints) — no JWT needed
+    so we can curl from CLI without logging in.
+
+    Usage:
+        curl -X POST https://iny-concierge.onrender.com/api/admin/upload/extracted \
+             -H "X-Admin-Secret: $ADMIN_SECRET" \
+             -F "file=@extracted_jsons.tar.gz"
+    """
+    secret = request.headers.get("X-Admin-Secret", "")
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden — invalid admin secret.")
+
+    if not file.filename or not file.filename.endswith((".tar.gz", ".tgz")):
+        raise HTTPException(status_code=400, detail="File must be a .tar.gz archive.")
+
+    os.makedirs(EXTRACTED_DIR, exist_ok=True)
+
+    # Save to temp file first
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
+    try:
+        total_bytes = 0
+        while chunk := await file.read(1024 * 1024):  # 1MB chunks
+            tmp.write(chunk)
+            total_bytes += len(chunk)
+        tmp.close()
+
+        log.info("Received %d MB tar.gz — extracting to %s",
+                 total_bytes // (1024 * 1024), EXTRACTED_DIR)
+
+        # Extract
+        count = 0
+        with tarfile.open(tmp.name, "r:gz") as tar:
+            for member in tar.getmembers():
+                if member.isfile() and member.name.endswith(".json"):
+                    # Flatten — strip any directory prefix
+                    member.name = os.path.basename(member.name)
+                    tar.extract(member, EXTRACTED_DIR)
+                    count += 1
+
+        log.info("Extracted %d JSON files to %s", count, EXTRACTED_DIR)
+
+        # Count what's on disk now
+        total_json = len([f for f in os.listdir(EXTRACTED_DIR) if f.endswith(".json")])
+        benefits_json = len([f for f in os.listdir(EXTRACTED_DIR)
+                             if f.endswith(".json") and f.startswith("benefits_")])
+        # Handle the _benefits.json naming convention too
+        benefits_alt = len([f for f in os.listdir(EXTRACTED_DIR)
+                            if f.endswith("_benefits.json")])
+        benefits_count = max(benefits_json, benefits_alt)
+
+        return {
+            "success": True,
+            "files_extracted": count,
+            "total_json_on_disk": total_json,
+            "benefits_files": benefits_count,
+            "extracted_dir": EXTRACTED_DIR,
+            "upload_size_mb": round(total_bytes / (1024 * 1024), 1),
+        }
+    finally:
+        os.unlink(tmp.name)

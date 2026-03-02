@@ -6,28 +6,83 @@ the SOB_EXTRACTION_PROMPT and saves the structured output to
 extracted/{plan_id}_benefits.json.
 
 Skips plans that already have a _benefits.json (incremental).
-Rate-limited to ~1 request/sec to avoid API throttling.
+Runs 5 parallel workers for speed.
 
 Usage:
   cd backend
-  python -m app.extract_benefits            # process all
+  python -m app.extract_benefits            # process all (5 workers)
   python -m app.extract_benefits --force     # re-extract even if _benefits.json exists
+  python -m app.extract_benefits --workers 10  # use 10 parallel workers
   python -m app.extract_benefits H1234-567   # process a single plan
 """
 
 import json
 import logging
 import os
+import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import anthropic
 
 from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR
 from .main import SOB_EXTRACTION_PROMPT
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
 log = logging.getLogger(__name__)
+
+# Thread-safe counters
+_lock = threading.Lock()
+_stats = {"processed": 0, "errors": 0, "repaired": 0}
+
+
+def _repair_json(raw: str) -> dict | None:
+    """Try to repair truncated JSON from Claude (unterminated strings, missing brackets)."""
+    text = raw.strip()
+
+    # Remove trailing comma if present
+    text = re.sub(r",\s*$", "", text)
+
+    # Close any unterminated strings — find odd number of unescaped quotes
+    in_string = False
+    last_quote_pos = -1
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and in_string:
+            i += 2  # skip escaped char
+            continue
+        if ch == '"':
+            in_string = not in_string
+            if in_string:
+                last_quote_pos = i
+        i += 1
+
+    if in_string:
+        # We're inside an unterminated string — close it
+        text += '"'
+
+    # Count brackets and close any open ones
+    open_braces = text.count("{") - text.count("}")
+    open_brackets = text.count("[") - text.count("]")
+
+    # Remove trailing comma before closing
+    text = re.sub(r",\s*$", "", text)
+
+    # Close arrays then objects
+    text += "]" * max(0, open_brackets)
+    text += "}" * max(0, open_braces)
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
 
 
 def _chunks_to_full_text(data: dict) -> str:
@@ -49,7 +104,7 @@ def extract_benefits_for_plan(plan_id: str, full_text: str) -> dict | None:
     try:
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=3000,
+            max_tokens=16384,
             system=SOB_EXTRACTION_PROMPT,
             messages=[
                 {
@@ -73,14 +128,62 @@ def extract_benefits_for_plan(plan_id: str, full_text: str) -> dict | None:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as e:
-        log.error(f"  JSON parse failed for {plan_id}: {e}")
-        log.error(f"  Raw (first 300 chars): {raw[:300]}")
-        return None
+        log.warning(f"  JSON parse failed for {plan_id}: {e}")
+        log.warning("  Attempting repair...")
+        parsed = _repair_json(raw)
+        if parsed is None:
+            log.error(f"  Repair failed for {plan_id}")
+            log.error(f"  Raw (first 300 chars): {raw[:300]}")
+            return None
+        log.info(f"  Repair succeeded for {plan_id}")
+        with _lock:
+            _stats["repaired"] += 1
 
     return parsed
 
 
-def run(plan_filter: str | None = None, force: bool = False):
+def _process_one(plan_id: str, filename: str, total: int, idx: int) -> None:
+    """Process a single plan (called from thread pool)."""
+    benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_id}_benefits.json")
+
+    # Load the extracted chunks
+    source_path = os.path.join(EXTRACTED_DIR, filename)
+    with open(source_path, "r") as f:
+        data = json.load(f)
+
+    full_text = _chunks_to_full_text(data)
+    text_len = len(full_text)
+
+    log.info(f"  [{idx}/{total}] {plan_id} ({text_len:,} chars) ...")
+
+    # Extract via Claude
+    parsed = extract_benefits_for_plan(plan_id, full_text)
+
+    if parsed is None:
+        with _lock:
+            _stats["errors"] += 1
+        return
+
+    # Save structured benefits
+    with open(benefits_path, "w") as f:
+        json.dump(parsed, f, indent=2)
+
+    medical_count = len(parsed.get("medical", []))
+    drug_count = len(parsed.get("drugs", []))
+    supp_count = len(parsed.get("supplemental", []))
+
+    with _lock:
+        _stats["processed"] += 1
+        done = _stats["processed"] + _stats["errors"]
+
+    log.info(
+        f"    -> {plan_id}_benefits.json "
+        f"({medical_count} medical, {drug_count} drug, {supp_count} supp) "
+        f"[{done}/{total} done]"
+    )
+
+
+def run(plan_filter: str | None = None, force: bool = False, workers: int = 5):
     """Process all extracted JSONs (or a single plan) through Claude."""
     if not ANTHROPIC_API_KEY:
         log.error("ANTHROPIC_API_KEY not set. Add it to backend/.env")
@@ -103,63 +206,72 @@ def run(plan_filter: str | None = None, force: bool = False):
         log.info("Run `python -m app.pdf_processor` first to extract PDFs.")
         return
 
-    log.info(f"\n{'='*60}")
-    log.info("  SOB Benefits Extraction (Claude API)")
-    log.info(f"  {len(plan_files)} plan(s) to process")
-    log.info(f"  Force re-extract: {force}")
-    log.info(f"{'='*60}\n")
-
-    processed = 0
+    # Build work list (skip already extracted unless --force)
+    work = []
     skipped = 0
-    errors = 0
-
     for filename in plan_files:
         plan_id = filename.replace(".json", "")
         benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_id}_benefits.json")
-
-        # Skip if already extracted (unless --force)
         if os.path.exists(benefits_path) and not force:
-            log.info(f"  SKIP {plan_id} (already extracted)")
             skipped += 1
             continue
+        work.append((plan_id, filename))
 
-        # Load the extracted chunks
-        source_path = os.path.join(EXTRACTED_DIR, filename)
-        with open(source_path, "r") as f:
-            data = json.load(f)
-
-        full_text = _chunks_to_full_text(data)
-        text_len = len(full_text)
-
-        log.info(f"  {plan_id} ({text_len:,} chars) ...")
-
-        # Extract via Claude
-        parsed = extract_benefits_for_plan(plan_id, full_text)
-
-        if parsed is None:
-            errors += 1
-            continue
-
-        # Save structured benefits
-        with open(benefits_path, "w") as f:
-            json.dump(parsed, f, indent=2)
-
-        medical_count = len(parsed.get("medical", []))
-        drug_count = len(parsed.get("drugs", []))
-        log.info(f"    -> {plan_id}_benefits.json ({medical_count} medical, {drug_count} drug rows)")
-
-        processed += 1
-
-        # Rate limit: ~1 request/sec
-        time.sleep(1.0)
+    total = len(work)
 
     log.info(f"\n{'='*60}")
-    log.info(f"  Done! {processed} extracted, {skipped} skipped, {errors} errors")
+    log.info("  SOB Benefits Extraction (Claude API)")
+    log.info(f"  {len(plan_files)} total plans, {skipped} already done, {total} to process")
+    log.info(f"  Workers: {workers} parallel")
+    log.info(f"  Force re-extract: {force}")
+    log.info(f"{'='*60}\n")
+
+    if total == 0:
+        log.info("  Nothing to do!")
+        return
+
+    # Reset stats
+    _stats["processed"] = 0
+    _stats["errors"] = 0
+    _stats["repaired"] = 0
+
+    start_time = time.time()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_process_one, plan_id, filename, total, i + 1): plan_id
+            for i, (plan_id, filename) in enumerate(work)
+        }
+        for future in as_completed(futures):
+            plan_id = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                log.error(f"  Unexpected error for {plan_id}: {e}")
+                with _lock:
+                    _stats["errors"] += 1
+
+    elapsed = time.time() - start_time
+    mins = int(elapsed // 60)
+    secs = int(elapsed % 60)
+
+    log.info(f"\n{'='*60}")
+    log.info(f"  Done in {mins}m {secs}s")
+    log.info(f"  Extracted: {_stats['processed']}")
+    log.info(f"  Repaired:  {_stats['repaired']}")
+    log.info(f"  Errors:    {_stats['errors']}")
+    log.info(f"  Skipped:   {skipped}")
     log.info(f"{'='*60}\n")
 
 
 if __name__ == "__main__":
     force = "--force" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    # Parse --workers N
+    w = 5
+    if "--workers" in sys.argv:
+        wi = sys.argv.index("--workers")
+        if wi + 1 < len(sys.argv):
+            w = int(sys.argv[wi + 1])
+    args = [a for a in sys.argv[1:] if not a.startswith("--") and not a.isdigit()]
     plan_filter = args[0] if args else None
-    run(plan_filter=plan_filter, force=force)
+    run(plan_filter=plan_filter, force=force, workers=w)

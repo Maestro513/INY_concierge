@@ -1,0 +1,36 @@
+export const API_BASE = import.meta.env.VITE_API_URL || '';
+
+export const ENDPOINTS = {
+  // Admin auth
+  LOGIN: '/api/admin/auth/login',
+  REFRESH: '/api/admin/auth/refresh',
+  ME: '/api/admin/auth/me',
+
+  // Members
+  MEMBERS: '/api/admin/members',
+  MEMBER: (phone: string) => `/api/admin/members/${phone}`,
+  MEMBER_ACTIVITY: (phone: string) => `/api/admin/members/${phone}/activity`,
+  MEMBER_CREATE: '/api/admin/members/create',
+  MEMBER_SEND_OTP: '/api/admin/members/send-otp',
+
+  // Plans
+  PLANS: '/api/admin/plans',
+  PLAN: (id: string) => `/api/admin/plans/${id}`,
+
+  // Extractions
+  EXTRACTIONS_STATS: '/api/admin/extractions/stats',
+  EXTRACTIONS_LIST: '/api/admin/extractions/list',
+
+  // System
+  HEALTH: '/api/admin/system/health',
+  METRICS: '/api/admin/system/metrics',
+  SESSIONS: '/api/admin/system/sessions',
+
+  // Analytics
+  ANALYTICS_LOGINS: '/api/admin/analytics/logins',
+  ANALYTICS_ENROLLMENTS: '/api/admin/analytics/enrollments',
+  ANALYTICS_FEATURES: '/api/admin/analytics/features',
+  ANALYTICS_CARRIERS: '/api/admin/analytics/carriers',
+  ANALYTICS_STATES: '/api/admin/analytics/states',
+  ANALYTICS_AGE_GROUPS: '/api/admin/analytics/age-groups',
+} as const;

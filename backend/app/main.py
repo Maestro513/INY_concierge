@@ -41,6 +41,7 @@ from .config import (
     TEST_OTP,
     TEST_PHONE,
 )
+from .admin_router import router as admin_router
 from .drug_cost_engine import compute_monthly_drug_costs
 from .encryption import get_cipher
 from .providers.service import search_providers
@@ -109,7 +110,7 @@ if APP_ENV == "production":
         allow_origins=_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
 else:
     # Dev: allow any localhost origin
@@ -120,6 +121,43 @@ else:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# ── Admin router ─────────────────────────────────────────────────────────────
+app.include_router(admin_router)
+
+# ── Admin SPA static files ───────────────────────────────────────────────────
+# Serves the Vite-built admin portal at /admin/*
+_admin_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), "admin", "dist")
+# On Render, admin dist may be at /opt/render/project/src/admin/dist
+if not os.path.isdir(_admin_dist):
+    _admin_dist = "/opt/render/project/src/admin/dist"
+
+if os.path.isdir(_admin_dist):
+    from starlette.staticfiles import StaticFiles
+    from starlette.responses import FileResponse as StarletteFileResponse
+
+    # Mount static assets (JS, CSS, images)
+    _assets_dir = os.path.join(_admin_dist, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
+
+    # Catch-all for SPA routing — serves index.html for any /admin/* route
+    @app.get("/admin/{full_path:path}")
+    async def admin_spa(full_path: str):
+        # If requesting a real file (favicon, etc.), serve it
+        file_path = os.path.join(_admin_dist, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        # Otherwise serve index.html for client-side routing
+        return FileResponse(os.path.join(_admin_dist, "index.html"))
+
+    @app.get("/admin")
+    async def admin_root():
+        return FileResponse(os.path.join(_admin_dist, "index.html"))
+
+    log.info(f"Admin portal mounted at /admin/ from {_admin_dist}")
+else:
+    log.warning(f"Admin dist not found at {_admin_dist} — /admin/ routes will 404")
 
 # ── Request timing + metrics middleware ──────────────────────────────────────
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
