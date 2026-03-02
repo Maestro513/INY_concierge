@@ -144,24 +144,24 @@ def extract_plan_ids(filename: str) -> list[str]:
     """
     name = os.path.splitext(filename)[0]
 
-    # --- Humana compact: H0028007000SB26 -> H0028-007 ---
-    compact = re.match(r"^(H\d{4})(\d{3})\d{3}SB", name, re.IGNORECASE)
+    # --- Humana/Wellcare compact: H0028007000SB26 / S5884101000SB26 -> H0028-007 / S5884-101 ---
+    compact = re.match(r"^([HRS]\d{4})(\d{3})\d{3}SB", name, re.IGNORECASE)
     if compact:
         return [f"{compact.group(1)}-{compact.group(2)}"]
 
-    # --- Find all H-number or R-number patterns in filename ---
-    # Three-segment: H1234-567-890 or R1234-567-890
-    three_seg = re.findall(r"[HR]\d{4}-\d{3}-\d{3}", name)
+    # --- Find all H/R/S-number patterns in filename ---
+    # Three-segment: H1234-567-890 or R1234-567-890 or S1234-567-890
+    three_seg = re.findall(r"[HRS]\d{4}-\d{3}-\d{3}", name)
     if three_seg:
         return list(dict.fromkeys(three_seg))
 
-    # Two-segment with dash: H7617-038
-    two_seg_dash = re.findall(r"[HR]\d{4}-\d{3}", name)
+    # Two-segment with dash: H7617-038, R6694-006, S5884-101
+    two_seg_dash = re.findall(r"[HRS]\d{4}-\d{3}", name)
     if two_seg_dash:
         return list(dict.fromkeys(two_seg_dash))
 
-    # Two-segment with underscore (Aetna): H1610_001 or Y0001_H0523_022
-    y_match = re.findall(r"(H\d{4})_(\d{3})", name)
+    # Two-segment with underscore (Aetna): H1610_001 or Y0001_H0523_022 or Y0001_S5601_038
+    y_match = re.findall(r"([HRS]\d{4})_(\d{3})", name)
     if y_match:
         return [f"{h}-{seg}" for h, seg in dict.fromkeys(y_match)]
 
