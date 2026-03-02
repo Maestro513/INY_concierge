@@ -15,19 +15,19 @@ Usage:
   python -m app.extract_benefits H1234-567   # process a single plan
 """
 
+import json
+import logging
 import os
 import sys
-import json
 import time
-import logging
+
 import anthropic
+
 from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR
+from .main import SOB_EXTRACTION_PROMPT
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
-
-# Import the extraction prompt from main.py to stay in sync
-from .main import SOB_EXTRACTION_PROMPT
 
 
 def _chunks_to_full_text(data: dict) -> str:
@@ -104,7 +104,7 @@ def run(plan_filter: str | None = None, force: bool = False):
         return
 
     log.info(f"\n{'='*60}")
-    log.info(f"  SOB Benefits Extraction (Claude API)")
+    log.info("  SOB Benefits Extraction (Claude API)")
     log.info(f"  {len(plan_files)} plan(s) to process")
     log.info(f"  Force re-extract: {force}")
     log.info(f"{'='*60}\n")

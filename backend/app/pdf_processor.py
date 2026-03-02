@@ -22,7 +22,6 @@ import fitz  # PyMuPDF
 
 from .config import EXTRACTED_DIR, PDFS_DIR
 
-
 # --- Section header patterns found in SOB PDFs across all carriers ---
 # These match the major section headings that appear in Medicare SOB documents.
 # Order matters: more specific patterns first.
