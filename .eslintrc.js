@@ -1,5 +1,6 @@
 module.exports = {
   root: true,
+  ignorePatterns: ['admin/', 'backend/'],
   extends: ['expo', 'prettier'],
   plugins: ['prettier'],
   globals: {
