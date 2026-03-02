@@ -884,12 +884,38 @@ Each with: Tier 1 (Preferred Generic), Tier 2 (Generic), Tier 3 (Preferred Brand
 Return ONLY the JSON. No markdown fences, no explanation."""
 
 
+def _load_pre_extracted_benefits(plan_id: str) -> dict | None:
+    """Check for pre-extracted _benefits.json (created by extract_benefits.py)."""
+    path = os.path.join(EXTRACTED_DIR, f"{plan_id}_benefits.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        log.warning(f"Failed to load pre-extracted benefits for {plan_id}: {e}")
+        return None
+
+
+def _chunks_to_context(chunks: list, max_chunks: int = 12) -> str:
+    """Join chunks into a single context string for Claude.
+    Handles both old format (list of strings) and new format (list of dicts).
+    """
+    parts = []
+    for c in chunks[:max_chunks]:
+        if isinstance(c, dict):
+            parts.append(f"[{c['section']}]\n{c['text']}")
+        else:
+            parts.append(c)
+    return "\n\n---\n\n".join(parts)
+
+
 @app.post("/sob/summary")
 def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     """
     Get structured SOB benefits for a plan.
-    Uses Claude to parse raw SOB text into medical/drug categories
-    with in-network and out-of-network columns.
+    1. Check for pre-extracted _benefits.json (instant, no API cost)
+    2. Fall back to on-demand Claude extraction if no pre-extracted file
     Results are cached in memory so it only parses once per plan.
     """
     plan_id = normalize_plan_id(req.plan_number)
@@ -899,7 +925,32 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
         return cached["data"]
 
-    # Load extracted chunks
+    # --- Try pre-extracted benefits first (instant, no API cost) ---
+    pre = _load_pre_extracted_benefits(plan_id)
+    if pre is not None:
+        result = {
+            "success": True,
+            "plan_id": plan_id,
+            "plan_name": pre.get("plan_name", plan_id),
+            "plan_type": pre.get("plan_type", ""),
+            "monthly_premium": pre.get("monthly_premium", ""),
+            "annual_deductible_in": pre.get("annual_deductible_in", ""),
+            "annual_deductible_out": pre.get("annual_deductible_out", ""),
+            "moop_in": pre.get("moop_in", ""),
+            "moop_out": pre.get("moop_out", ""),
+            "medical": pre.get("medical", []),
+            "drugs": pre.get("drugs", []),
+        }
+        # Enrich with CMS authoritative data
+        try:
+            result = _enrich_sob_with_cms(result, req.plan_number)
+        except Exception as e:
+            log.warning(f"CMS enrichment failed (non-fatal): {e}")
+        _sob_cache[plan_id] = {"data": result, "ts": time.time()}
+        log.info(f"[SOB] {plan_id}: served from pre-extracted benefits")
+        return result
+
+    # --- Fall back to on-demand Claude extraction ---
     chunks = load_plan_chunks(plan_id)
     if chunks is None:
         raise HTTPException(
@@ -907,10 +958,8 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
             detail=f"No SOB document found for plan {plan_id}",
         )
 
-    # Use MORE chunks — we need the full document for in/out of network
-    context = "\n\n---\n\n".join(chunks[:12])
+    context = _chunks_to_context(chunks)
 
-    # Ask Claude to extract structured benefits
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     message = client.messages.create(

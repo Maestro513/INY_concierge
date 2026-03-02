@@ -1,17 +1,22 @@
-// Mock AsyncStorage
-jest.mock('@react-native-async-storage/async-storage', () => ({
-  setItem: jest.fn(() => Promise.resolve()),
-  getItem: jest.fn(() => Promise.resolve(null)),
-  removeItem: jest.fn(() => Promise.resolve()),
-  multiSet: jest.fn(() => Promise.resolve()),
-  multiGet: jest.fn(() =>
-    Promise.resolve([
-      ['@iny_access_token', null],
-      ['@iny_refresh_token', null],
-    ]),
-  ),
-  multiRemove: jest.fn(() => Promise.resolve()),
-}));
+// Mock AsyncStorage — the source code uses require('...').default,
+// so we need both named exports and a .default that points to the same mock.
+jest.mock('@react-native-async-storage/async-storage', () => {
+  const mock = {
+    setItem: jest.fn(() => Promise.resolve()),
+    getItem: jest.fn(() => Promise.resolve(null)),
+    removeItem: jest.fn(() => Promise.resolve()),
+    multiSet: jest.fn(() => Promise.resolve()),
+    multiGet: jest.fn(() =>
+      Promise.resolve([
+        ['@iny_access_token', null],
+        ['@iny_refresh_token', null],
+      ]),
+    ),
+    multiRemove: jest.fn(() => Promise.resolve()),
+  };
+  mock.default = mock;
+  return mock;
+});
 
 // Mock expo modules that aren't available in test environment
 jest.mock('expo-speech-recognition', () => ({}));

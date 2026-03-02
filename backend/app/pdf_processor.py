@@ -1,5 +1,5 @@
 """
-Extract text from SOB PDFs and save as chunked JSON files.
+Extract text from SOB PDFs and save as section-aware chunked JSON files.
 
 Handles all carrier filename formats:
   Humana:   H7617-038.PDF / H0028007000SB26.PDF
@@ -21,6 +21,121 @@ import re
 import fitz  # PyMuPDF
 
 from .config import EXTRACTED_DIR, PDFS_DIR
+
+
+# --- Section header patterns found in SOB PDFs across all carriers ---
+# These match the major section headings that appear in Medicare SOB documents.
+# Order matters: more specific patterns first.
+
+SECTION_HEADERS = re.compile(
+    r'^[ \t]*('
+    # Plan overview / highlights
+    r'(?:PLAN\s+HIGHLIGHTS|Plan\s+Highlights|PRE[\-\u2011]ENROLLMENT\s+CHECKLIST|'
+    r'THINGS\s+TO\s+KNOW|Things\s+to\s+Know|PLAN\s+COSTS|Plan\s+Costs|'
+    r'MONTHLY\s+PREMIUM|Monthly\s+Premium|PLAN\s+OVERVIEW|Plan\s+Overview|'
+    r'ABOUT\s+THIS\s+PLAN|About\s+This\s+Plan|SUMMARY\s+OF\s+BENEFITS)'
+    r'|'
+    # Doctor visits / primary care
+    r'(?:DOCTOR\s+VISITS|Doctor\s+Visits|PRIMARY\s+CARE|Primary\s+Care|'
+    r'OFFICE\s+VISITS|Office\s+Visits|PHYSICIAN\s+SERVICES|Physician\s+Services)'
+    r'|'
+    # Specialist
+    r'(?:SPECIALIST|Specialist)\s+(?:VISITS|Visits|SERVICES|Services)'
+    r'|'
+    # Preventive care
+    r'(?:PREVENTIVE\s+CARE|Preventive\s+Care|PREVENTIVE\s+SERVICES|Preventive\s+Services)'
+    r'|'
+    # Emergency / urgent care
+    r'(?:EMERGENCY\s+(?:CARE|ROOM|SERVICES)|Emergency\s+(?:Care|Room|Services))'
+    r'|'
+    r'(?:URGENTLY\s+NEEDED\s+CARE|Urgently\s+Needed\s+Care|URGENT\s+CARE|Urgent\s+Care)'
+    r'|'
+    # Inpatient hospital
+    r'(?:INPATIENT\s+HOSPITAL\s+(?:COVERAGE|CARE|SERVICES)|'
+    r'Inpatient\s+Hospital\s+(?:Coverage|Care|Services)|'
+    r'INPATIENT\s+HOSPITAL|Inpatient\s+Hospital)'
+    r'|'
+    # Outpatient hospital / surgery
+    r'(?:OUTPATIENT\s+HOSPITAL\s+(?:COVERAGE|CARE|SERVICES)|'
+    r'Outpatient\s+Hospital\s+(?:Coverage|Care|Services)|'
+    r'OUTPATIENT\s+HOSPITAL|Outpatient\s+Hospital)'
+    r'|'
+    r'(?:AMBULATORY\s+SURG(?:ERY|ICAL)\s+CENTER|Ambulatory\s+Surg(?:ery|ical)\s+Center)'
+    r'|'
+    # Skilled nursing
+    r'(?:SKILLED\s+NURSING\s+FACILITY|Skilled\s+Nursing\s+Facility|SNF\s+CARE|SNF\s+Care)'
+    r'|'
+    # Mental health
+    r'(?:MENTAL\s+HEALTH\s+(?:SERVICES|CARE)|Mental\s+Health\s+(?:Services|Care)|'
+    r'BEHAVIORAL\s+HEALTH|Behavioral\s+Health|'
+    r'SUBSTANCE\s+(?:ABUSE|USE)|Substance\s+(?:Abuse|Use))'
+    r'|'
+    # Prescription drugs
+    r'(?:PRESCRIPTION\s+DRUG\s+(?:BENEFITS|COVERAGE)|Prescription\s+Drug\s+(?:Benefits|Coverage)|'
+    r'PART\s+D\s+(?:PRESCRIPTION|DRUG)|Part\s+D\s+(?:Prescription|Drug)|'
+    r'DRUG\s+BENEFITS|Drug\s+Benefits|PHARMACY|Pharmacy)'
+    r'|'
+    # Dental
+    r'(?:DENTAL\s+(?:SERVICES|BENEFITS|COVERAGE)|Dental\s+(?:Services|Benefits|Coverage))'
+    r'|'
+    # Vision
+    r'(?:VISION\s+(?:SERVICES|BENEFITS|COVERAGE)|Vision\s+(?:Services|Benefits|Coverage))'
+    r'|'
+    # Hearing
+    r'(?:HEARING\s+(?:SERVICES|BENEFITS|COVERAGE)|Hearing\s+(?:Services|Benefits|Coverage))'
+    r'|'
+    # Lab / diagnostic
+    r'(?:LAB\s+SERVICES|Lab\s+Services|DIAGNOSTIC\s+(?:SERVICES|TESTS)|'
+    r'Diagnostic\s+(?:Services|Tests))'
+    r'|'
+    # Rehabilitation / therapy
+    r'(?:REHABILITATION\s+SERVICES|Rehabilitation\s+Services|'
+    r'PHYSICAL\s+THERAPY|Physical\s+Therapy|'
+    r'OCCUPATIONAL\s+THERAPY|Occupational\s+Therapy)'
+    r'|'
+    # Home health / hospice
+    r'(?:HOME\s+HEALTH\s+(?:CARE|SERVICES)|Home\s+Health\s+(?:Care|Services))'
+    r'|'
+    r'(?:HOSPICE|Hospice)'
+    r'|'
+    # Ambulance
+    r'(?:AMBULANCE\s+(?:SERVICES)?|Ambulance\s+(?:Services)?)'
+    r'|'
+    # DME
+    r'(?:DURABLE\s+MEDICAL\s+EQUIPMENT|Durable\s+Medical\s+Equipment|'
+    r'MEDICAL\s+EQUIPMENT|Medical\s+Equipment|DME)'
+    r'|'
+    # Supplemental benefits
+    r'(?:ADDITIONAL\s+BENEFITS|Additional\s+Benefits|'
+    r'SUPPLEMENTAL\s+BENEFITS|Supplemental\s+Benefits|'
+    r'EXTRA\s+BENEFITS|Extra\s+Benefits|'
+    r'MORE\s+BENEFITS|More\s+Benefits|'
+    r'OTHER\s+COVERED\s+(?:BENEFITS|SERVICES)|Other\s+Covered\s+(?:Benefits|Services))'
+    r'|'
+    # Fitness / wellness
+    r'(?:FITNESS\s+(?:BENEFIT|PROGRAM)|Fitness\s+(?:Benefit|Program)|'
+    r'SILVER\s*&?\s*FIT|SilverSneakers)'
+    r'|'
+    # OTC / flex card
+    r'(?:OVER[\-\u2011]THE[\-\u2011]COUNTER|Over[\-\u2011]the[\-\u2011]Counter|OTC\s+(?:ALLOWANCE|BENEFIT))'
+    r'|'
+    # Transportation
+    r'(?:TRANSPORTATION|Transportation)'
+    r'|'
+    # Telehealth
+    r'(?:TELEHEALTH|Telehealth|VIRTUAL\s+VISITS|Virtual\s+Visits)'
+    r'|'
+    # Chiropractic / acupuncture / podiatry
+    r'(?:CHIROPRACTIC|Chiropractic|ACUPUNCTURE|Acupuncture|'
+    r'PODIATRY|Podiatry|FOOT\s+CARE|Foot\s+Care)'
+    r'|'
+    # Resources / disclaimers (end sections)
+    r'(?:RESOURCES|Resources|IMPORTANT\s+NUMBERS|Important\s+Numbers|'
+    r'HOW\s+TO\s+REACH\s+US|How\s+to\s+Reach\s+Us|'
+    r'CUSTOMER\s+SERVICE|Customer\s+Service)'
+    r')',
+    re.MULTILINE
+)
 
 
 def extract_plan_ids(filename: str) -> list[str]:
@@ -66,8 +181,79 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return text.strip()
 
 
-def chunk_text(text: str, chunk_size: int = 1500, overlap: int = 200) -> list[str]:
-    """Split text into overlapping chunks for better context retrieval."""
+def _normalize_section_label(raw_label: str) -> str:
+    """Clean up a matched section header into a readable label."""
+    label = raw_label.strip()
+    # Title-case it consistently
+    label = " ".join(w.capitalize() if w.lower() not in ("of", "the", "and", "to", "in") else w.lower()
+                     for w in label.split())
+    # Collapse extra whitespace
+    label = re.sub(r'\s+', ' ', label)
+    return label
+
+
+def chunk_by_sections(text: str, max_section_size: int = 3000, overlap: int = 200) -> list[dict]:
+    """
+    Split SOB text into chunks at section boundaries.
+
+    Each chunk is a dict: {"section": "Section Name", "text": "..."}
+    If a section exceeds max_section_size, it's sub-split with overlap.
+    Tiny sections (<100 chars) are merged with the next section.
+    """
+    # Find all section header positions
+    matches = list(SECTION_HEADERS.finditer(text))
+
+    if not matches:
+        # No sections detected — fall back to character-based chunking
+        raw_chunks = _chunk_text_raw(text)
+        return [{"section": "General", "text": c} for c in raw_chunks]
+
+    sections = []
+
+    # Text before the first section header
+    if matches[0].start() > 100:
+        sections.append({
+            "section": "Plan Overview",
+            "text": text[:matches[0].start()].strip(),
+        })
+
+    # Each section: from this header to the next header
+    for i, match in enumerate(matches):
+        label = _normalize_section_label(match.group(1))
+        start = match.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        section_text = text[start:end].strip()
+
+        if section_text:
+            sections.append({"section": label, "text": section_text})
+
+    # Merge tiny sections with the next one
+    merged = []
+    i = 0
+    while i < len(sections):
+        current = sections[i]
+        while len(current["text"]) < 100 and i + 1 < len(sections):
+            i += 1
+            current["text"] += "\n\n" + sections[i]["text"]
+        merged.append(current)
+        i += 1
+
+    # Sub-split oversized sections
+    result = []
+    for section in merged:
+        if len(section["text"]) <= max_section_size:
+            result.append(section)
+        else:
+            sub_chunks = _chunk_text_raw(section["text"], chunk_size=max_section_size, overlap=overlap)
+            for j, chunk in enumerate(sub_chunks):
+                label = section["section"] if j == 0 else f"{section['section']} (cont.)"
+                result.append({"section": label, "text": chunk})
+
+    return [s for s in result if len(s["text"]) > 50]
+
+
+def _chunk_text_raw(text: str, chunk_size: int = 1500, overlap: int = 200) -> list[str]:
+    """Split text into overlapping chunks (fallback for non-section text)."""
     chunks = []
     start = 0
     while start < len(text):
@@ -83,6 +269,10 @@ def chunk_text(text: str, chunk_size: int = 1500, overlap: int = 200) -> list[st
         chunks.append(chunk.strip())
         start = end - overlap
     return [c for c in chunks if len(c) > 50]
+
+
+# Keep old function name for backward compat
+chunk_text = _chunk_text_raw
 
 
 def get_carrier_from_path(pdf_path: str, base_dir: str) -> str:
@@ -105,9 +295,10 @@ def process_single_pdf(pdf_path: str, base_dir: str) -> list[dict]:
     print(f"     Plan ID(s): {', '.join(plan_ids)}")
 
     full_text = extract_text_from_pdf(pdf_path)
-    chunks = chunk_text(full_text)
+    sections = chunk_by_sections(full_text)
 
-    print(f"     {len(full_text):,} chars -> {len(chunks)} chunks")
+    section_labels = [s["section"] for s in sections]
+    print(f"     {len(full_text):,} chars -> {len(sections)} sections: {', '.join(section_labels[:6])}{'...' if len(section_labels) > 6 else ''}")
 
     results = []
     for plan_id in plan_ids:
@@ -116,8 +307,8 @@ def process_single_pdf(pdf_path: str, base_dir: str) -> list[dict]:
             "carrier": carrier,
             "source_file": filename,
             "full_text_length": len(full_text),
-            "num_chunks": len(chunks),
-            "chunks": chunks,
+            "num_chunks": len(sections),
+            "chunks": sections,
         })
 
     return results

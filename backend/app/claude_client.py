@@ -31,14 +31,21 @@ def _find_extracted_file(plan_id: str) -> str | None:
     return None
 
 
-def load_plan_chunks(plan_id: str) -> list[str] | None:
-    """Load pre-extracted chunks for a plan."""
+def load_plan_chunks(plan_id: str) -> list[dict] | None:
+    """Load pre-extracted chunks for a plan.
+    Returns list of {"section": "...", "text": "..."} dicts,
+    or plain strings wrapped as {"section": "General", "text": "..."} for backward compat.
+    """
     path = _find_extracted_file(plan_id)
     if path is None:
         return None
     with open(path, "r") as f:
         data = json.load(f)
-    return data["chunks"]
+    chunks = data["chunks"]
+    # Handle old format (list of plain strings) — wrap them
+    if chunks and isinstance(chunks[0], str):
+        return [{"section": "General", "text": c} for c in chunks]
+    return chunks
 
 
 _DRUG_SYNONYMS = {
@@ -49,11 +56,72 @@ _DRUG_SYNONYMS = {
     "coverage gap", "catastrophic", "deductible",
 }
 
+# Maps common question topics to section labels for boosted matching
+_TOPIC_SECTION_MAP = {
+    "doctor": ["Doctor Visits", "Primary Care", "Office Visits"],
+    "pcp": ["Doctor Visits", "Primary Care", "Office Visits"],
+    "primary": ["Doctor Visits", "Primary Care", "Office Visits"],
+    "specialist": ["Specialist Visits", "Specialist Services"],
+    "emergency": ["Emergency Care", "Emergency Room", "Emergency Services"],
+    "urgent": ["Urgently Needed Care", "Urgent Care"],
+    "hospital": ["Inpatient Hospital", "Outpatient Hospital"],
+    "inpatient": ["Inpatient Hospital"],
+    "outpatient": ["Outpatient Hospital", "Ambulatory Surgery"],
+    "surgery": ["Outpatient Hospital", "Ambulatory Surgery"],
+    "nursing": ["Skilled Nursing Facility"],
+    "snf": ["Skilled Nursing Facility"],
+    "mental": ["Mental Health Services", "Behavioral Health"],
+    "behavioral": ["Mental Health Services", "Behavioral Health"],
+    "substance": ["Substance Abuse", "Substance Use"],
+    "drug": ["Prescription Drug Benefits", "Drug Benefits", "Pharmacy"],
+    "prescription": ["Prescription Drug Benefits", "Drug Benefits", "Pharmacy"],
+    "pharmacy": ["Prescription Drug Benefits", "Drug Benefits", "Pharmacy"],
+    "medication": ["Prescription Drug Benefits", "Drug Benefits", "Pharmacy"],
+    "dental": ["Dental Services", "Dental Benefits"],
+    "teeth": ["Dental Services", "Dental Benefits"],
+    "vision": ["Vision Services", "Vision Benefits"],
+    "eye": ["Vision Services", "Vision Benefits"],
+    "glasses": ["Vision Services", "Vision Benefits"],
+    "hearing": ["Hearing Services", "Hearing Benefits"],
+    "lab": ["Lab Services", "Diagnostic Services"],
+    "diagnostic": ["Lab Services", "Diagnostic Services"],
+    "xray": ["Lab Services", "Diagnostic Services"],
+    "imaging": ["Lab Services", "Diagnostic Services"],
+    "therapy": ["Rehabilitation Services", "Physical Therapy", "Occupational Therapy"],
+    "physical": ["Rehabilitation Services", "Physical Therapy"],
+    "rehab": ["Rehabilitation Services", "Physical Therapy"],
+    "home": ["Home Health Care", "Home Health Services"],
+    "hospice": ["Hospice"],
+    "ambulance": ["Ambulance Services", "Ambulance"],
+    "equipment": ["Durable Medical Equipment", "Medical Equipment"],
+    "dme": ["Durable Medical Equipment", "Medical Equipment"],
+    "wheelchair": ["Durable Medical Equipment", "Medical Equipment"],
+    "fitness": ["Fitness Benefit", "Fitness Program"],
+    "silversneakers": ["Fitness Benefit", "Fitness Program"],
+    "otc": ["Over-The-Counter", "Otc Allowance"],
+    "over-the-counter": ["Over-The-Counter", "Otc Allowance"],
+    "transportation": ["Transportation"],
+    "ride": ["Transportation"],
+    "telehealth": ["Telehealth", "Virtual Visits"],
+    "virtual": ["Telehealth", "Virtual Visits"],
+    "chiropractic": ["Chiropractic"],
+    "chiropractor": ["Chiropractic"],
+    "acupuncture": ["Acupuncture"],
+    "podiatry": ["Podiatry", "Foot Care"],
+    "foot": ["Podiatry", "Foot Care"],
+    "premium": ["Plan Overview", "Monthly Premium", "Plan Costs"],
+    "cost": ["Plan Overview", "Plan Costs", "Monthly Premium"],
+    "deductible": ["Plan Overview", "Plan Costs"],
+    "copay": ["Plan Overview", "Plan Costs"],
+    "maximum": ["Plan Overview", "Plan Costs"],
+    "out-of-pocket": ["Plan Overview", "Plan Costs"],
+}
 
-def find_relevant_chunks(chunks: list[str], question: str, max_chunks: int = 5) -> str:
-    """TF-IDF inspired scoring to find the most relevant chunks.
-    Uses term frequency with IDF-like weighting: rarer terms score higher.
-    Also supports bigram matching and synonym expansion for drug queries.
+
+def find_relevant_chunks(chunks: list[dict], question: str, max_chunks: int = 5) -> str:
+    """Section-aware TF-IDF scoring to find the most relevant chunks.
+    Combines section label matching with TF-IDF text scoring,
+    bigram matching, and synonym expansion for drug queries.
     """
     import math
     question_lower = question.lower()
@@ -72,28 +140,58 @@ def find_relevant_chunks(chunks: list[str], question: str, max_chunks: int = 5) 
 
     all_terms = words + bigrams
 
-    # Compute document frequency (how many chunks contain each term)
-    n_docs = len(chunks)
-    doc_freq = {}
-    chunks_lower = [c.lower() for c in chunks]
-    for term in all_terms:
-        doc_freq[term] = sum(1 for cl in chunks_lower if term in cl)
+    # Find section labels that match the question topic
+    boosted_sections = set()
+    for word in question_lower.split():
+        word_clean = word.strip("?.,!\"'")
+        if word_clean in _TOPIC_SECTION_MAP:
+            for s in _TOPIC_SECTION_MAP[word_clean]:
+                boosted_sections.add(s.lower())
 
-    # Score each chunk using TF * IDF
+    # Extract text from chunks (handles both dict and string formats)
+    texts = []
+    sections = []
+    for chunk in chunks:
+        if isinstance(chunk, dict):
+            texts.append(chunk["text"])
+            sections.append(chunk.get("section", "").lower())
+        else:
+            texts.append(chunk)
+            sections.append("")
+
+    # Compute document frequency (how many chunks contain each term)
+    n_docs = len(texts)
+    doc_freq = {}
+    texts_lower = [t.lower() for t in texts]
+    for term in all_terms:
+        doc_freq[term] = sum(1 for tl in texts_lower if term in tl)
+
+    # Score each chunk using TF * IDF + section boost
     scored = []
-    for i, chunk_lower in enumerate(chunks_lower):
+    for i, text_lower in enumerate(texts_lower):
         score = 0.0
+
+        # TF-IDF text scoring
         for term in all_terms:
-            if term not in chunk_lower:
+            if term not in text_lower:
                 continue
-            # Term frequency: count occurrences in this chunk
-            tf = chunk_lower.count(term)
-            # IDF: rarer terms across chunks get higher weight
+            tf = text_lower.count(term)
             df = doc_freq.get(term, 0)
             idf = math.log((n_docs + 1) / (df + 1)) + 1.0
-            # Bigrams get a 2x boost
             weight = 2.0 if " " in term else 1.0
             score += tf * idf * weight
+
+        # Section label boost: +5 if section matches a topic keyword
+        section = sections[i]
+        if section and boosted_sections:
+            if any(s in section or section in s for s in boosted_sections):
+                score += 5.0
+
+        # Keyword hits in section label itself
+        for kw in words:
+            if kw in section:
+                score += 1.0
+
         scored.append((score, chunks[i]))
 
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -103,7 +201,15 @@ def find_relevant_chunks(chunks: list[str], question: str, max_chunks: int = 5) 
     if not top:
         top = chunks[:max_chunks]
 
-    return "\n\n---\n\n".join(top)
+    # Format with section labels for Claude context
+    parts = []
+    for c in top:
+        if isinstance(c, dict):
+            parts.append(f"[{c['section']}]\n{c['text']}")
+        else:
+            parts.append(c)
+
+    return "\n\n---\n\n".join(parts)
 
 
 SYSTEM_PROMPT = """You are a Medicare benefits assistant for InsuranceNYou members.

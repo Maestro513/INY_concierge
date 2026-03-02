@@ -71,5 +71,5 @@ FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "pdfs"))
+PDFS_DIR = os.getenv("PDFS_DIR", os.path.join(BASE_DIR, "pdf Updated"))
 EXTRACTED_DIR = os.getenv("EXTRACTED_DIR", os.path.join(BASE_DIR, "extracted"))
