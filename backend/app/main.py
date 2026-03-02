@@ -818,7 +818,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
     return result
 
 
-SOB_EXTRACTION_PROMPT = """You are extracting benefits from a Medicare Summary of Benefits PDF. Your job is to pull EVERY dollar amount and cost-share from this document.
+SOB_EXTRACTION_PROMPT = """You are extracting benefits from a Medicare Summary of Benefits PDF. Your job is to pull EVERY benefit, dollar amount, cost-share, and supplemental benefit from this document.
 
 CRITICAL RULES:
 - The document has TWO columns: In-Network and Out-of-Network. You MUST extract BOTH.
@@ -831,12 +831,14 @@ CRITICAL RULES:
 - If a benefit says "Not covered" for out-of-network, write "Not covered".
 - Drug tiers: extract the actual copay/coinsurance for EACH tier at EACH phase (initial, coverage gap, catastrophic) if shown.
 - Keep values SHORT: "$0", "$40/visit", "20%", "$345/day days 1-6", "$250 deductible"
+- For allowance benefits (OTC, flex card, meals, etc.) include the dollar amount AND frequency (per month, per quarter, per year).
 
 Return ONLY valid JSON:
 {
   "plan_name": "Full official plan name from document",
   "plan_type": "HMO or PPO or PFFS etc",
   "monthly_premium": "$X.XX",
+  "part_b_premium_reduction": "$X.XX or null if not offered",
   "annual_deductible_in": "In-network deductible",
   "annual_deductible_out": "Out-of-network deductible",
   "moop_in": "In-network max out of pocket",
@@ -846,6 +848,9 @@ Return ONLY valid JSON:
   ],
   "drugs": [
     {"label": "Tier/phase name", "value": "$X"}
+  ],
+  "supplemental": [
+    {"label": "Benefit name", "value": "Description with dollar amounts and limits"}
   ]
 }
 
@@ -855,31 +860,69 @@ For medical, include ALL of these if in the document:
 - Preventive care
 - Urgent care
 - Emergency room
-- Inpatient hospital
-- Outpatient surgery
+- Inpatient hospital (include per-day breakdown)
+- Outpatient surgery/services
 - Ambulance
 - Lab services
-- X-rays/imaging
+- X-rays/diagnostic imaging
+- Advanced imaging (CT/MRI/PET)
 - Mental health (outpatient)
 - Mental health (inpatient)
-- Skilled nursing
+- Substance abuse (outpatient)
+- Substance abuse (inpatient)
+- Skilled nursing facility
 - Home health care
+- Hospice
 - Dental (preventive)
-- Dental (comprehensive)
-- Vision (exam)
-- Vision (eyewear)
-- Hearing (exam)
-- Hearing (aids)
+- Dental (comprehensive/restorative)
+- Vision (routine exam)
+- Vision (eyewear/contacts allowance)
+- Hearing (routine exam)
+- Hearing (aids/fitting)
 - Chiropractic
-- Podiatry
-- Physical/occupational therapy
-- Telehealth
+- Podiatry/foot care
+- Physical therapy
+- Occupational therapy
+- Speech therapy
+- Cardiac rehabilitation
+- Pulmonary rehabilitation
+- Telehealth/virtual visits
+- Durable medical equipment (DME)
+- Prosthetics/orthotics
+- Diabetic supplies/monitoring
+- Kidney disease/dialysis
+- Outpatient rehabilitation
 
 For drugs, extract every tier shown. Common tiers:
 - Preferred retail pharmacy (30-day, 90-day)
 - Standard retail pharmacy (30-day, 90-day)
 - Mail order (90-day)
-Each with: Tier 1 (Preferred Generic), Tier 2 (Generic), Tier 3 (Preferred Brand), Tier 4 (Non-Preferred), Tier 5 (Specialty)
+Each with: Tier 1 (Preferred Generic), Tier 2 (Generic), Tier 3 (Preferred Brand), Tier 4 (Non-Preferred Drug), Tier 5 (Specialty), Tier 6 (Select Care Drugs) if present
+Also extract:
+- Drug deductible (if any)
+- Coverage gap/donut hole costs per tier
+- Catastrophic coverage costs per tier
+- Part B drugs (chemotherapy, immunosuppressants, etc.)
+
+For supplemental, include ALL extra benefits if in the document:
+- OTC allowance (amount per quarter/month/year)
+- Flex card / benefit allowance (amount and what it covers)
+- Meal benefit (number of meals, duration after hospital stay)
+- Transportation (number of one-way trips per year)
+- Fitness/gym (SilverSneakers, gym membership, fitness allowance)
+- Nurse hotline / 24-hour nurse line
+- Personal emergency response system (PERS)
+- Caregiver support
+- In-home support services
+- Bathroom safety devices
+- Worldwide emergency coverage
+- Acupuncture (number of visits)
+- Weight management / obesity counseling
+- Nutritional counseling
+- Smoking cessation
+- Over-the-counter insulin
+- Part B premium giveback (monthly reduction amount)
+- Any other supplemental benefits with dollar amounts or visit limits
 
 Return ONLY the JSON. No markdown fences, no explanation."""
 
