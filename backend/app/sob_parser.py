@@ -34,7 +34,15 @@ def load_plan_text(plan_id: str) -> str | None:
         if os.path.exists(path):
             with open(path, "r") as f:
                 data = json.load(f)
-            return "\n\n".join(data["chunks"])
+            # Chunks may be plain strings (old format) or dicts with
+            # {section, text} keys (section-aware extraction pipeline).
+            parts = []
+            for c in data["chunks"]:
+                if isinstance(c, dict):
+                    parts.append(c.get("text", ""))
+                else:
+                    parts.append(c)
+            return "\n\n".join(parts)
     return None
 
 
