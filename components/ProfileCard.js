@@ -187,7 +187,7 @@ function AddReminderModal({ visible, onClose, onSave }) {
 }
 
 // ── Main component ──────────────────────────────────────────────
-export default function ProfileCard({ member, onViewSOB, onViewIDCard, onFindPharmacy, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder }) {
+export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -239,25 +239,36 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, onFindPha
         </View>
       </Animated.View>
 
-      {/* Reminder Bar — tap to expand */}
-      <TouchableOpacity
-        style={styles.reminderBar}
-        onPress={() => setRemindersExpanded(!remindersExpanded)}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="notifications-outline" size={16} color={COLORS.accent} />
-        <Text style={styles.reminderText}>
-          {reminders.length > 0 ? `${reminders.length} Reminder${reminders.length > 1 ? 's' : ''}` : 'Reminders'}
-        </Text>
-        {reminders.length > 0 ? (
-          <View style={styles.remBadge}>
-            <Text style={styles.remBadgeText}>{reminders.length}</Text>
-          </View>
-        ) : null}
-        <Ionicons name={remindersExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.accentDark} />
-      </TouchableOpacity>
+      <AddReminderModal visible={showAddModal} onClose={() => setShowAddModal(false)} onSave={onAddReminder} />
 
-      {/* Expanded reminder list */}
+      {/* Quick Actions */}
+      <View style={styles.quickActionsRow}>
+        <TouchableOpacity onPress={onViewIDCard} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View digital ID card">
+          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.careBg }]}>
+            <Ionicons name="card-outline" size={20} color={COLORS.careVisit} />
+          </View>
+          <Text style={styles.quickActionText}>ID Card</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setRemindersExpanded(!remindersExpanded)} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Medication reminders">
+          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.rxDrugBg || '#FDECEA' }]}>
+            <MaterialCommunityIcons name="pill" size={20} color={COLORS.rxDrug} />
+            {reminders.length > 0 ? (
+              <View style={styles.quickActionBadge}>
+                <Text style={styles.quickActionBadgeText}>{reminders.length}</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.quickActionText}>Reminders</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onViewSOB} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
+          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.savingsBg }]}>
+            <Ionicons name="document-text-outline" size={20} color={COLORS.savings} />
+          </View>
+          <Text style={styles.quickActionText}>Benefits</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Expanded reminders section */}
       {remindersExpanded ? (
         <View style={styles.remBody}>
           {reminders.length === 0 ? (
@@ -273,30 +284,6 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, onFindPha
           </TouchableOpacity>
         </View>
       ) : null}
-
-      <AddReminderModal visible={showAddModal} onClose={() => setShowAddModal(false)} onSave={onAddReminder} />
-
-      {/* Quick Actions */}
-      <View style={styles.quickActionsRow}>
-        <TouchableOpacity onPress={onViewIDCard} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View digital ID card">
-          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.careBg }]}>
-            <Ionicons name="card-outline" size={18} color={COLORS.careVisit} />
-          </View>
-          <Text style={styles.quickActionText}>ID Card</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onFindPharmacy} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Find a pharmacy">
-          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.clinicalBg }]}>
-            <Ionicons name="storefront-outline" size={18} color={COLORS.clinical} />
-          </View>
-          <Text style={styles.quickActionText}>Pharmacy</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onViewSOB} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
-          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.savingsBg }]}>
-            <Ionicons name="document-text-outline" size={18} color={COLORS.savings} />
-          </View>
-          <Text style={styles.quickActionText}>Benefits</Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Agent + View More Benefits row — right above cards */}
       <View style={styles.aboveCardsRow}>
@@ -385,28 +372,24 @@ const styles = StyleSheet.create({
   carrierLogo: { width: 96, height: 48 },
   planName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, textAlign: 'right', marginTop: 6, lineHeight: 18 },
 
-  // Reminder bar
-  reminderBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: COLORS.accentLight,
-    borderRadius: RADII.md,
-    paddingHorizontal: 14, paddingVertical: 10,
-    marginBottom: 14,
-    borderWidth: 1, borderColor: COLORS.accentSoft,
-  },
-  reminderText: { fontSize: 14, fontWeight: '600', color: COLORS.accentDark, flex: 1 },
-
   // Quick actions row
   quickActionsRow: {
-    flexDirection: 'row', justifyContent: 'space-around',
-    marginBottom: 14,
+    flexDirection: 'row', justifyContent: 'space-between',
+    marginBottom: 14, gap: 12,
   },
-  quickAction: { alignItems: 'center', gap: 6 },
+  quickAction: { flex: 1, alignItems: 'center', gap: 6 },
   quickActionIcon: {
-    width: 48, height: 48, borderRadius: 14,
+    width: '100%', height: 56, borderRadius: 16,
     justifyContent: 'center', alignItems: 'center',
   },
-  quickActionText: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
+  quickActionText: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+  quickActionBadge: {
+    position: 'absolute', top: -4, right: -4,
+    backgroundColor: COLORS.accent, borderRadius: 10,
+    minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 5, borderWidth: 2, borderColor: COLORS.white,
+  },
+  quickActionBadgeText: { fontSize: 11, fontWeight: '700', color: COLORS.white },
 
   // Agent row (right above cards)
   aboveCardsRow: {
@@ -476,13 +459,6 @@ const styles = StyleSheet.create({
   benefitLabel: {
     ...TYPE.cardLabel, color: COLORS.textSecondary, textAlign: 'center', width: '100%',
   },
-
-  // Reminder badge on bar
-  remBadge: {
-    backgroundColor: COLORS.accent, borderRadius: 10,
-    minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5,
-  },
-  remBadgeText: { fontSize: 11, fontWeight: '700', color: COLORS.white },
 
   // Expanded reminder body
   remBody: {
