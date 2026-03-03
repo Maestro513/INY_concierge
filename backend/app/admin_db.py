@@ -62,9 +62,12 @@ def _init_db():
 
 @contextmanager
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn

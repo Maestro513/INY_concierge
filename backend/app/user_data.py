@@ -35,9 +35,12 @@ class UserDataDB:
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10)
             conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")  # better concurrent reads
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError:
+                pass  # WAL already set or disk locked briefly — non-fatal
             self._local.conn = conn
         return conn
 
