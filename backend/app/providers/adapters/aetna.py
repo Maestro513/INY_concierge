@@ -47,7 +47,11 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
 
-    if not AETNA_CLIENT_ID or not AETNA_CLIENT_SECRET:
+    # Re-read at runtime so dotenv has a chance to load
+    client_id = os.getenv("AETNA_CLIENT_ID", "") or AETNA_CLIENT_ID
+    client_secret = os.getenv("AETNA_CLIENT_SECRET", "") or AETNA_CLIENT_SECRET
+
+    if not client_id or not client_secret:
         raise ValueError("AETNA_CLIENT_ID and AETNA_CLIENT_SECRET must be set")
 
     print(f"[AETNA] Fetching OAuth token from {AETNA_TOKEN_URL}")
@@ -58,7 +62,7 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
             "grant_type": "client_credentials",
             "scope": "Public NonPII",
         },
-        auth=(AETNA_CLIENT_ID, AETNA_CLIENT_SECRET),
+        auth=(client_id, client_secret),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=15.0,
     )
