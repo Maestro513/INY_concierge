@@ -1,5 +1,4 @@
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
 
 let AsyncStorage = null;
 try {
@@ -9,29 +8,12 @@ try {
 }
 
 // ── API Configuration ──────────────────────────────────────────
-const DEV_PORT = 8000;
+// Always uses Render backend. Set EXPO_PUBLIC_API_URL to override (e.g. for local dev).
 const PROD_URL = 'https://iny-concierge.onrender.com';
 
 const getApiUrl = () => {
-  // 1. Explicit env var always wins
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl) return envUrl;
-
-  // 2. In dev (Expo Go), use the same LAN IP that Expo's dev server runs on
-  if (__DEV__) {
-    const debuggerHost =
-      Constants.expoGoConfig?.debuggerHost ||
-      Constants.manifest2?.extra?.expoGo?.debuggerHost ||
-      Constants.manifest?.debuggerHost;
-    if (debuggerHost) {
-      const lanIp = debuggerHost.split(':')[0];
-      const devUrl = `http://${lanIp}:${DEV_PORT}`;
-      console.log(`[API] Dev mode → using local backend at ${devUrl}`);
-      return devUrl;
-    }
-  }
-
-  // 3. Production fallback
   return PROD_URL;
 };
 
