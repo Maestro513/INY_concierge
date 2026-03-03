@@ -734,7 +734,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       )}
 
       {/* Chat Input Bar */}
-      <View style={[s.inputBar, { paddingBottom: Platform.OS === 'android' ? 48 : Math.max(insets.bottom, 12) }]}>
+      <View style={[s.inputBar, { paddingBottom: Platform.OS === 'ios' ? Math.max(insets.bottom, 12) : 12 }]}>
         <TextInput
           style={s.textInput}
           placeholder="Type your question..."

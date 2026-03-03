@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, StyleSheet, Platform } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
@@ -16,6 +16,7 @@ import {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { firstName, lastName, planName, planNumber, agent, medicareNumber, sessionId, zipCode } = useLocalSearchParams();
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
@@ -281,7 +282,7 @@ export default function HomeScreen() {
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom, 24) : 0 }]}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ProfileCard
           member={member}
