@@ -449,11 +449,19 @@ def health():
             pdfs_count += sum(1 for x in f if x.lower().endswith(".pdf"))
             if pdfs_count > 10:
                 break  # just need to know there are some
+    # List top-level contents of PDFS_DIR for debugging
+    pdfs_contents = []
+    if pdfs_exists:
+        try:
+            pdfs_contents = os.listdir(PDFS_DIR)[:20]
+        except OSError:
+            pdfs_contents = ["<error reading dir>"]
     return {
         "status": "ok",
         "pdfs_dir": PDFS_DIR,
         "pdfs_dir_exists": pdfs_exists,
         "pdf_count_sample": pdfs_count,
+        "pdfs_contents": pdfs_contents,
         "extracted_dir": EXTRACTED_DIR,
         "extracted_dir_exists": os.path.isdir(EXTRACTED_DIR),
     }
