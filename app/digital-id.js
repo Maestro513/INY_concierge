@@ -9,7 +9,7 @@ import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 48;
+const CARD_WIDTH = SCREEN_WIDTH - 32;
 const CARD_HEIGHT = CARD_WIDTH / 1.4; // Taller ratio so Rx strip doesn't overflow
 
 // Carrier logo map (same as ProfileCard)
@@ -274,7 +274,7 @@ const s = StyleSheet.create({
   retryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   // Content
-  content: { flex: 1, alignItems: 'center', paddingTop: 8, paddingHorizontal: 24 },
+  content: { flex: 1, alignItems: 'center', paddingTop: 8, paddingHorizontal: 16 },
   tapHint: { fontSize: 13, color: COLORS.textTertiary, marginBottom: 12, fontWeight: '500' },
 
   // Card container
