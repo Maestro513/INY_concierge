@@ -55,5 +55,8 @@ backend/*.db-shm
 backend/*.db-wal
 backend/pdfs/
 backend/extracted/
+# Vercel
+.vercel/
+
 # Claude Code
 .claude/

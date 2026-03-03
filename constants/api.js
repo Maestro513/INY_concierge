@@ -8,32 +8,14 @@ try {
 }
 
 // ── API Configuration ──────────────────────────────────────────
-const DEV_IPS = ['192.168.1.188', '192.168.1.50'];
-const DEV_PORT = 8000;
+// Always uses Render backend. Set EXPO_PUBLIC_API_URL to override (e.g. for local dev).
+const PROD_URL = 'https://iny-concierge.onrender.com';
 
 const getApiUrl = () => {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl) return envUrl;
-  return 'https://iny-concierge.onrender.com';
+  return PROD_URL;
 };
-
-let _resolvedDevUrl = null;
-async function probeDevBackend() {
-  if (_resolvedDevUrl) return _resolvedDevUrl;
-  const raceProbes = DEV_IPS.map((ip) => {
-    const url = `http://${ip}:${DEV_PORT}`;
-    return fetch(`${url}/health`, { method: 'GET' })
-      .then((r) => (r.ok ? url : Promise.reject()))
-      .catch(() => Promise.reject());
-  });
-  try {
-    _resolvedDevUrl = await Promise.any(raceProbes);
-    console.log(`[API] Dev backend found at ${_resolvedDevUrl}`);
-    return _resolvedDevUrl;
-  } catch {
-    return null;
-  }
-}
 
 export let API_URL = getApiUrl();
 
