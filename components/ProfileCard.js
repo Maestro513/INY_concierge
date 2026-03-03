@@ -187,9 +187,10 @@ function AddReminderModal({ visible, onClose, onSave }) {
 }
 
 // ── Main component ──────────────────────────────────────────────
-export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder }) {
+export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder, drugsData }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showMedsModal, setShowMedsModal] = useState(false);
 
   // Greeting entrance animation
   const greetFade = useRef(new Animated.Value(0)).current;
@@ -241,6 +242,40 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
 
       <AddReminderModal visible={showAddModal} onClose={() => setShowAddModal(false)} onSave={onAddReminder} />
 
+      {/* Medications detail modal */}
+      <Modal visible={showMedsModal} transparent animationType="slide" onRequestClose={() => setShowMedsModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Your Medications</Text>
+              <TouchableOpacity onPress={() => setShowMedsModal(false)}>
+                <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            {drugsData && drugsData.medications ? drugsData.medications.map((med, i) => (
+              <View key={String(i)} style={styles.medRow}>
+                <View style={styles.medIconWrap}>
+                  <MaterialCommunityIcons name="pill" size={18} color={COLORS.rxDrug} />
+                </View>
+                <View style={styles.medInfo}>
+                  <Text style={styles.medName}>{med.drug_name}</Text>
+                  <Text style={styles.medDetail}>{med.tier_label}{med.copay_display ? ` · ${med.copay_display}/mo` : ''}</Text>
+                </View>
+                <Text style={styles.medCost}>{med.copay_display || '—'}</Text>
+              </View>
+            )) : (
+              <Text style={styles.remEmpty}>No medication data available.</Text>
+            )}
+            {drugsData && drugsData.annual_display ? (
+              <View style={styles.medTotalRow}>
+                <Text style={styles.medTotalLabel}>Est. Annual Total</Text>
+                <Text style={styles.medTotalValue}>{drugsData.annual_display}/yr</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* Quick Actions */}
       <View style={styles.quickActionsRow}>
         <TouchableOpacity onPress={onViewIDCard} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View digital ID card">
@@ -251,7 +286,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setRemindersExpanded(!remindersExpanded)} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Medication reminders">
           <View style={[styles.quickActionIcon, { backgroundColor: COLORS.rxDrugBg || '#FDECEA' }]}>
-            <MaterialCommunityIcons name="pill" size={20} color={COLORS.rxDrug} />
+            <Ionicons name="alarm-outline" size={22} color={COLORS.rxDrug} />
             {reminders.length > 0 ? (
               <View style={styles.quickActionBadge}>
                 <Text style={styles.quickActionBadgeText}>{reminders.length}</Text>
@@ -315,17 +350,29 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
           {/* Row 2: Rx cost + supplementals (2-4 cards) */}
           {row2.length > 0 ? (
             <View style={styles.benefitsRow}>
-              {row2.map((b, i) => (
-                <AnimatedCard
-                  key={'r2-' + String(i)}
-                  index={row1.length + i}
-                  style={row2.length <= 2 ? styles.benefitCardWide : styles.benefitCard}
-                >
-                  <BenefitIcon label={b.label} size={20} />
-                  <Text style={styles.benefitValue}>{b.in_network || ''}</Text>
-                  <Text style={styles.benefitLabel} numberOfLines={1}>{b.label}</Text>
-                </AnimatedCard>
-              ))}
+              {row2.map((b, i) => {
+                const isRx = b.label.toLowerCase().includes('rx');
+                const cardContent = (
+                  <>
+                    <BenefitIcon label={b.label} size={20} />
+                    <Text style={styles.benefitValue}>{b.in_network || ''}</Text>
+                    <Text style={styles.benefitLabel} numberOfLines={1}>{b.label}</Text>
+                  </>
+                );
+                return (
+                  <AnimatedCard
+                    key={'r2-' + String(i)}
+                    index={row1.length + i}
+                    style={row2.length <= 2 ? styles.benefitCardWide : styles.benefitCard}
+                  >
+                    {isRx && drugsData ? (
+                      <TouchableOpacity onPress={() => setShowMedsModal(true)} activeOpacity={0.7} style={styles.benefitCardTap}>
+                        {cardContent}
+                      </TouchableOpacity>
+                    ) : cardContent}
+                  </AnimatedCard>
+                );
+              })}
             </View>
           ) : null}
         </View>
@@ -489,6 +536,31 @@ const styles = StyleSheet.create({
     gap: 6, paddingVertical: 8, marginTop: 4,
   },
   remAddText: { fontSize: 13, fontWeight: '600', color: COLORS.accent },
+
+  // Tappable benefit card inner wrapper
+  benefitCardTap: { alignItems: 'center', gap: 6, width: '100%' },
+
+  // Medications modal rows
+  medRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
+  },
+  medIconWrap: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: COLORS.rxDrugBg || '#FDECEA',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  medInfo: { flex: 1 },
+  medName: { fontSize: 15, fontWeight: '600', color: COLORS.text },
+  medDetail: { fontSize: 12, fontWeight: '500', color: COLORS.textSecondary, marginTop: 2 },
+  medCost: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  medTotalRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingTop: 14, marginTop: 4,
+    borderTopWidth: 2, borderTopColor: COLORS.accent,
+  },
+  medTotalLabel: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
+  medTotalValue: { fontSize: 18, fontWeight: '700', color: COLORS.accent },
 
   // ── Add Reminder Modal ─────────────────────────────────────────
   modalOverlay: { flex: 1, backgroundColor: COLORS.overlay, justifyContent: 'flex-end' },

@@ -28,6 +28,9 @@ export default function HomeScreen() {
   const [reminders, setReminders] = useState([]);
   const [remindersLoading, setRemindersLoading] = useState(true);
 
+  // Drug data (for Rx card tap detail)
+  const [drugsData, setDrugsData] = useState(null);
+
   // Usage tracking state
   const [usageSummary, setUsageSummary] = useState([]);
   const [usageLoading, setUsageLoading] = useState(true);
@@ -131,6 +134,7 @@ export default function HomeScreen() {
         const cards = buildBenefitCards(benefitsRes, drugsRes);
         setBenefits(cards);
       }
+      if (drugsRes) setDrugsData(drugsRes);
     } catch (err) {
       console.warn('Benefits load error:', err);
       setBenefitsError(true);
@@ -283,7 +287,6 @@ export default function HomeScreen() {
           member={member}
           onViewSOB={handleOpenSOB}
           onViewIDCard={handleViewIDCard}
-          onFindPharmacy={handleFindPharmacy}
           benefits={benefits}
           loading={loading}
           benefitsError={benefitsError}
@@ -292,6 +295,7 @@ export default function HomeScreen() {
           onToggleReminder={handleToggleReminder}
           onDeleteReminder={handleDeleteReminder}
           onAddReminder={handleAddReminder}
+          drugsData={drugsData}
         />
         <VoiceHelp
           planNumber={planNumber || ''}
