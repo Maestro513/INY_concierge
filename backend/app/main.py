@@ -464,25 +464,26 @@ def lookup_member(req: LookupRequest, request: Request):
     Step 1: Look up member by phone, send OTP.
     Returns only {found, first_name} — no sensitive data until OTP verified.
     """
-    # Test account — skip Zoho lookup and SMS, use hardcoded demo data
+    # Test account — still fetch real data from Zoho, just skip SMS
     is_test = TEST_PHONE and req.phone == TEST_PHONE
 
-    if is_test:
-        member = {
-            "first_name": "Test",
-            "last_name": "User",
-            "plan_name": "Demo Plan",
-            "plan_number": "H0000-000-000",
-            "agent": "",
-            "medicare_number": "",
-            "medications": "",
-            "zip_code": "10001",
-        }
-    else:
-        try:
-            member = search_contact_by_phone(req.phone)
-        except Exception as e:
-            log.error(f"Zoho lookup failed: {e}")
+    try:
+        member = search_contact_by_phone(req.phone)
+    except Exception as e:
+        log.error(f"Zoho lookup failed: {e}")
+        if is_test:
+            # Fallback for test account if Zoho is unreachable
+            member = {
+                "first_name": "Test",
+                "last_name": "User",
+                "plan_name": "Demo Plan",
+                "plan_number": "H0000-000-000",
+                "agent": "",
+                "medicare_number": "",
+                "medications": "",
+                "zip_code": "10001",
+            }
+        else:
             raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
 
     if member is None:
