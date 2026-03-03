@@ -226,9 +226,6 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
           <Text style={styles.name}>
             {member.firstName} {member.lastName}
           </Text>
-          {member.medicareNumber ? (
-            <Text style={styles.medicareNumber}>Medicare #: {member.medicareNumber}</Text>
-          ) : null}
         </View>
         <View style={styles.headerRight}>
           {carrierLogo ? (
@@ -426,9 +423,8 @@ const styles = StyleSheet.create({
   },
   quickAction: { flex: 1, alignItems: 'center', gap: 6 },
   quickActionIcon: {
-    width: '100%', height: 60, borderRadius: 16,
+    width: 48, height: 48, borderRadius: 24,
     justifyContent: 'center', alignItems: 'center',
-    ...SHADOWS.soft,
   },
   quickActionText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, letterSpacing: 0.2 },
   quickActionBadge: {
