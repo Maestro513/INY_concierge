@@ -10,7 +10,7 @@ import { API_URL, authFetch } from '../constants/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 48;
-const CARD_HEIGHT = CARD_WIDTH / 1.59; // Real ID card aspect ratio
+const CARD_HEIGHT = CARD_WIDTH / 1.4; // Taller ratio so Rx strip doesn't overflow
 
 // Carrier logo map (same as ProfileCard)
 const CARRIER_LOGOS = {
@@ -298,12 +298,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4,
   },
   planTypeText: { fontSize: 10, fontWeight: '700', color: COLORS.accent, letterSpacing: 0.3 },
-  cardPlanName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 8, lineHeight: 18 },
-  divider: { height: 1, backgroundColor: COLORS.borderLight, marginBottom: 10 },
+  cardPlanName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 10, lineHeight: 18 },
+  divider: { height: 1, backgroundColor: COLORS.borderLight, marginBottom: 12 },
 
   // Member info
-  memberSection: { marginBottom: 6 },
-  memberRow: { flexDirection: 'row', gap: 20, marginBottom: 6 },
+  memberSection: { marginBottom: 8 },
+  memberRow: { flexDirection: 'row', gap: 20, marginBottom: 8 },
   memberCol: { flex: 1 },
   fieldLabel: { fontSize: 10, fontWeight: '600', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 1 },
   fieldValue: { fontSize: 15, fontWeight: '700', color: COLORS.text },
@@ -312,9 +312,9 @@ const s = StyleSheet.create({
   rxStrip: {
     flexDirection: 'row', justifyContent: 'space-between',
     backgroundColor: COLORS.accentLight, borderRadius: RADII.sm,
-    paddingHorizontal: 12, paddingVertical: 6, marginTop: 'auto',
+    paddingHorizontal: 12, paddingVertical: 8, marginTop: 'auto',
   },
-  rxItem: { fontSize: 11, fontWeight: '600', color: COLORS.accent },
+  rxItem: { fontSize: 12, fontWeight: '600', color: COLORS.accent },
 
   // Back
   cardBack: { backgroundColor: '#FFFFFF' },
