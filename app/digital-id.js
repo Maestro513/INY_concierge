@@ -9,8 +9,8 @@ import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 32;
-const CARD_HEIGHT = CARD_WIDTH / 1.4; // Taller ratio so Rx strip doesn't overflow
+const CARD_WIDTH = SCREEN_WIDTH - 24;
+const CARD_HEIGHT = CARD_WIDTH / 1.35; // Taller ratio so Rx strip doesn't overflow
 
 // Carrier logo map (same as ProfileCard)
 const CARRIER_LOGOS = {
@@ -110,6 +110,9 @@ export default function DigitalIDScreen() {
           <TouchableOpacity onPress={flipCard} activeOpacity={0.95} style={s.cardContainer}>
             {/* FRONT */}
             <Animated.View style={[s.card, s.cardFront, { transform: [{ perspective: 1000 }, { rotateY: frontRotation }] }]}>
+              {/* Premium accent stripe */}
+              <View style={s.accentStripe} />
+
               {/* Top row: Carrier logo + Plan type */}
               <View style={s.cardTopRow}>
                 {carrierLogo ? (
@@ -145,13 +148,6 @@ export default function DigitalIDScreen() {
                 </View>
               </View>
 
-              {medicareNumber ? (
-                <View style={s.memberSection}>
-                  <Text style={s.fieldLabel}>Medicare #</Text>
-                  <Text style={s.fieldValue}>{medicareNumber}</Text>
-                </View>
-              ) : null}
-
               {/* Rx info strip at bottom */}
               {cardData?.rx_bin ? (
                 <View style={s.rxStrip}>
@@ -164,6 +160,8 @@ export default function DigitalIDScreen() {
 
             {/* BACK */}
             <Animated.View style={[s.card, s.cardBack, { transform: [{ perspective: 1000 }, { rotateY: backRotation }] }]}>
+              {/* Premium accent stripe */}
+              <View style={s.accentStripe} />
               <Text style={s.backTitle}>Important Numbers</Text>
 
               {cardData?.customer_service ? (
@@ -261,7 +259,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { ...TYPE.h3, color: COLORS.text },
+  headerTitle: { ...TYPE.h2, color: COLORS.text },
 
   // Center states
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
@@ -274,7 +272,7 @@ const s = StyleSheet.create({
   retryText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   // Content
-  content: { flex: 1, alignItems: 'center', paddingTop: 8, paddingHorizontal: 16 },
+  content: { flex: 1, alignItems: 'center', paddingTop: 8, paddingHorizontal: 12 },
   tapHint: { fontSize: 13, color: COLORS.textTertiary, marginBottom: 12, fontWeight: '500' },
 
   // Card container
@@ -283,62 +281,70 @@ const s = StyleSheet.create({
   // Card shared
   card: {
     width: CARD_WIDTH, height: CARD_HEIGHT,
-    borderRadius: 16, padding: 20,
+    borderRadius: 18, padding: 22, paddingTop: 28,
     position: 'absolute', backfaceVisibility: 'hidden',
-    ...SHADOWS.cardLifted,
+    overflow: 'hidden',
+    ...SHADOWS.container,
+  },
+
+  // Premium accent stripe at top of card
+  accentStripe: {
+    position: 'absolute', top: 0, left: 0, right: 0,
+    height: 5, borderTopLeftRadius: 18, borderTopRightRadius: 18,
+    backgroundColor: COLORS.accent,
   },
 
   // Front
   cardFront: { backgroundColor: '#FFFFFF' },
-  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  cardLogo: { width: 90, height: 36 },
-  cardOrgName: { fontSize: 14, fontWeight: '700', color: COLORS.accent, flex: 1 },
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  cardLogo: { width: 100, height: 42 },
+  cardOrgName: { fontSize: 16, fontWeight: '700', color: COLORS.accent, flex: 1 },
   planTypeBadge: {
     backgroundColor: COLORS.accentLight, borderRadius: RADII.full,
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 12, paddingVertical: 5,
   },
-  planTypeText: { fontSize: 10, fontWeight: '700', color: COLORS.accent, letterSpacing: 0.3 },
-  cardPlanName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 10, lineHeight: 18 },
-  divider: { height: 1, backgroundColor: COLORS.borderLight, marginBottom: 12 },
+  planTypeText: { fontSize: 11, fontWeight: '700', color: COLORS.accent, letterSpacing: 0.4 },
+  cardPlanName: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 12, lineHeight: 20 },
+  divider: { height: 1, backgroundColor: COLORS.borderLight, marginBottom: 14 },
 
   // Member info
-  memberSection: { marginBottom: 8 },
-  memberRow: { flexDirection: 'row', gap: 20, marginBottom: 8 },
+  memberSection: { marginBottom: 10 },
+  memberRow: { flexDirection: 'row', gap: 24, marginBottom: 10 },
   memberCol: { flex: 1 },
-  fieldLabel: { fontSize: 10, fontWeight: '600', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 1 },
-  fieldValue: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  fieldLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
+  fieldValue: { fontSize: 17, fontWeight: '700', color: COLORS.text, letterSpacing: 0.1 },
 
   // Rx strip
   rxStrip: {
     flexDirection: 'row', justifyContent: 'space-between',
     backgroundColor: COLORS.accentLight, borderRadius: RADII.sm,
-    paddingHorizontal: 12, paddingVertical: 8, marginTop: 'auto',
+    paddingHorizontal: 14, paddingVertical: 10, marginTop: 'auto',
   },
-  rxItem: { fontSize: 12, fontWeight: '600', color: COLORS.accent },
+  rxItem: { fontSize: 13, fontWeight: '600', color: COLORS.accent },
 
   // Back
   cardBack: { backgroundColor: '#FFFFFF' },
-  backTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 10 },
+  backTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 12 },
   phoneRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
   },
   phoneInfo: { flex: 1 },
-  phoneLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.3 },
-  phoneNumber: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  phoneLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.4 },
+  phoneNumber: { fontSize: 16, fontWeight: '700', color: COLORS.text },
 
   // Back copays
-  backDivider: { height: 1, backgroundColor: COLORS.borderLight, marginTop: 6, marginBottom: 8 },
-  backSectionTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
-  copayGrid: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  backDivider: { height: 1, backgroundColor: COLORS.borderLight, marginTop: 8, marginBottom: 10 },
+  backSectionTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  copayGrid: { flexDirection: 'row', gap: 10, marginBottom: 8 },
   copayItem: {
     flex: 1, backgroundColor: COLORS.accentLighter, borderRadius: RADII.sm,
-    paddingVertical: 6, paddingHorizontal: 4, alignItems: 'center',
+    paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center',
   },
-  copayValue: { fontSize: 16, fontWeight: '700', color: COLORS.accent },
-  copayLabel: { fontSize: 10, fontWeight: '600', color: COLORS.textSecondary, marginTop: 1 },
+  copayValue: { fontSize: 18, fontWeight: '700', color: COLORS.accent },
+  copayLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
 
-  websiteText: { fontSize: 11, color: COLORS.textTertiary, textAlign: 'center', marginTop: 'auto' },
+  websiteText: { fontSize: 12, color: COLORS.textTertiary, textAlign: 'center', marginTop: 'auto' },
 
   // Disclaimer
   disclaimer: {

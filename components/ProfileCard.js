@@ -406,15 +406,15 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flex: 1, paddingTop: 4 },
   headerRight: { alignItems: 'flex-end', flexShrink: 0, maxWidth: '48%' },
-  greeting: { fontSize: 17, fontWeight: '600', letterSpacing: 0.2, color: COLORS.textSecondary, marginBottom: 2 },
-  name: { ...TYPE.h1, color: COLORS.text },
-  medicareNumber: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 6 },
+  greeting: { fontSize: 17, fontWeight: '600', letterSpacing: 0.3, color: COLORS.textSecondary, marginBottom: 2 },
+  name: { ...TYPE.h1, color: COLORS.text, letterSpacing: -0.5 },
+  medicareNumber: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 6, letterSpacing: 0.2 },
   agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   agent: { fontSize: 16, fontWeight: '700', color: COLORS.textSecondary },
   logoBg: {
-    backgroundColor: '#FFFFFF', borderRadius: RADII.sm,
-    padding: 6, overflow: 'hidden',
-    ...SHADOWS.soft,
+    backgroundColor: '#FFFFFF', borderRadius: RADII.md,
+    padding: 8, overflow: 'hidden',
+    ...SHADOWS.card,
   },
   carrierLogo: { width: 96, height: 48 },
   planName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, textAlign: 'right', marginTop: 6, lineHeight: 18 },
@@ -426,10 +426,11 @@ const styles = StyleSheet.create({
   },
   quickAction: { flex: 1, alignItems: 'center', gap: 6 },
   quickActionIcon: {
-    width: '100%', height: 56, borderRadius: 16,
+    width: '100%', height: 60, borderRadius: 16,
     justifyContent: 'center', alignItems: 'center',
+    ...SHADOWS.soft,
   },
-  quickActionText: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+  quickActionText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, letterSpacing: 0.2 },
   quickActionBadge: {
     position: 'absolute', top: -4, right: -4,
     backgroundColor: COLORS.accent, borderRadius: 10,
@@ -483,20 +484,20 @@ const styles = StyleSheet.create({
 
   benefitCard: {
     flex: 1, backgroundColor: COLORS.white, borderRadius: RADII.md,
-    paddingVertical: 14, paddingHorizontal: 6, alignItems: 'center',
-    gap: 6, ...SHADOWS.card,
+    paddingVertical: 16, paddingHorizontal: 8, alignItems: 'center',
+    gap: 6, ...SHADOWS.cardLifted,
     borderWidth: 1, borderColor: COLORS.borderLight,
   },
   benefitCardWide: {
     flex: 1, backgroundColor: COLORS.white, borderRadius: RADII.md,
-    paddingVertical: 14, paddingHorizontal: 8, alignItems: 'center',
-    gap: 6, ...SHADOWS.card,
+    paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center',
+    gap: 6, ...SHADOWS.cardLifted,
     borderWidth: 1, borderColor: COLORS.borderLight,
   },
 
   // Icon circle
   iconCircle: {
-    width: 36, height: 36, borderRadius: 12,
+    width: 40, height: 40, borderRadius: 14,
     justifyContent: 'center', alignItems: 'center',
   },
 
