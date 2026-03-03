@@ -9,8 +9,8 @@ import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 24;
-const CARD_HEIGHT = CARD_WIDTH / 1.35; // Taller ratio so Rx strip doesn't overflow
+const CARD_WIDTH = SCREEN_WIDTH - 16;
+const CARD_HEIGHT = CARD_WIDTH / 1.25; // Extra tall for bigger content
 
 // Carrier logo map (same as ProfileCard)
 const CARRIER_LOGOS = {
@@ -281,7 +281,7 @@ const s = StyleSheet.create({
   // Card shared
   card: {
     width: CARD_WIDTH, height: CARD_HEIGHT,
-    borderRadius: 18, padding: 22, paddingTop: 28,
+    borderRadius: 20, padding: 26, paddingTop: 32,
     position: 'absolute', backfaceVisibility: 'hidden',
     overflow: 'hidden',
     ...SHADOWS.container,
@@ -290,61 +290,61 @@ const s = StyleSheet.create({
   // Premium accent stripe at top of card
   accentStripe: {
     position: 'absolute', top: 0, left: 0, right: 0,
-    height: 5, borderTopLeftRadius: 18, borderTopRightRadius: 18,
+    height: 6, borderTopLeftRadius: 20, borderTopRightRadius: 20,
     backgroundColor: COLORS.accent,
   },
 
   // Front
   cardFront: { backgroundColor: '#FFFFFF' },
-  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  cardLogo: { width: 100, height: 42 },
-  cardOrgName: { fontSize: 16, fontWeight: '700', color: COLORS.accent, flex: 1 },
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  cardLogo: { width: 120, height: 50 },
+  cardOrgName: { fontSize: 19, fontWeight: '700', color: COLORS.accent, flex: 1 },
   planTypeBadge: {
     backgroundColor: COLORS.accentLight, borderRadius: RADII.full,
-    paddingHorizontal: 12, paddingVertical: 5,
+    paddingHorizontal: 14, paddingVertical: 6,
   },
-  planTypeText: { fontSize: 11, fontWeight: '700', color: COLORS.accent, letterSpacing: 0.4 },
-  cardPlanName: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 12, lineHeight: 20 },
-  divider: { height: 1, backgroundColor: COLORS.borderLight, marginBottom: 14 },
+  planTypeText: { fontSize: 13, fontWeight: '700', color: COLORS.accent, letterSpacing: 0.4 },
+  cardPlanName: { fontSize: 17, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 14, lineHeight: 23 },
+  divider: { height: 1, backgroundColor: COLORS.borderLight, marginBottom: 16 },
 
   // Member info
-  memberSection: { marginBottom: 10 },
-  memberRow: { flexDirection: 'row', gap: 24, marginBottom: 10 },
+  memberSection: { marginBottom: 12 },
+  memberRow: { flexDirection: 'row', gap: 28, marginBottom: 12 },
   memberCol: { flex: 1 },
-  fieldLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 },
-  fieldValue: { fontSize: 17, fontWeight: '700', color: COLORS.text, letterSpacing: 0.1 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 },
+  fieldValue: { fontSize: 20, fontWeight: '700', color: COLORS.text, letterSpacing: 0.1 },
 
   // Rx strip
   rxStrip: {
     flexDirection: 'row', justifyContent: 'space-between',
     backgroundColor: COLORS.accentLight, borderRadius: RADII.sm,
-    paddingHorizontal: 14, paddingVertical: 10, marginTop: 'auto',
+    paddingHorizontal: 16, paddingVertical: 12, marginTop: 'auto',
   },
-  rxItem: { fontSize: 13, fontWeight: '600', color: COLORS.accent },
+  rxItem: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
 
   // Back
   cardBack: { backgroundColor: '#FFFFFF' },
-  backTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginBottom: 12 },
+  backTitle: { fontSize: 22, fontWeight: '700', color: COLORS.text, marginBottom: 14 },
   phoneRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
   },
   phoneInfo: { flex: 1 },
-  phoneLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.4 },
-  phoneNumber: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  phoneLabel: { fontSize: 14, fontWeight: '600', color: COLORS.textTertiary, textTransform: 'uppercase', letterSpacing: 0.4 },
+  phoneNumber: { fontSize: 19, fontWeight: '700', color: COLORS.text },
 
   // Back copays
-  backDivider: { height: 1, backgroundColor: COLORS.borderLight, marginTop: 8, marginBottom: 10 },
-  backSectionTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  copayGrid: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  backDivider: { height: 1, backgroundColor: COLORS.borderLight, marginTop: 10, marginBottom: 12 },
+  backSectionTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
+  copayGrid: { flexDirection: 'row', gap: 12, marginBottom: 10 },
   copayItem: {
     flex: 1, backgroundColor: COLORS.accentLighter, borderRadius: RADII.sm,
-    paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center',
+    paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center',
   },
-  copayValue: { fontSize: 18, fontWeight: '700', color: COLORS.accent },
-  copayLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
+  copayValue: { fontSize: 22, fontWeight: '700', color: COLORS.accent },
+  copayLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
 
-  websiteText: { fontSize: 12, color: COLORS.textTertiary, textAlign: 'center', marginTop: 'auto' },
+  websiteText: { fontSize: 14, color: COLORS.textTertiary, textAlign: 'center', marginTop: 'auto' },
 
   // Disclaimer
   disclaimer: {
