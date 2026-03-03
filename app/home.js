@@ -282,7 +282,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ProfileCard
           member={member}
           onViewSOB={handleOpenSOB}
