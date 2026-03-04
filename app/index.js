@@ -129,7 +129,7 @@ export default function PhoneScreen() {
               opacity: contentOpacity,
               transform: [{ translateY: contentSlide }],
             }}>
-              <Text style={styles.brandLine}>Powered by <Text style={styles.brandAccent}>Insurance 'n You</Text></Text>
+              <Text style={styles.brandLine}>Powered by{'\n'}<Text style={styles.brandAccent}>Insurance 'n You</Text></Text>
 
               {/* Phone Input Card */}
               <View style={styles.inputCard}>
@@ -219,10 +219,10 @@ const styles = StyleSheet.create({
 
   // Logo
   logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.lg },
-  logo: { width: 200, height: 200 },
+  logo: { width: 275, height: 275 },
 
   // Typography
-  brandLine: { fontSize: 20, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
+  brandLine: { fontSize: 30, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
   brandAccent: { color: COLORS.accent },
 
   // Input card
