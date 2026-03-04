@@ -219,10 +219,10 @@ const styles = StyleSheet.create({
 
   // Logo
   logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.lg },
-  logo: { width: 275, height: 275 },
+  logo: { width: 230, height: 230 },
 
   // Typography
-  brandLine: { fontSize: 30, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
+  brandLine: { fontSize: 23, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
   brandAccent: { color: COLORS.accent },
 
   // Input card
