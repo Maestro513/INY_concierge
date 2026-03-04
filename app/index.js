@@ -116,22 +116,19 @@ export default function PhoneScreen() {
               opacity: logoOpacity,
               transform: [{ scale: logoScale }],
             }]}>
-              <View style={styles.logoCircle}>
-                <Image
-                  source={logo}
-                  style={styles.logo}
-                  resizeMode="contain"
-                  accessible={true}
-                  accessibilityLabel="Med Concierge logo"
-                />
-              </View>
+              <Image
+                source={logo}
+                style={styles.logo}
+                resizeMode="contain"
+                accessible={true}
+                accessibilityLabel="Med Concierge logo"
+              />
             </Animated.View>
 
             <Animated.View style={{
               opacity: contentOpacity,
               transform: [{ translateY: contentSlide }],
             }}>
-              <Text style={styles.title} accessibilityRole="header">Med Concierge</Text>
               <Text style={styles.subtitle}>
                 Your health plan, simplified.{'\n'}
                 <Text style={styles.brandName}>Powered by Insurance 'n You</Text>
@@ -225,16 +222,9 @@ const styles = StyleSheet.create({
 
   // Logo
   logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.lg },
-  logoCircle: {
-    width: 80, height: 80, borderRadius: 22,
-    backgroundColor: COLORS.white,
-    justifyContent: 'center', alignItems: 'center',
-    ...SHADOWS.cardLifted,
-  },
-  logo: { width: 56, height: 56 },
+  logo: { width: 140, height: 140 },
 
   // Typography
-  title: { ...TYPE.hero, color: COLORS.text, marginBottom: SPACING.xs },
   subtitle: {
     ...TYPE.body, fontSize: 17, color: COLORS.textSecondary,
     lineHeight: 26, marginBottom: 32,
