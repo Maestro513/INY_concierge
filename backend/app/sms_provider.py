@@ -32,7 +32,7 @@ class TwilioProvider(SMSProvider):
     def send_otp(self, phone: str, code: str) -> bool:
         try:
             msg = self.client.messages.create(
-                body=f"Your Med Concierge verification code is: {code}",
+                body=f"Your InsuranceNYou Concierge verification code is: {code}",
                 from_=self.from_number,
                 to=f"+1{phone}",
             )

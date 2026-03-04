@@ -121,7 +121,7 @@ export default function PhoneScreen() {
                 style={styles.logo}
                 resizeMode="contain"
                 accessible={true}
-                accessibilityLabel="Med Concierge logo"
+                accessibilityLabel="InsuranceNYou Concierge logo"
               />
             </Animated.View>
 
