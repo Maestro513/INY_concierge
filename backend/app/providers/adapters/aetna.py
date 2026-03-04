@@ -191,7 +191,7 @@ class AetnaAdapter(BaseAdapter):
         referenced Practitioner and Location resources individually.
         Similar to Humana's multi-step approach.
         """
-        print(f"[AETNA] Fallback: searching without _include")
+        print("[AETNA] Fallback: searching without _include")
 
         params = [
             ("specialty", nucc_code),
