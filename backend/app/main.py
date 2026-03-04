@@ -163,6 +163,19 @@ else:
 _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 if not os.path.isdir(_static_dir):
     _static_dir = "/opt/render/project/src/static"
+
+# Serve widget JS with CORS headers (StaticFiles mount doesn't inherit CORS middleware)
+_widget_js_path = os.path.join(_static_dir, "quote-widget.js")
+
+@app.get("/static/quote-widget.js")
+async def serve_widget_js():
+    """Serve widget JS with permissive CORS for cross-origin embedding."""
+    from starlette.responses import FileResponse as _FR
+    resp = _FR(_widget_js_path, media_type="application/javascript")
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    return resp
+
 if os.path.isdir(_static_dir):
     from starlette.staticfiles import StaticFiles as _SF2
     app.mount("/static", _SF2(directory=_static_dir), name="static-files")
