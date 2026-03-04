@@ -129,10 +129,7 @@ export default function PhoneScreen() {
               opacity: contentOpacity,
               transform: [{ translateY: contentSlide }],
             }}>
-              <Text style={styles.subtitle}>
-                Your health plan, simplified.{'\n'}
-                <Text style={styles.brandName}>Powered by Insurance 'n You</Text>
-              </Text>
+              <Text style={styles.brandName}>Powered by Insurance 'n You</Text>
 
               {/* Phone Input Card */}
               <View style={styles.inputCard}>
@@ -225,11 +222,7 @@ const styles = StyleSheet.create({
   logo: { width: 140, height: 140 },
 
   // Typography
-  subtitle: {
-    ...TYPE.body, fontSize: 17, color: COLORS.textSecondary,
-    lineHeight: 26, marginBottom: 32,
-  },
-  brandName: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
+  brandName: { fontSize: 15, fontWeight: '600', color: COLORS.accent, marginBottom: 32 },
 
   // Input card
   inputCard: {
