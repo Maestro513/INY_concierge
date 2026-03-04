@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: SPACING.xl },
 
   // Logo
-  logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.lg },
+  logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.xs },
   logo: { width: 230, height: 230 },
 
   // Typography
