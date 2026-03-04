@@ -6,6 +6,7 @@ enriches results with NPPES/Google data, calculates distances.
 
 import logging
 
+from .adapters.aetna import AetnaAdapter
 from .adapters.base import ProviderResult, resolve_specialty
 from .adapters.healthspring import HealthspringAdapter
 from .adapters.humana import HumanaAdapter
@@ -23,10 +24,10 @@ CARRIER_MAP = {
     "united": UHCAdapter,
     "aarp": UHCAdapter,
     "healthspring": HealthspringAdapter,
+    "aetna": AetnaAdapter,
     # "devoted": DevotedAdapter,
     # "wellcare": WellcareAdapter,
     # "centene": WellcareAdapter,
-    # "aetna": AetnaAdapter,
     # "zing": ZingAdapter,
 }
 
