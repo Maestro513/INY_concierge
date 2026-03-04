@@ -218,12 +218,12 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: SPACING.xl },
 
   // Logo
-  logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.xs },
+  logoWrap: { alignItems: 'flex-start', marginBottom: 0 },
   logo: { width: 230, height: 230 },
 
   // Typography
-  brandLine: { fontSize: 23, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
-  brandAccent: { color: COLORS.accent },
+  brandLine: { fontSize: 19, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
+  brandAccent: { fontSize: 23, color: COLORS.accent },
 
   // Input card
   inputCard: {
@@ -277,6 +277,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
     paddingBottom: SPACING.md, paddingTop: SPACING.sm,
   },
-  footerText: { ...TYPE.caption, color: COLORS.textTertiary },
-  footerLink: { ...TYPE.caption, color: COLORS.accent, fontWeight: '600' },
+  footerText: { ...TYPE.caption, fontSize: 18, color: COLORS.textTertiary },
+  footerLink: { ...TYPE.caption, fontSize: 18, color: COLORS.accent, fontWeight: '600' },
 });
