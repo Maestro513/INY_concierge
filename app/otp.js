@@ -223,12 +223,12 @@ const s = StyleSheet.create({
   // OTP card
   otpCard: {
     backgroundColor: COLORS.white, borderRadius: RADII.lg,
-    padding: 20, marginBottom: 24,
+    paddingHorizontal: 12, paddingVertical: 20, marginBottom: 24,
     ...SHADOWS.card,
   },
-  otpRow: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
+  otpRow: { flexDirection: 'row', justifyContent: 'space-between' },
   otpInput: {
-    width: 48, height: 56, borderWidth: 2, borderColor: COLORS.border,
+    flex: 1, marginHorizontal: 4, height: 56, borderWidth: 2, borderColor: COLORS.border,
     borderRadius: 12, backgroundColor: COLORS.bg, textAlign: 'center',
     fontSize: 24, fontWeight: '600', color: COLORS.text,
   },

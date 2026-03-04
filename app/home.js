@@ -393,6 +393,6 @@ function buildBenefitCards(data, drugsData) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  safe: { flex: 1 },
+  container: { flex: 1, backgroundColor: COLORS.white },
+  safe: { flex: 1, backgroundColor: COLORS.bg },
 });
