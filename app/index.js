@@ -218,11 +218,11 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: SPACING.xl },
 
   // Logo
-  logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.lg },
-  logo: { width: 275, height: 275 },
+  logoWrap: { alignItems: 'flex-start', marginBottom: SPACING.xs },
+  logo: { width: 230, height: 230 },
 
   // Typography
-  brandLine: { fontSize: 30, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
+  brandLine: { fontSize: 23, fontWeight: '600', color: COLORS.text, marginBottom: 32 },
   brandAccent: { color: COLORS.accent },
 
   // Input card
