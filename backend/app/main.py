@@ -159,6 +159,15 @@ if os.path.isdir(_admin_dist):
 else:
     log.warning(f"Admin dist not found at {_admin_dist} — /admin/ routes will 404")
 
+# ── Static widget files ─────────────────────────────────────────────────────
+_static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+if not os.path.isdir(_static_dir):
+    _static_dir = "/opt/render/project/src/static"
+if os.path.isdir(_static_dir):
+    from starlette.staticfiles import StaticFiles as _SF2
+    app.mount("/static", _SF2(directory=_static_dir), name="static-files")
+    log.info(f"Static files mounted at /static/ from {_static_dir}")
+
 # ── Request timing + metrics middleware ──────────────────────────────────────
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
 
@@ -443,6 +452,81 @@ class UsageCreate(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# --- Public Quote/Plan Search Endpoints (no auth — for Webflow widget) ---
+
+from .plan_search import MedicarePlanSearch, get_counties_by_zip, search_marketplace_plans
+
+_medicare_search: MedicarePlanSearch | None = None
+
+
+def get_medicare_search() -> MedicarePlanSearch:
+    global _medicare_search
+    if _medicare_search is None:
+        _medicare_search = MedicarePlanSearch()
+    return _medicare_search
+
+
+@app.get("/quote/counties/{zipcode}")
+def quote_counties(zipcode: str):
+    """Get counties for a zip code (public, no auth)."""
+    counties = get_counties_by_zip(zipcode)
+    if not counties:
+        raise HTTPException(status_code=404, detail="No counties found for this zip code")
+    return {"counties": counties}
+
+
+@app.get("/quote/medicare")
+def quote_medicare(
+    zip: str = None,
+    state: str = None,
+    county: str = None,
+    fips: str = None,
+    limit: int = 50,
+):
+    """
+    Search Medicare Advantage plans (public, no auth).
+    Either provide zip (auto-resolves to state/county) or state + county code.
+    """
+    search = get_medicare_search()
+    if zip:
+        result = search.search_by_zip(zip, limit=limit)
+    elif state:
+        result = {
+            "plans": search.search_by_state(state, county_code=county, limit=limit),
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Provide zip or state parameter")
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.get("/quote/marketplace")
+def quote_marketplace(
+    zip: str,
+    fips: str = None,
+    age: int = 30,
+    income: int = None,
+    household_size: int = 1,
+    limit: int = 50,
+):
+    """
+    Search ACA Marketplace plans for under-65 (public, no auth).
+    Proxies to CMS Marketplace API (marketplace.api.healthcare.gov).
+    """
+    result = search_marketplace_plans(
+        zipcode=zip,
+        fips=fips,
+        age=age,
+        household_income=income,
+        household_size=household_size,
+        limit=limit,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @app.get("/metrics")
