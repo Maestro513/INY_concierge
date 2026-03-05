@@ -2,6 +2,7 @@
 InsuranceNYou Backend API
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -160,6 +161,16 @@ if os.path.isdir(_admin_dist):
 else:
     log.warning(f"Admin dist not found at {_admin_dist} — /admin/ routes will 404")
 
+# ── Request ID correlation middleware ─────────────────────────────────────────
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Attach a unique X-Request-ID to every request/response for log correlation."""
+    req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+    request.state.request_id = req_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
 # ── Request timing + metrics middleware ──────────────────────────────────────
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
 
@@ -178,7 +189,8 @@ async def metrics_middleware(request: Request, call_next):
         _request_metrics["errors"] += 1
     # Mask PII from URL paths before logging (e.g. /cms/my-drugs/5551234567)
     path = mask_pii_in_string(str(request.url.path))
-    log.info(f"{request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
+    req_id = getattr(request.state, "request_id", "")
+    log.info(f"[{req_id}] {request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
     return response
 
 # ── Persistent store (OTP + sessions in SQLite) ─────────────────────────────
@@ -1233,10 +1245,31 @@ def _otc_from_sob_text(plan_number: str) -> dict | None:
     return None
 
 
+# --- Response Caching Helper ─────────────────────────────────────────────────
+
+def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> JSONResponse:
+    """Return a JSONResponse with Cache-Control and ETag headers.
+    If the client sends a matching If-None-Match, returns 304."""
+    body = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    etag = '"' + hashlib.md5(body.encode()).hexdigest() + '"'
+
+    client_etag = request.headers.get("If-None-Match")
+    if client_etag and client_etag == etag:
+        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": f"private, max-age={max_age}, stale-while-revalidate=600",
+            "ETag": etag,
+        },
+    )
+
+
 # --- CMS Benefits Endpoints ---
 
 @app.get("/cms/benefits/{plan_number}")
-def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Full plan benefits from CMS data."""
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
@@ -1251,56 +1284,56 @@ def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
             otc["amount"] = sob_otc["amount"]
             otc["period"] = sob_otc["period"]
 
-    return result
+    return _cached_json_response(result, request)
 
 
 @app.get("/cms/benefits/{plan_number}/medical")
-def cms_medical(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_medical(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """PCP, specialist, ER, urgent care copays."""
     cms = get_cms()
-    return cms.get_medical_copays(plan_number)
+    return _cached_json_response(cms.get_medical_copays(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/dental")
-def cms_dental(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_dental(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Dental preventive + comprehensive benefits."""
     cms = get_cms()
-    return cms.get_dental_benefits(plan_number)
+    return _cached_json_response(cms.get_dental_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/otc")
-def cms_otc(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_otc(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """OTC allowance amount and delivery method."""
     cms = get_cms()
-    return cms.get_otc_allowance(plan_number)
+    return _cached_json_response(cms.get_otc_allowance(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/vision")
-def cms_vision(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_vision(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Eye exam + eyewear vision benefits."""
     cms = get_cms()
-    return cms.get_vision_benefits(plan_number)
+    return _cached_json_response(cms.get_vision_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/hearing")
-def cms_hearing(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_hearing(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Hearing exam + hearing aid benefits."""
     cms = get_cms()
-    return cms.get_hearing_benefits(plan_number)
+    return _cached_json_response(cms.get_hearing_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/flex")
-def cms_flex(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_flex(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Flex card / SSBCI supplemental benefits."""
     cms = get_cms()
-    return cms.get_flex_ssbci(plan_number)
+    return _cached_json_response(cms.get_flex_ssbci(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/giveback")
-def cms_giveback(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_giveback(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Part B premium giveback amount."""
     cms = get_cms()
-    return cms.get_part_b_giveback(plan_number)
+    return _cached_json_response(cms.get_part_b_giveback(plan_number), request)
 
 
 @app.post("/cms/drug")
@@ -1846,7 +1879,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    session["ts"] = time.time()
+    get_store().touch_session(session_id)
 
     phone = session["phone"]
     plan_number = session["data"].get("plan_number", "")
@@ -1958,7 +1991,7 @@ def _split_plan(plan_number: str) -> tuple[str, str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/cms/id-card/{plan_number}")
-def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
+def get_id_card_data(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Return all data needed to render a digital insurance ID card."""
     from .carrier_config import detect_carrier, get_carrier_config
 
@@ -1975,7 +2008,7 @@ def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
     )
     rx = get_carrier_config(carrier_key) if carrier_key else {}
 
-    return {
+    result = {
         "plan_name": overview.get("plan_name", ""),
         "org_name": overview.get("org_name", ""),
         "contract_id": overview.get("contract_id", ""),
@@ -1995,4 +2028,5 @@ def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
         "prior_auth_phone": rx.get("prior_auth", ""),
         "website": rx.get("website", ""),
     }
+    return _cached_json_response(result, request)
 

@@ -7,6 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
+import { cachedFetch } from '../utils/offlineCache';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 16;
@@ -41,10 +42,9 @@ export default function DigitalIDScreen() {
     setLoading(true);
     setError(null);
     try {
-      const res = await authFetch(`${API_URL}/cms/id-card/${encodeURIComponent(planNumber)}`);
-      if (!res.ok) throw new Error('Failed to load card data');
-      const data = await res.json();
-      setCardData(data);
+      const url = `${API_URL}/cms/id-card/${encodeURIComponent(planNumber)}`;
+      const result = await cachedFetch(authFetch, url);
+      setCardData(result.data);
     } catch (e) {
       console.log('ID Card load error:', e);
       setError('Could not load card details');
@@ -83,31 +83,31 @@ export default function DigitalIDScreen() {
     <SafeAreaView style={s.safe}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
           <Ionicons name="chevron-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Digital ID Card</Text>
+        <Text style={s.headerTitle} accessibilityRole="header">Digital ID Card</Text>
         <View style={{ width: 40 }} />
       </View>
 
       {loading ? (
         <View style={s.center}>
-          <ActivityIndicator size="large" color={COLORS.accent} />
-          <Text style={s.loadingText}>Loading your ID card...</Text>
+          <ActivityIndicator size="large" color={COLORS.accent} accessibilityLabel="Loading" />
+          <Text style={s.loadingText} accessibilityLiveRegion="polite">Loading your ID card...</Text>
         </View>
       ) : error ? (
         <View style={s.center}>
           <Ionicons name="alert-circle-outline" size={48} color={COLORS.textTertiary} />
-          <Text style={s.errorText}>{error}</Text>
-          <TouchableOpacity style={s.retryBtn} onPress={loadCardData} activeOpacity={0.7}>
+          <Text style={s.errorText} accessibilityLiveRegion="assertive">{error}</Text>
+          <TouchableOpacity style={s.retryBtn} onPress={loadCardData} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Try again to load ID card">
             <Text style={s.retryText}>Try Again</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <View style={s.content}>
-          <Text style={s.tapHint}>Tap card to flip</Text>
+          <Text style={s.tapHint} accessibilityElementsHidden>Tap card to flip</Text>
 
-          <TouchableOpacity onPress={flipCard} activeOpacity={0.95} style={s.cardContainer}>
+          <TouchableOpacity onPress={flipCard} activeOpacity={0.95} style={s.cardContainer} accessibilityRole="button" accessibilityLabel={flipped ? 'ID card back side showing phone numbers. Tap to flip to front' : 'ID card front side showing member info. Tap to flip to back'} accessibilityHint="Double tap to flip the card">
             {/* FRONT */}
             <Animated.View style={[s.card, s.cardFront, { transform: [{ perspective: 1000 }, { rotateY: frontRotation }] }]}>
               {/* Premium accent stripe */}
@@ -165,7 +165,7 @@ export default function DigitalIDScreen() {
               <Text style={s.backTitle}>Important Numbers</Text>
 
               {cardData?.customer_service ? (
-                <TouchableOpacity style={s.phoneRow} onPress={() => callNumber(cardData.customer_service)} activeOpacity={0.7}>
+                <TouchableOpacity style={s.phoneRow} onPress={() => callNumber(cardData.customer_service)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Call customer service at ${cardData.customer_service}`}>
                   <Ionicons name="call-outline" size={16} color={COLORS.accent} />
                   <View style={s.phoneInfo}>
                     <Text style={s.phoneLabel}>Customer Service</Text>
@@ -176,7 +176,7 @@ export default function DigitalIDScreen() {
               ) : null}
 
               {cardData?.pharmacy_help ? (
-                <TouchableOpacity style={s.phoneRow} onPress={() => callNumber(cardData.pharmacy_help)} activeOpacity={0.7}>
+                <TouchableOpacity style={s.phoneRow} onPress={() => callNumber(cardData.pharmacy_help)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Call pharmacy help at ${cardData.pharmacy_help}`}>
                   <Ionicons name="medkit-outline" size={16} color={COLORS.accent} />
                   <View style={s.phoneInfo}>
                     <Text style={s.phoneLabel}>Pharmacy Help</Text>
@@ -187,7 +187,7 @@ export default function DigitalIDScreen() {
               ) : null}
 
               {cardData?.prior_auth_phone ? (
-                <TouchableOpacity style={s.phoneRow} onPress={() => callNumber(cardData.prior_auth_phone)} activeOpacity={0.7}>
+                <TouchableOpacity style={s.phoneRow} onPress={() => callNumber(cardData.prior_auth_phone)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Call prior authorization at ${cardData.prior_auth_phone}`}>
                   <Ionicons name="document-text-outline" size={16} color={COLORS.accent} />
                   <View style={s.phoneInfo}>
                     <Text style={s.phoneLabel}>Prior Authorization</Text>

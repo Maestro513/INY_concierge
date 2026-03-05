@@ -122,7 +122,7 @@ export default function OTPScreen() {
       <SafeAreaView style={s.container}>
         <KeyboardAvoidingView style={s.inner} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={[s.content, { opacity: contentOpacity, transform: [{ translateY: contentSlide }] }]}>
-            <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+            <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
               <View style={s.backIconWrap}>
                 <Ionicons name="chevron-back" size={18} color={COLORS.accent} />
               </View>
@@ -153,15 +153,16 @@ export default function OTPScreen() {
                     maxLength={1}
                     selectTextOnFocus
                     editable={!loading}
+                    accessibilityLabel={`Verification code digit ${i + 1} of 6`}
                   />
                 ))}
               </View>
             </View>
 
             {error ? (
-              <View style={s.errorWrap}>
+              <View style={s.errorWrap} accessibilityLiveRegion="assertive">
                 <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
-                <Text style={s.errorText}>{error}</Text>
+                <Text style={s.errorText} accessibilityRole="alert">{error}</Text>
               </View>
             ) : null}
 
@@ -170,6 +171,9 @@ export default function OTPScreen() {
               onPress={handleVerify}
               disabled={!filled || loading}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Verify code"
+              accessibilityState={{ disabled: !filled || loading }}
             >
               {loading ? (
                 <ActivityIndicator color={COLORS.white} />
@@ -181,7 +185,7 @@ export default function OTPScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={s.resendWrap} activeOpacity={0.7} onPress={handleResend} disabled={resending}>
+            <TouchableOpacity style={s.resendWrap} activeOpacity={0.7} onPress={handleResend} disabled={resending} accessibilityRole="button" accessibilityLabel={resending ? 'Sending new code' : 'Resend verification code'} accessibilityState={{ disabled: resending }}>
               <Text style={s.resendText}>
                 Didn't get it? <Text style={s.resendLink}>{resending ? 'Sending...' : 'Resend code'}</Text>
               </Text>

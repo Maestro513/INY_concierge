@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
+import { cachedFetch } from '../utils/offlineCache';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
@@ -112,12 +113,10 @@ export default function HomeScreen() {
     setLoading(true);
     setBenefitsError(false);
     try {
-      const [benefitsRes, drugsRes] = await Promise.all([
-        authFetch(`${API_URL}/cms/benefits/${planNumber}`)
-          .then(r => {
-            if (!r.ok) { console.warn(`Benefits fetch failed: ${r.status}`); return null; }
-            return r.json();
-          })
+      const benefitsUrl = `${API_URL}/cms/benefits/${planNumber}`;
+      const [benefitsResult, drugsRes] = await Promise.all([
+        cachedFetch(authFetch, benefitsUrl)
+          .then(r => r.data)
           .catch((err) => { console.warn('Benefits fetch error:', err); return null; }),
         sessionId
           ? authFetch(`${API_URL}/cms/my-drugs-session/${sessionId}`)
@@ -128,11 +127,11 @@ export default function HomeScreen() {
               .catch((err) => { console.warn('Drugs fetch error:', err); return null; })
           : Promise.resolve(null),
       ]);
-      if (!benefitsRes) {
+      if (!benefitsResult) {
         setBenefitsError(true);
         setBenefits([]);
       } else {
-        const cards = buildBenefitCards(benefitsRes, drugsRes);
+        const cards = buildBenefitCards(benefitsResult, drugsRes);
         setBenefits(cards);
       }
       if (drugsRes) setDrugsData(drugsRes);

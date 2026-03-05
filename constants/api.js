@@ -61,8 +61,15 @@ export function getAccessToken() {
   return _accessToken;
 }
 
+// ── Request ID generator ─────────────────────────────────────
+function _generateRequestId() {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${ts}-${rand}`;
+}
+
 // ── Authenticated Fetch ───────────────────────────────────────
-// Wraps fetch with: timeout, Bearer token, auto-refresh on 401
+// Wraps fetch with: timeout, Bearer token, auto-refresh on 401, X-Request-ID
 export async function authFetch(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -70,6 +77,9 @@ export async function authFetch(url, options = {}, timeoutMs = 15000) {
   const headers = { ...options.headers };
   if (_accessToken) {
     headers['Authorization'] = `Bearer ${_accessToken}`;
+  }
+  if (!headers['X-Request-ID']) {
+    headers['X-Request-ID'] = _generateRequestId();
   }
 
   try {
