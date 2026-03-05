@@ -1,0 +1,260 @@
+"""
+Persistent OTP + Session store backed by SQLite.
+
+Replaces the in-memory dicts in auth.py and main.py so that
+server restarts / deploys don't wipe active OTPs or sessions.
+"""
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import secrets
+import sqlite3
+import threading
+import time
+import uuid
+
+log = logging.getLogger(__name__)
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARENT_DIR = os.path.dirname(_THIS_DIR)
+DEFAULT_STORE_DB = os.path.join(_PARENT_DIR, "persistent_store.db")
+
+
+class PersistentStore:
+    """SQLite-backed store for OTP codes and user sessions."""
+
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or os.environ.get("STORE_DB_PATH", DEFAULT_STORE_DB)
+        self._local = threading.local()
+        self._ensure_tables()
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError:
+                pass
+            self._local.conn = conn
+        return conn
+
+    def _ensure_tables(self):
+        conn = self._conn()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS otp_store (
+                phone           TEXT PRIMARY KEY,
+                code_hash       TEXT NOT NULL,
+                created_at      REAL NOT NULL,
+                ttl             INTEGER NOT NULL DEFAULT 300,
+                attempts        INTEGER NOT NULL DEFAULT 0,
+                locked_until    REAL NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS otp_send_log (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                sent_at         REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_otp_send_phone
+                ON otp_send_log(phone, sent_at);
+
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id      TEXT PRIMARY KEY,
+                phone           TEXT NOT NULL,
+                data            TEXT NOT NULL,
+                created_at      REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_phone
+                ON sessions(phone);
+        """)
+        conn.commit()
+        log.info(f"Persistent store ready at {self.db_path}")
+
+    # ── OTP Methods ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _hash_code(code: str) -> str:
+        return hashlib.sha256(code.encode()).hexdigest()
+
+    def generate_otp(self, phone: str, *, otp_ttl: int = 300,
+                     max_sends: int = 5, send_window: int = 600) -> str | None:
+        now = time.time()
+        conn = self._conn()
+
+        # Rate limiting — count recent sends
+        cutoff = now - send_window
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM otp_send_log WHERE phone = ? AND sent_at > ?",
+            (phone, cutoff),
+        ).fetchone()
+        if row["cnt"] >= max_sends:
+            log.warning(f"OTP rate limit hit for phone ending {phone[-4:]}")
+            return None
+
+        # Log this send
+        conn.execute("INSERT INTO otp_send_log (phone, sent_at) VALUES (?, ?)", (phone, now))
+
+        # Generate code
+        code = f"{secrets.randbelow(900000) + 100000}"
+
+        # Upsert OTP entry
+        conn.execute(
+            """INSERT INTO otp_store (phone, code_hash, created_at, ttl, attempts, locked_until)
+               VALUES (?, ?, ?, ?, 0, 0)
+               ON CONFLICT(phone) DO UPDATE SET
+                   code_hash = excluded.code_hash,
+                   created_at = excluded.created_at,
+                   ttl = excluded.ttl,
+                   attempts = 0,
+                   locked_until = 0""",
+            (phone, self._hash_code(code), now, otp_ttl),
+        )
+        conn.commit()
+
+        # Prune old send log entries (older than window)
+        conn.execute("DELETE FROM otp_send_log WHERE sent_at < ?", (cutoff,))
+        conn.commit()
+
+        return code
+
+    def verify_otp(self, phone: str, code: str, *,
+                   max_attempts: int = 5, lockout_seconds: int = 300) -> bool:
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM otp_store WHERE phone = ?", (phone,)).fetchone()
+        if not row:
+            return False
+
+        now = time.time()
+
+        # Check lockout
+        if now < row["locked_until"]:
+            remaining = int(row["locked_until"] - now)
+            log.warning(f"OTP locked for phone ending {phone[-4:]}, {remaining}s remaining")
+            return False
+
+        # Check expiration
+        if now - row["created_at"] > row["ttl"]:
+            conn.execute("DELETE FROM otp_store WHERE phone = ?", (phone,))
+            conn.commit()
+            return False
+
+        # Check code
+        if not hmac.compare_digest(self._hash_code(code), row["code_hash"]):
+            attempts = row["attempts"] + 1
+            if attempts >= max_attempts:
+                conn.execute(
+                    "UPDATE otp_store SET attempts = ?, locked_until = ? WHERE phone = ?",
+                    (attempts, now + lockout_seconds, phone),
+                )
+                log.warning(f"OTP locked out for phone ending {phone[-4:]} after {max_attempts} attempts")
+            else:
+                conn.execute(
+                    "UPDATE otp_store SET attempts = ? WHERE phone = ?",
+                    (attempts, phone),
+                )
+            conn.commit()
+            return False
+
+        # Success — delete OTP (single-use)
+        conn.execute("DELETE FROM otp_store WHERE phone = ?", (phone,))
+        conn.commit()
+        return True
+
+    def get_otp_send_count(self, phone: str, send_window: int = 600) -> int:
+        """Get the number of OTP sends in the current window (for testing)."""
+        cutoff = time.time() - send_window
+        row = self._conn().execute(
+            "SELECT COUNT(*) as cnt FROM otp_send_log WHERE phone = ? AND sent_at > ?",
+            (phone, cutoff),
+        ).fetchone()
+        return row["cnt"]
+
+    # ── Session Methods ───────────────────────────────────────────────────
+
+    def create_session(self, phone: str, member_data: dict) -> str:
+        sid = uuid.uuid4().hex
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO sessions (session_id, phone, data, created_at) VALUES (?, ?, ?, ?)",
+            (sid, phone, json.dumps(member_data), time.time()),
+        )
+        conn.commit()
+        self._cleanup_sessions()
+        return sid
+
+    def get_session(self, sid: str, ttl: int = 7200) -> dict | None:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE session_id = ?", (sid,)
+        ).fetchone()
+        if not row:
+            return None
+        if time.time() - row["created_at"] > ttl:
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (sid,))
+            conn.commit()
+            return None
+        return {
+            "phone": row["phone"],
+            "data": json.loads(row["data"]),
+            "ts": row["created_at"],
+        }
+
+    def touch_session(self, sid: str):
+        """Extend session TTL by updating created_at."""
+        conn = self._conn()
+        conn.execute(
+            "UPDATE sessions SET created_at = ? WHERE session_id = ?",
+            (time.time(), sid),
+        )
+        conn.commit()
+
+    def find_session_by_phone(self, phone: str, ttl: int = 7200) -> dict | None:
+        """Find the most recent session for a phone number."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
+            (phone,),
+        ).fetchone()
+        if not row:
+            return None
+        if time.time() - row["created_at"] > ttl:
+            return None
+        return {
+            "phone": row["phone"],
+            "data": json.loads(row["data"]),
+            "ts": row["created_at"],
+        }
+
+    def count_active_sessions(self, ttl: int = 7200) -> int:
+        cutoff = time.time() - ttl
+        row = self._conn().execute(
+            "SELECT COUNT(*) as cnt FROM sessions WHERE created_at > ?", (cutoff,)
+        ).fetchone()
+        return row["cnt"]
+
+    def _cleanup_sessions(self, ttl: int = 7200):
+        cutoff = time.time() - ttl
+        conn = self._conn()
+        conn.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff,))
+        conn.commit()
+
+    # ── Cleanup ───────────────────────────────────────────────────────────
+
+    def cleanup_all(self):
+        """Remove all expired entries. Call periodically or on startup."""
+        now = time.time()
+        conn = self._conn()
+        # Expired OTPs (TTL varies, so check each row)
+        conn.execute(
+            "DELETE FROM otp_store WHERE (created_at + ttl) < ?", (now,)
+        )
+        # Old send logs (anything > 10 minutes)
+        conn.execute("DELETE FROM otp_send_log WHERE sent_at < ?", (now - 600,))
+        # Expired sessions
+        self._cleanup_sessions()
+        conn.commit()

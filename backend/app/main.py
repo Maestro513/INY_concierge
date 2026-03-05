@@ -20,7 +20,8 @@ from starlette.responses import JSONResponse
 
 from .admin_router import router as admin_router
 from .audit import get_audit_log, mask_phone, mask_pii_in_string
-from .auth import create_tokens, decode_token, generate_otp, require_auth, verify_otp
+from .auth import create_tokens, decode_token, require_auth
+from .persistent_store import PersistentStore
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
     ADMIN_SECRET,
@@ -180,33 +181,27 @@ async def metrics_middleware(request: Request, call_next):
     log.info(f"{request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
     return response
 
-# ── Session store (in-memory with TTL) ───────────────────────────────────────
-_sessions: dict[str, dict] = {}
+# ── Persistent store (OTP + sessions in SQLite) ─────────────────────────────
+_store = None
 SESSION_TTL = 7200  # 2 hours
+
+
+def get_store() -> PersistentStore:
+    global _store
+    if _store is None:
+        _store = PersistentStore()
+        _store.cleanup_all()
+        log.info("Persistent store loaded")
+    return _store
+
 
 def create_session(phone: str, member_data: dict) -> str:
     """Create a session and return the session ID."""
-    sid = uuid.uuid4().hex
-    _sessions[sid] = {"phone": phone, "data": member_data, "ts": time.time()}
-    _cleanup_sessions()
-    return sid
+    return get_store().create_session(phone, member_data)
 
 def get_session(sid: str) -> dict | None:
     """Get session data, or None if expired/missing."""
-    entry = _sessions.get(sid)
-    if not entry:
-        return None
-    if time.time() - entry["ts"] > SESSION_TTL:
-        _sessions.pop(sid, None)
-        return None
-    return entry
-
-def _cleanup_sessions():
-    """Remove expired sessions (called lazily)."""
-    now = time.time()
-    expired = [k for k, v in _sessions.items() if now - v["ts"] > SESSION_TTL]
-    for k in expired:
-        _sessions.pop(k, None)
+    return get_store().get_session(sid, ttl=SESSION_TTL)
 
 # In-memory cache for parsed SOB summaries: {plan_id: {"data": {...}, "ts": float}}
 _sob_cache: dict[str, dict] = {}
@@ -230,7 +225,7 @@ def _session_phone(session_id: str) -> str:
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     # Touch timestamp to extend TTL on activity
-    session["ts"] = time.time()
+    get_store().touch_session(session_id)
     return session["phone"]
 
 
@@ -453,7 +448,7 @@ def metrics():
         "total_requests": total,
         "total_errors": _request_metrics["errors"],
         "avg_latency_ms": round((_request_metrics["latency_sum"] / total) * 1000, 1) if total > 0 else 0,
-        "active_sessions": len(_sessions),
+        "active_sessions": get_store().count_active_sessions(ttl=SESSION_TTL),
         "sob_cache_size": len(_sob_cache),
     }
 
@@ -499,7 +494,7 @@ def lookup_member(req: LookupRequest, request: Request):
 
     if not is_test:
         # Generate + send OTP (skipped for test account — uses TEST_OTP instead)
-        code = generate_otp(
+        code = get_store().generate_otp(
             req.phone,
             otp_ttl=OTP_TTL,
             max_sends=OTP_MAX_SENDS,
@@ -532,7 +527,7 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     # Test account — accept TEST_OTP without going through the OTP store
     is_test = TEST_PHONE and TEST_OTP and req.phone == TEST_PHONE
-    otp_valid = (is_test and req.code == TEST_OTP) or verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
+    otp_valid = (is_test and req.code == TEST_OTP) or get_store().verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
 
     if not otp_valid:
         get_audit_log().record(
@@ -544,10 +539,9 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
 
     # Find the pending session with this phone's member data
     member_data = None
-    for sid, entry in _sessions.items():
-        if entry["phone"] == req.phone:
-            member_data = entry["data"]
-            break
+    pending = get_store().find_session_by_phone(req.phone, ttl=SESSION_TTL)
+    if pending:
+        member_data = pending["data"]
 
     if not member_data:
         # Session expired between lookup and verify — re-fetch from Zoho
@@ -600,10 +594,9 @@ def refresh_token_endpoint(req: RefreshRequest):
 
     # Find member data from an active session
     member_data = None
-    for entry in _sessions.values():
-        if entry["phone"] == phone:
-            member_data = entry["data"]
-            break
+    active = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if active:
+        member_data = active["data"]
 
     if not member_data:
         # Session gone — re-fetch from Zoho
