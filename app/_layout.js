@@ -85,31 +85,33 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: COLORS.bg },
-          animation: 'fade',
-        }}
-      >
-        <Stack.Screen name="index" options={{ animation: 'none' }} />
-        <Stack.Screen name="home" options={{ animation: 'fade', gestureEnabled: false }} />
-        <Stack.Screen name="otp" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen
-          name="doctor-results"
-          options={{ animation: 'slide_from_right', gestureEnabled: true }}
-        />
-        <Stack.Screen
-          name="digital-id"
-          options={{ animation: 'slide_from_right', gestureEnabled: true }}
-        />
-        <Stack.Screen
-          name="pharmacy-results"
-          options={{ animation: 'slide_from_right', gestureEnabled: true }}
-        />
-      </Stack>
-    </SafeAreaProvider>
+    <Sentry.ErrorBoundary fallback={<Text style={{ padding: 40, textAlign: 'center' }}>Something went wrong. Please restart the app.</Text>}>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: COLORS.bg },
+            animation: 'fade',
+          }}
+        >
+          <Stack.Screen name="index" options={{ animation: 'none' }} />
+          <Stack.Screen name="home" options={{ animation: 'fade', gestureEnabled: false }} />
+          <Stack.Screen name="otp" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen
+            name="doctor-results"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
+          <Stack.Screen
+            name="digital-id"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
+          <Stack.Screen
+            name="pharmacy-results"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
+        </Stack>
+      </SafeAreaProvider>
+    </Sentry.ErrorBoundary>
   );
 }

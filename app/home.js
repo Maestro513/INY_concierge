@@ -300,7 +300,7 @@ export default function HomeScreen() {
         <VoiceHelp
           planNumber={planNumber || ''}
           planName={planName || ''}
-          zipCode={zipCode || '33434'}
+          zipCode={zipCode || ''}
           sessionId={sessionId || ''}
           onReminderCreated={loadReminders}
           onUsageLogged={loadUsageSummary}

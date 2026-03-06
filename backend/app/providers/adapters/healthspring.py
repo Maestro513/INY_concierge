@@ -64,7 +64,7 @@ class HealthspringAdapter(BaseAdapter):
                 # Step 1: search PractitionerRole by specialty
                 roles = await self._search_roles(client, nucc_code, limit)
                 if not roles:
-                    print("[HealthSpring] No PractitionerRole results")
+                    logger.debug("[HealthSpring] No PractitionerRole results")
                     return []
 
                 # Collect unique Practitioner and Location refs to fetch
@@ -79,7 +79,7 @@ class HealthspringAdapter(BaseAdapter):
                         if loc_ref:
                             loc_refs.add(loc_ref)
 
-                print(f"[HealthSpring] Fetching {len(prac_refs)} practitioners, {len(loc_refs)} locations")
+                logger.debug(f"[HealthSpring] Fetching {len(prac_refs)} practitioners, {len(loc_refs)} locations")
 
                 # Step 2 & 3: fetch Practitioner and Location in parallel
                 prac_map, loc_map = await asyncio.gather(
@@ -95,12 +95,12 @@ class HealthspringAdapter(BaseAdapter):
                         results.append(result)
 
                 results = self._deduplicate(results, limit)
-                print(f"[HealthSpring] Final: {len(results)} providers")
+                logger.debug(f"[HealthSpring] Final: {len(results)} providers")
                 return results
 
         except Exception as e:
             logger.error(f"HealthSpring search failed: {e}")
-            print(f"[HealthSpring] Search failed: {e}")
+            logger.warning(f"[HealthSpring] Search failed: {e}")
             return []
 
     async def _search_roles(
@@ -110,7 +110,7 @@ class HealthspringAdapter(BaseAdapter):
         limit: int,
     ) -> list[dict]:
         """Search PractitionerRole by specialty."""
-        print(f"[HealthSpring] Searching PractitionerRole: specialty={nucc_code}")
+        logger.debug(f"[HealthSpring] Searching PractitionerRole: specialty={nucc_code}")
 
         params = {
             "specialty": nucc_code,
@@ -126,10 +126,10 @@ class HealthspringAdapter(BaseAdapter):
             resp.raise_for_status()
             bundle = resp.json() or {}
         except httpx.HTTPStatusError as e:
-            print(f"[HealthSpring] PractitionerRole search failed: {e.response.status_code} {e.response.text[:300]}")
+            logger.warning(f"[HealthSpring] PractitionerRole search failed: {e.response.status_code} {e.response.text[:300]}")
             return []
         except Exception as e:
-            print(f"[HealthSpring] PractitionerRole search error: {e}")
+            logger.warning(f"[HealthSpring] PractitionerRole search error: {e}")
             return []
 
         entries = bundle.get("entry", []) or []
@@ -139,7 +139,7 @@ class HealthspringAdapter(BaseAdapter):
             if resource.get("resourceType") == "PractitionerRole":
                 roles.append(resource)
 
-        print(f"[HealthSpring] Found {len(roles)} PractitionerRole entries")
+        logger.debug(f"[HealthSpring] Found {len(roles)} PractitionerRole entries")
         return roles
 
     async def _batch_fetch(

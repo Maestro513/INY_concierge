@@ -54,7 +54,7 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if not client_id or not client_secret:
         raise ValueError("AETNA_CLIENT_ID and AETNA_CLIENT_SECRET must be set")
 
-    print(f"[AETNA] Fetching OAuth token from {AETNA_TOKEN_URL}")
+    logger.debug(f"[AETNA] Fetching OAuth token from {AETNA_TOKEN_URL}")
 
     resp = await client.post(
         AETNA_TOKEN_URL,
@@ -67,14 +67,14 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
         timeout=15.0,
     )
     if resp.status_code != 200:
-        print(f"[AETNA] Token error {resp.status_code}: {resp.text[:500]}")
+        logger.warning(f"[AETNA] Token error {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
     token_data = resp.json()
 
     _token_cache["access_token"] = token_data["access_token"]
     _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
 
-    print(f"[AETNA] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+    logger.debug(f"[AETNA] Token acquired, expires in {token_data.get('expires_in', '?')}s")
     return _token_cache["access_token"]
 
 
@@ -126,12 +126,12 @@ class AetnaAdapter(BaseAdapter):
                     )
 
                 results = self._deduplicate(results, limit)
-                print(f"[AETNA] Final: {len(results)} providers")
+                logger.debug(f"[AETNA] Final: {len(results)} providers")
                 return results
 
         except Exception as e:
             logger.error(f"Aetna search failed: {e}")
-            print(f"[AETNA] Search failed: {e}")
+            logger.warning(f"[AETNA] Search failed: {e}")
             return []
 
     async def _search_with_include(
@@ -147,7 +147,7 @@ class AetnaAdapter(BaseAdapter):
         Primary search: PractitionerRole with specialty + location zip + _include.
         Returns Practitioner and Location resources in the same bundle.
         """
-        print(f"[AETNA] Searching PractitionerRole: specialty={nucc_code}, zip={zip_code}")
+        logger.debug(f"[AETNA] Searching PractitionerRole: specialty={nucc_code}, zip={zip_code}")
 
         params = [
             ("specialty", nucc_code),
@@ -168,13 +168,13 @@ class AetnaAdapter(BaseAdapter):
             return self._parse_bundle(bundle, specialty_display)
 
         except httpx.HTTPStatusError as e:
-            print(f"[AETNA] PractitionerRole search failed: {e.response.status_code} {e.response.text[:200]}")
+            logger.warning(f"[AETNA] PractitionerRole search failed: {e.response.status_code} {e.response.text[:200]}")
             # Fallback: try without _include (some endpoints don't support it)
             return await self._search_without_include(
                 client, headers, nucc_code, zip_code, specialty_display, limit
             )
         except Exception as e:
-            print(f"[AETNA] PractitionerRole search error: {e}")
+            logger.warning(f"[AETNA] PractitionerRole search error: {e}")
             return []
 
     async def _search_without_include(
@@ -191,7 +191,7 @@ class AetnaAdapter(BaseAdapter):
         referenced Practitioner and Location resources individually.
         Similar to Humana's multi-step approach.
         """
-        print("[AETNA] Fallback: searching without _include")
+        logger.debug("[AETNA] Fallback: searching without _include")
 
         params = [
             ("specialty", nucc_code),
@@ -229,7 +229,7 @@ class AetnaAdapter(BaseAdapter):
                         if loc_ref:
                             loc_refs.add(loc_ref)
 
-            print(f"[AETNA] Got {len(roles)} roles, fetching {len(prac_refs)} practitioners and {len(loc_refs)} locations")
+            logger.debug(f"[AETNA] Got {len(roles)} roles, fetching {len(prac_refs)} practitioners and {len(loc_refs)} locations")
 
             # Fetch practitioners and locations
             practitioners = {}
@@ -264,7 +264,7 @@ class AetnaAdapter(BaseAdapter):
             return self._build_results_from_roles(roles, practitioners, locations, specialty_display)
 
         except Exception as e:
-            print(f"[AETNA] Fallback search failed: {e}")
+            logger.warning(f"[AETNA] Fallback search failed: {e}")
             return []
 
     async def _search_by_state(
@@ -281,7 +281,7 @@ class AetnaAdapter(BaseAdapter):
         if not state:
             return []
 
-        print(f"[AETNA] Fallback: searching by state {state}")
+        logger.debug(f"[AETNA] Fallback: searching by state {state}")
 
         params = [
             ("specialty", nucc_code),
@@ -302,7 +302,7 @@ class AetnaAdapter(BaseAdapter):
             return self._parse_bundle(bundle, specialty_display)
 
         except Exception as e:
-            print(f"[AETNA] State search failed: {e}")
+            logger.warning(f"[AETNA] State search failed: {e}")
             return []
 
     # ─────────────────────────────────────────────
@@ -317,7 +317,7 @@ class AetnaAdapter(BaseAdapter):
         """
         entries = bundle.get("entry", []) or []
         total = bundle.get("total", len(entries))
-        print(f"[AETNA] Bundle: {len(entries)} entries (total available: {total})")
+        logger.debug(f"[AETNA] Bundle: {len(entries)} entries (total available: {total})")
 
         if not entries:
             return []
@@ -345,7 +345,7 @@ class AetnaAdapter(BaseAdapter):
                 if full_url:
                     locations[full_url] = resource
 
-        print(
+        logger.debug(
             f"[AETNA] Parsed: {len(roles)} roles, "
             f"{len(set(id(v) for v in practitioners.values()))} practitioners, "
             f"{len(set(id(v) for v in locations.values()))} locations"

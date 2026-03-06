@@ -546,7 +546,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       speakResponse('Searching for pharmacies near you.');
       setIsSpeaking(true); setMode('idle');
       setTimeout(() => {
-        router.push({ pathname: '/pharmacy-results', params: { zipCode: zipCode || '33434', planNumber: planNumber || '', planName: planName || '' } });
+        router.push({ pathname: '/pharmacy-results', params: { zipCode: zipCode || '', planNumber: planNumber || '', planName: planName || '' } });
       }, 800);
       return;
     }
@@ -557,7 +557,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       speakResponse(`Searching for a ${specialty} near you.`);
       setIsSpeaking(true); setMode('idle');
       setTimeout(() => {
-        router.push({ pathname: '/doctor-results', params: { specialty, zipCode: zipCode || '33434', planName: planName || '' } });
+        router.push({ pathname: '/doctor-results', params: { specialty, zipCode: zipCode || '', planName: planName || '' } });
       }, 800);
       return;
     }

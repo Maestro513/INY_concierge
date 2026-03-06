@@ -757,9 +757,24 @@ def refresh_token_endpoint(req: RefreshRequest):
     return tokens
 
 
+# Per-phone rate limiter for /ask: max 10 questions per 60 seconds
+_ask_rate: dict[str, list[float]] = {}
+_ASK_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
+_ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask_question(req: AskRequest, _user: dict = Depends(get_current_user)):
     """Ask a question about a member's plan benefits."""
+    phone = _user.get("sub", "anon")
+    now = time.time()
+    hits = _ask_rate.get(phone, [])
+    hits = [t for t in hits if now - t < _ASK_WINDOW]
+    if len(hits) >= _ASK_MAX:
+        raise HTTPException(status_code=429, detail="Too many questions. Please wait a minute.")
+    hits.append(now)
+    _ask_rate[phone] = hits
+
     plan_id = normalize_plan_id(req.plan_number)
     result = ask_claude(question=req.question, plan_number=plan_id)
     return AskResponse(**result)
@@ -1177,7 +1192,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
 
     context = _chunks_to_context(chunks)
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",

@@ -28,7 +28,7 @@ from typing import Optional
 
 import httpx
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # ── Config from env ──────────────────────────────────────────────────────────
 
@@ -118,7 +118,7 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
 
     token_url = os.getenv("AETNA_RTPBC_TOKEN_URL", "") or AETNA_RTPBC_TOKEN_URL
 
-    print(f"[RTPBC] Fetching OAuth token from {token_url}")
+    log.debug(f"[RTPBC] Fetching OAuth token from {token_url}")
 
     resp = await client.post(
         token_url,
@@ -131,14 +131,14 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
         timeout=15.0,
     )
     if resp.status_code != 200:
-        print(f"[RTPBC] Token error {resp.status_code}: {resp.text[:500]}")
+        log.warning(f"[RTPBC] Token error {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
     token_data = resp.json()
 
     _token_cache["access_token"] = token_data["access_token"]
     _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
 
-    print(f"[RTPBC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+    log.debug(f"[RTPBC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
     return _token_cache["access_token"]
 
 
@@ -595,7 +595,7 @@ async def check_drug_cost(
         DrugCostResult with pricing and coverage info, or None on failure.
     """
     if not drug_ndc and not drug_rxnorm:
-        logger.error("Either drug_ndc or drug_rxnorm is required")
+        log.error("Either drug_ndc or drug_rxnorm is required")
         return None
 
     claim = _build_rtpbc_claim(
@@ -621,7 +621,7 @@ async def check_drug_cost(
 
     base_url = os.getenv("AETNA_RTPBC_BASE_URL", "") or AETNA_RTPBC_BASE
 
-    print(f"[RTPBC] Checking cost: drug={drug_name or drug_ndc}, pharmacy={pharmacy_name or pharmacy_ncpdp}")
+    log.debug(f"[RTPBC] Checking cost: drug={drug_name or drug_ndc}, pharmacy={pharmacy_name or pharmacy_ncpdp}")
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
@@ -634,7 +634,7 @@ async def check_drug_cost(
             # POST Claim to $submit or /Claim endpoint
             # Try $submit first (CARIN IG standard), fall back to /Claim
             submit_url = f"{base_url}/Claim/$submit"
-            print(f"[RTPBC] POST {submit_url}")
+            log.debug(f"[RTPBC] POST {submit_url}")
 
             resp = await client.post(
                 submit_url,
@@ -645,7 +645,7 @@ async def check_drug_cost(
             if resp.status_code == 404:
                 # Fallback: POST to /Claim directly
                 fallback_url = f"{base_url}/Claim"
-                print(f"[RTPBC] $submit not found, trying {fallback_url}")
+                log.debug(f"[RTPBC] $submit not found, trying {fallback_url}")
                 resp = await client.post(
                     fallback_url,
                     json=claim,
@@ -653,20 +653,20 @@ async def check_drug_cost(
                 )
 
             if resp.status_code != 200:
-                print(f"[RTPBC] Error {resp.status_code}: {resp.text[:500]}")
+                log.warning(f"[RTPBC] Error {resp.status_code}: {resp.text[:500]}")
                 resp.raise_for_status()
 
             response_data = resp.json()
             resource_type = response_data.get("resourceType", "")
 
-            print(f"[RTPBC] Response: {resource_type}")
+            log.debug(f"[RTPBC] Response: {resource_type}")
 
             if resource_type == "ClaimResponse":
                 result = _parse_claim_response(response_data, drug_name)
                 result.ndc = drug_ndc
                 result.rxnorm = drug_rxnorm
                 result.pharmacy_name = pharmacy_name
-                print(
+                log.debug(
                     f"[RTPBC] Result: patient_pay=${result.patient_pay}, "
                     f"formulary={result.formulary_status}, "
                     f"prior_auth={result.prior_auth_required}"
@@ -689,10 +689,10 @@ async def check_drug_cost(
                 for issue in issues:
                     severity = issue.get("severity", "")
                     details = issue.get("diagnostics", issue.get("details", {}).get("text", ""))
-                    print(f"[RTPBC] OperationOutcome: {severity} — {details}")
+                    log.warning(f"[RTPBC] OperationOutcome: {severity} — {details}")
                 return None
 
-            print(f"[RTPBC] Unexpected response type: {resource_type}")
+            log.warning(f"[RTPBC] Unexpected response type: {resource_type}")
             return None
 
     except httpx.HTTPStatusError as e:
@@ -701,15 +701,15 @@ async def check_drug_cost(
             error_body = e.response.json()
             if error_body.get("resourceType") == "OperationOutcome":
                 for issue in error_body.get("issue", []):
-                    print(f"[RTPBC] Error: {issue.get('diagnostics', issue.get('details', {}).get('text', ''))}")
+                    log.warning(f"[RTPBC] Error: {issue.get('diagnostics', issue.get('details', {}).get('text', ''))}")
         except Exception:
             pass
-        logger.error(f"RTPBC request failed: {e}")
-        print(f"[RTPBC] HTTP error: {e}")
+        log.error(f"RTPBC request failed: {e}")
+        log.warning(f"[RTPBC] HTTP error: {e}")
         return None
     except Exception as e:
-        logger.error(f"RTPBC request failed: {e}")
-        print(f"[RTPBC] Error: {e}")
+        log.error(f"RTPBC request failed: {e}")
+        log.warning(f"[RTPBC] Error: {e}")
         return None
 
 

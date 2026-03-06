@@ -500,13 +500,18 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
 
     os.makedirs(EXTRACTED_DIR, exist_ok=True)
 
-    # Save to temp file first
+    # Save to temp file first — cap at 500 MB
+    MAX_TAR_BYTES = 500 * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
     try:
         total_bytes = 0
         while chunk := await file.read(1024 * 1024):  # 1MB chunks
-            tmp.write(chunk)
             total_bytes += len(chunk)
+            if total_bytes > MAX_TAR_BYTES:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(status_code=413, detail=f"File too large (max {MAX_TAR_BYTES // (1024*1024)} MB).")
+            tmp.write(chunk)
         tmp.close()
 
         log.info("Received %d MB tar.gz — extracting to %s",
