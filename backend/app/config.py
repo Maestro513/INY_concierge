@@ -34,6 +34,9 @@ ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
 # JWT Authentication
 JWT_SECRET = os.getenv("JWT_SECRET", "")  # MUST be set in production
+if not JWT_SECRET:
+    import secrets as _secrets
+    JWT_SECRET = _secrets.token_urlsafe(32)  # random per-startup fallback for dev
 JWT_ACCESS_TTL = int(os.getenv("JWT_ACCESS_TTL", "7200"))         # 2 hours
 JWT_REFRESH_TTL = int(os.getenv("JWT_REFRESH_TTL", "2592000"))    # 30 days
 

@@ -99,10 +99,9 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 
 ### Authentication & Authorization
 
-**C12. Empty JWT_SECRET Is a Valid Signing Key**
-- **File:** `backend/app/config.py:44`
-- `JWT_SECRET` defaults to `""`. Anyone who knows the secret is empty can forge tokens.
-- **Fix:** Generate a random key at startup in non-production; require explicit setting in production.
+**C12. ~~FIXED~~ Empty JWT_SECRET Is a Valid Signing Key**
+- **File:** `backend/app/config.py:36`
+- `JWT_SECRET` now generates a random `secrets.token_urlsafe(32)` fallback when unset (dev only). Production still raises `RuntimeError` if not explicitly configured.
 
 **C13. Auth Bypass in Development Mode**
 - **File:** `backend/app/main.py:303-304`

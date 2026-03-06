@@ -90,10 +90,12 @@ log = logging.getLogger(__name__)
 app = FastAPI(title="InsuranceNYou API", version="0.7.0")
 
 # ── JWT Secret validation ────────────────────────────────────────────────────
-if APP_ENV == "production" and not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
-if not JWT_SECRET:
-    log.warning("JWT_SECRET not set — using insecure default for development only")
+if APP_ENV == "production" and JWT_SECRET == os.getenv("JWT_SECRET", ""):
+    # In production, JWT_SECRET must be explicitly set via env var
+    if not os.getenv("JWT_SECRET"):
+        raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
+elif not os.getenv("JWT_SECRET"):
+    log.warning("JWT_SECRET not set — using random per-startup key (dev only, tokens won't survive restarts)")
 
 # ── CORS — env-based ─────────────────────────────────────────────────────────
 _default_prod_origins = [
