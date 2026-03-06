@@ -47,34 +47,29 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 
 ### Security Vulnerabilities
 
-**C1. Path Traversal - Arbitrary File Read**
+**C1. ~~FIXED~~ Path Traversal - Arbitrary File Read**
 - **File:** `backend/app/main.py:160-167`
-- The admin SPA route joins user input directly into a file path. An attacker can request `/admin/../../etc/passwd` to read any file on the server.
-- **Fix:** Validate the resolved path stays within the static directory using `os.path.realpath()`.
+- Resolved path is now validated with `os.path.realpath()` to stay within `_admin_dist`. Requests like `/admin/../../etc/passwd` return 400.
 
-**C2. SQL Injection via CSV Headers**
+**C2. ~~FIXED~~ SQL Injection via CSV Headers**
 - **File:** `backend/cms_import.py:135`
-- Column names from external CSV files pass through a weak `sanitize_col()` and are interpolated into `CREATE TABLE` SQL via f-string. A crafted CSV header executes arbitrary SQL.
-- **Fix:** Whitelist allowed column names or use parameterized DDL.
+- `sanitize_col()` now strips all non-alphanumeric/underscore characters via regex. Crafted CSV headers can no longer inject SQL.
 
 **C3. ~~REMOVED~~ — Google Drive code deleted; no longer applicable.**
 
-**C4. Tar Extraction Zip-Slip Vulnerability**
+**C4. ~~FIXED~~ Tar Extraction Zip-Slip Vulnerability**
 - **File:** `backend/app/admin_router.py:522-528`
-- Tar file extraction does not protect against symlink attacks. A malicious archive can write files anywhere on disk.
-- **Fix:** Validate all extracted paths remain within the target directory.
+- Extraction now validates resolved paths stay within `EXTRACTED_DIR` and rejects symlinks.
 
-**C5. XSS in Quote Widget**
+**C5. ~~FIXED~~ XSS in Quote Widget**
 - **File:** `backend/static/quote-widget.js:~477`
-- API error messages from `errData.detail` are rendered via `innerHTML` without sanitization. The `esc()` helper exists but is not applied to error output.
-- **Fix:** Apply `esc()` to all dynamic content rendered via innerHTML.
+- Error messages now sanitized with `esc()` before rendering via `innerHTML`.
 
 ### HIPAA Violations
 
-**C6. Field Encryption Imported but Never Wired In - All PHI Plaintext at Rest**
-- **Files:** `backend/app/main.py:48`, `backend/app/persistent_store.py:184`
-- `get_cipher` is imported but **never called** anywhere. Zero calls to `cipher.encrypt()` or `cipher.decrypt()` exist. Medicare numbers, medications, phone numbers, and all PHI in all SQLite databases are stored in plaintext.
-- **Fix:** Wire encryption into data storage paths; make it a hard failure if encryption key is missing in production.
+**C6. ~~FIXED~~ Field Encryption Imported but Never Wired In - All PHI Plaintext at Rest**
+- **File:** `backend/app/persistent_store.py`
+- PHI fields (`medicare_number`, `medications`, `phone`) are now encrypted via `FieldCipher` on session create and decrypted on session read. Encryption activates when `FIELD_ENCRYPTION_KEY` env var is set.
 
 **C7. OTP Store Split-Brain: Admin and Mobile Use Different Stores**
 - **Files:** `backend/app/admin_router.py:30`, `backend/app/main.py:638`

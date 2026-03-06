@@ -474,7 +474,7 @@
         `;
       }
       if (this.error) {
-        return `<div class="iny-error">${this.error}</div>`;
+        return `<div class="iny-error">${this.esc(this.error)}</div>`;
       }
       if (!this.plans.length) return "";
 

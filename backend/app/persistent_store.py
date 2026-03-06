@@ -16,7 +16,12 @@ import threading
 import time
 import uuid
 
+from .encryption import get_cipher
+
 log = logging.getLogger(__name__)
+
+# PHI fields within member_data that must be encrypted at rest
+_PHI_FIELDS = ("medicare_number", "medications", "phone")
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PARENT_DIR = os.path.dirname(_THIS_DIR)
@@ -174,14 +179,41 @@ class PersistentStore:
         ).fetchone()
         return row["cnt"]
 
+    # ── PHI Encryption Helpers ────────────────────────────────────────────
+
+    @staticmethod
+    def _encrypt_phi(member_data: dict) -> dict:
+        """Encrypt PHI fields in member_data before storing."""
+        cipher = get_cipher()
+        if not cipher.enabled:
+            return member_data
+        data = dict(member_data)
+        for field in _PHI_FIELDS:
+            if field in data and data[field]:
+                data[field] = cipher.encrypt(str(data[field]))
+        return data
+
+    @staticmethod
+    def _decrypt_phi(member_data: dict) -> dict:
+        """Decrypt PHI fields in member_data after reading."""
+        cipher = get_cipher()
+        if not cipher.enabled:
+            return member_data
+        data = dict(member_data)
+        for field in _PHI_FIELDS:
+            if field in data and data[field]:
+                data[field] = cipher.decrypt(str(data[field]))
+        return data
+
     # ── Session Methods ───────────────────────────────────────────────────
 
     def create_session(self, phone: str, member_data: dict) -> str:
         sid = uuid.uuid4().hex
         conn = self._conn()
+        encrypted = self._encrypt_phi(member_data)
         conn.execute(
             "INSERT INTO sessions (session_id, phone, data, created_at) VALUES (?, ?, ?, ?)",
-            (sid, phone, json.dumps(member_data), time.time()),
+            (sid, phone, json.dumps(encrypted), time.time()),
         )
         conn.commit()
         self._cleanup_sessions()
@@ -200,7 +232,7 @@ class PersistentStore:
             return None
         return {
             "phone": row["phone"],
-            "data": json.loads(row["data"]),
+            "data": self._decrypt_phi(json.loads(row["data"])),
             "ts": row["created_at"],
         }
 
@@ -226,7 +258,7 @@ class PersistentStore:
             return None
         return {
             "phone": row["phone"],
-            "data": json.loads(row["data"]),
+            "data": self._decrypt_phi(json.loads(row["data"])),
             "ts": row["created_at"],
         }
 

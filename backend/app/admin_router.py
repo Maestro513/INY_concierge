@@ -517,15 +517,25 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
         log.info("Received %d MB tar.gz — extracting to %s",
                  total_bytes // (1024 * 1024), EXTRACTED_DIR)
 
-        # Extract
+        # Extract — with path validation to prevent zip-slip attacks
         count = 0
+        extract_real = os.path.realpath(EXTRACTED_DIR)
         with tarfile.open(tmp.name, "r:gz") as tar:
             for member in tar.getmembers():
-                if member.isfile() and member.name.endswith(".json"):
-                    # Flatten — strip any directory prefix
-                    member.name = os.path.basename(member.name)
-                    tar.extract(member, EXTRACTED_DIR)
-                    count += 1
+                if not member.isfile() or not member.name.endswith(".json"):
+                    continue
+                # Flatten — strip any directory prefix
+                member.name = os.path.basename(member.name)
+                # Reject symlinks and verify resolved path stays within target dir
+                if member.issym() or member.islnk():
+                    log.warning("Skipping symlink in tar: %s", member.name)
+                    continue
+                dest = os.path.realpath(os.path.join(EXTRACTED_DIR, member.name))
+                if not dest.startswith(extract_real + os.sep):
+                    log.warning("Skipping tar member outside target dir: %s", member.name)
+                    continue
+                tar.extract(member, EXTRACTED_DIR)
+                count += 1
 
         log.info("Extracted %d JSON files to %s", count, EXTRACTED_DIR)
 

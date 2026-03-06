@@ -42,7 +42,6 @@ from .config import (
     TEST_PHONE,
 )
 from .drug_cost_engine import compute_monthly_drug_costs
-from .encryption import get_cipher
 from .persistent_store import PersistentStore
 from .providers.service import search_providers
 from .sms_provider import create_sms_provider
@@ -154,10 +153,14 @@ if os.path.isdir(_admin_dist):
         app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
 
     # Catch-all for SPA routing — serves index.html for any /admin/* route
+    _admin_real = os.path.realpath(_admin_dist)
+
     @app.get("/admin/{full_path:path}")
     async def admin_spa(full_path: str):
         # If requesting a real file (favicon, etc.), serve it
-        file_path = os.path.join(_admin_dist, full_path)
+        file_path = os.path.realpath(os.path.join(_admin_dist, full_path))
+        if not file_path.startswith(_admin_real + os.sep) and file_path != _admin_real:
+            raise HTTPException(status_code=400, detail="Invalid path")
         if os.path.isfile(file_path):
             return FileResponse(file_path)
         # Otherwise serve index.html for client-side routing
