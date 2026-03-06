@@ -67,6 +67,10 @@ def search_contact_by_phone(phone: str) -> dict | None:
     if len(clean) == 11 and clean.startswith("1"):
         clean = clean[1:]
 
+    # Prevent COQL injection — phone must be digits only
+    if not clean.isdigit() or len(clean) != 10:
+        return None
+
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
 
     # Search by phone and mobile fields

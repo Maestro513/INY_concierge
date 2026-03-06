@@ -276,14 +276,20 @@ def get_user_db() -> UserDataDB:
     return _user_db
 
 
-def _session_phone(session_id: str) -> str:
-    """Resolve session_id → phone, or raise 401."""
+def _session_phone(session_id: str, user: dict | None = None) -> str:
+    """Resolve session_id → phone, or raise 401.
+    If *user* (JWT payload) is provided, verifies the session belongs to that user.
+    """
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    phone = session["phone"]
+    # Cross-user check: JWT subject must match the session's phone
+    if user and user.get("sub") not in (None, "dev") and user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     # Touch timestamp to extend TTL on activity
     get_store().touch_session(session_id)
-    return session["phone"]
+    return phone
 
 
 # ── SMS Provider — lazy init ─────────────────────────────────────────────────
@@ -1521,6 +1527,10 @@ def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    # Cross-user check: JWT subject must match the session's phone
+    phone = session["phone"]
+    if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     return _my_drugs_impl(session["data"])
 
 
@@ -1882,7 +1892,7 @@ def _compute_ic_monthly_cost(
 @app.get("/reminders/{session_id}")
 def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
     """List all medication reminders for this member."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     return {"reminders": db.get_reminders(phone)}
 
@@ -1890,7 +1900,7 @@ def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
 @app.post("/reminders/{session_id}")
 def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(get_current_user)):
     """Create a single medication reminder."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     if not 0 <= req.time_hour <= 23:
         raise HTTPException(status_code=400, detail="time_hour must be 0-23")
     if not 0 <= req.time_minute <= 59:
@@ -1912,7 +1922,7 @@ def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(
 @app.post("/reminders/{session_id}/bulk")
 def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict = Depends(get_current_user)):
     """Create multiple reminders at once (agent onboarding)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     reminders = db.create_reminders_bulk(
         phone=phone,
@@ -1925,7 +1935,7 @@ def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict 
 @app.put("/reminders/{session_id}/{reminder_id}")
 def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _user: dict = Depends(get_current_user)):
     """Update a reminder (toggle, reschedule, etc.)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     reminder = db.update_reminder(phone, reminder_id, **req.model_dump(exclude_none=True))
     if not reminder:
@@ -1936,7 +1946,7 @@ def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _use
 @app.delete("/reminders/{session_id}/{reminder_id}")
 def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get_current_user)):
     """Delete a medication reminder."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     deleted = db.delete_reminder(phone, reminder_id)
     if not deleted:
@@ -1954,7 +1964,7 @@ VALID_USAGE_CATEGORIES = {"otc", "dental", "flex", "vision", "hearing"}
 @app.post("/usage/{session_id}")
 def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_current_user)):
     """Log a benefits usage entry (e.g. OTC purchase, dental visit)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     cat = req.category.lower()
     if cat not in VALID_USAGE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(VALID_USAGE_CATEGORIES)}")
@@ -1975,7 +1985,7 @@ def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_curre
 @app.get("/usage/{session_id}")
 def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Depends(get_current_user)):
     """Get all usage entries for this member, optionally filtered by category."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     entries = db.get_usage(phone, category)
     return {"usage": entries}
@@ -1984,7 +1994,7 @@ def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Dep
 @app.delete("/usage/{session_id}/{usage_id}")
 def delete_usage(session_id: str, usage_id: int, _user: dict = Depends(get_current_user)):
     """Delete a usage entry (undo mistake)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     deleted = db.delete_usage(phone, usage_id)
     if not deleted:
@@ -2001,9 +2011,12 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    phone = session["phone"]
+    # Cross-user check: JWT subject must match the session's phone
+    if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     get_store().touch_session(session_id)
 
-    phone = session["phone"]
     plan_number = session["data"].get("plan_number", "")
     if not plan_number:
         return {"summary": []}
