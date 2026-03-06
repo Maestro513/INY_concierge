@@ -12,6 +12,7 @@ import uuid
 from typing import Optional
 
 import anthropic
+import jwt
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -133,6 +134,41 @@ async def security_headers(request: Request, call_next) -> Response:
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     if APP_ENV == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
+
+# ── PHI access audit middleware ───────────────────────────────────────────────
+# Logs every request to endpoints that touch Protected Health Information.
+_PHI_PATH_PREFIXES = (
+    "/cms/", "/sob/", "/reminders/", "/usage/", "/ask",
+    "/providers/search", "/pharmacies/search",
+)
+
+@app.middleware("http")
+async def phi_audit_middleware(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _PHI_PATH_PREFIXES):
+        actor = "anonymous"
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer ") and APP_ENV != "development":
+            try:
+                payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=["HS256"])
+                actor = payload.get("sub", "unknown")
+            except Exception:
+                actor = "invalid_token"
+        elif APP_ENV == "development":
+            actor = "dev"
+        action = "read" if request.method == "GET" else "write"
+        try:
+            get_audit_log().record(
+                actor=actor,
+                action=f"phi_{action}",
+                resource=path,
+                ip_address=request.client.host if request.client else "",
+                detail=f"{request.method} {response.status_code}",
+            )
+        except Exception:
+            pass  # Never let audit logging break request flow
     return response
 
 # ── Admin router ─────────────────────────────────────────────────────────────

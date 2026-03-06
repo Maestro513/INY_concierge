@@ -3,11 +3,12 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Animated,
   SafeAreaView, Linking, ActivityIndicator, Image, Dimensions,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 import { cachedFetch } from '../utils/offlineCache';
+import { getMemberSession } from '../constants/session';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 16;
@@ -26,7 +27,8 @@ const CARRIER_LOGOS = {
 
 export default function DigitalIDScreen() {
   const router = useRouter();
-  const { firstName, lastName, planName, planNumber, medicareNumber } = useLocalSearchParams();
+  const { member: _mem } = getMemberSession();
+  const { firstName, lastName, planName, planNumber, medicareNumber } = _mem || {};
 
   const [cardData, setCardData] = useState(null);
   const [loading, setLoading] = useState(true);

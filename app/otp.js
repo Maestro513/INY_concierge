@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
+import { setMemberSession } from '../constants/session';
 
 export default function OTPScreen() {
   const { phone, firstName } = useLocalSearchParams();
@@ -67,20 +68,21 @@ export default function OTPScreen() {
         // Store JWT tokens
         await setTokens(data.access_token, data.refresh_token);
 
-        // Navigate to home with member data
-        router.replace({
-          pathname: '/home',
-          params: {
+        // Store member data in memory (not URL params) to avoid PHI in URLs
+        setMemberSession(
+          {
             firstName: data.first_name,
             lastName: data.last_name,
             planName: data.plan_name,
             planNumber: data.plan_number,
             agent: data.agent || '',
             medicareNumber: data.medicare_number || '',
-            sessionId: data.session_id || '',
             zipCode: data.zip_code || '',
           },
-        });
+          data.session_id || '',
+        );
+
+        router.replace('/home');
       } else {
         setError('Verification failed. Please try again.');
       }

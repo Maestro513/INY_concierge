@@ -27,13 +27,22 @@ from .admin_auth import (
     require_admin,
     require_role,
 )
-from .auth import generate_otp
 from .config import ADMIN_SECRET, EXTRACTED_DIR, PDFS_DIR
+from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+# Lazy singleton — shares the same SQLite DB as the mobile OTP store
+_store = None
+
+def _get_store() -> PersistentStore:
+    global _store
+    if _store is None:
+        _store = PersistentStore()
+    return _store
 
 
 # ── Request / Response models ────────────────────────────────────────────────
@@ -213,7 +222,7 @@ async def create_member(body: CreateMemberRequest,
     otp_sent = False
     if body.send_verification:
         try:
-            code = generate_otp(phone)
+            code = _get_store().generate_otp(phone)
             if code:
                 sms = create_sms_provider()
                 otp_sent = sms.send_otp(phone, code)
@@ -238,7 +247,7 @@ async def admin_send_otp(body: SendOTPRequest,
         raise HTTPException(status_code=400, detail="Invalid phone number.")
 
     try:
-        code = generate_otp(phone)
+        code = _get_store().generate_otp(phone)
         if not code:
             raise HTTPException(status_code=429, detail="Too many OTP requests. Try again later.")
         sms = create_sms_provider()

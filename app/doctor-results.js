@@ -8,10 +8,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
+import { getMemberSession } from '../constants/session';
 
 export default function DoctorResults() {
-  const { specialty, zipCode, planName } = useLocalSearchParams();
+  const { specialty } = useLocalSearchParams();
   const router = useRouter();
+  const { member: _mem } = getMemberSession();
+  const { zipCode, planName } = _mem || {};
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

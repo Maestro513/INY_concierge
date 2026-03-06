@@ -4,14 +4,16 @@ import {
   ActivityIndicator, Linking, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
+import { getMemberSession } from '../constants/session';
 
 export default function PharmacyResults() {
-  const { zipCode, planNumber, planName } = useLocalSearchParams();
   const router = useRouter();
+  const { member: _mem } = getMemberSession();
+  const { zipCode, planNumber, planName } = _mem || {};
   const [pharmacies, setPharmacies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

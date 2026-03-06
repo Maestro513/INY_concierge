@@ -104,7 +104,9 @@ class TestJWTTokens:
         payload = decode_token(tokens["access_token"], jwt_secret=jwt_secret, expected_type="access")
         assert payload["sub"] == "5551234567"
         assert payload["type"] == "access"
-        assert payload["first_name"] == "Jane"
+        # H1: PHI should NOT be in JWT tokens
+        assert "first_name" not in payload
+        assert "plan_number" not in payload
 
     def test_decode_refresh_token(self, jwt_secret, sample_member):
         tokens = create_tokens("5551234567", sample_member, jwt_secret=jwt_secret)
