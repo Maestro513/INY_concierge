@@ -491,7 +491,8 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
              -F "file=@extracted_jsons.tar.gz"
     """
     secret = request.headers.get("X-Admin-Secret", "")
-    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+    import hmac
+    if not ADMIN_SECRET or not hmac.compare_digest(secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden — invalid admin secret.")
 
     if not file.filename or not file.filename.endswith((".tar.gz", ".tgz")):

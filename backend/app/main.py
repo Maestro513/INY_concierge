@@ -2,6 +2,8 @@
 InsuranceNYou Backend API
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -16,11 +18,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from .admin_router import router as admin_router
 from .audit import get_audit_log, mask_phone, mask_pii_in_string
-from .auth import create_tokens, decode_token, generate_otp, require_auth, verify_otp
+from .auth import create_tokens, decode_token, require_auth
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
     ADMIN_SECRET,
@@ -44,6 +46,7 @@ from .config import (
 )
 from .drug_cost_engine import compute_monthly_drug_costs
 from .encryption import get_cipher
+from .persistent_store import PersistentStore
 from .providers.service import search_providers
 from .sms_provider import create_sms_provider
 from .sob_parser import extract_tier_copays, load_plan_text
@@ -122,6 +125,18 @@ else:
         allow_headers=["*"],
     )
 
+# ── Security headers middleware ──────────────────────────────────────────────
+@app.middleware("http")
+async def security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if APP_ENV == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
+
 # ── Admin router ─────────────────────────────────────────────────────────────
 app.include_router(admin_router)
 
@@ -188,6 +203,16 @@ if os.path.isdir(_static_dir):
     app.mount("/static", _SF2(directory=_static_dir), name="static-files")
     log.info(f"Static files mounted at /static/ from {_static_dir}")
 
+# ── Request ID correlation middleware ─────────────────────────────────────────
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Attach a unique X-Request-ID to every request/response for log correlation."""
+    req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+    request.state.request_id = req_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
 # ── Request timing + metrics middleware ──────────────────────────────────────
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
 
@@ -206,40 +231,36 @@ async def metrics_middleware(request: Request, call_next):
         _request_metrics["errors"] += 1
     # Mask PII from URL paths before logging (e.g. /cms/my-drugs/5551234567)
     path = mask_pii_in_string(str(request.url.path))
-    log.info(f"{request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
+    req_id = getattr(request.state, "request_id", "")
+    log.info(f"[{req_id}] {request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
     return response
 
-# ── Session store (in-memory with TTL) ───────────────────────────────────────
-_sessions: dict[str, dict] = {}
+# ── Persistent store (OTP + sessions in SQLite) ─────────────────────────────
+_store = None
 SESSION_TTL = 7200  # 2 hours
+
+
+def get_store() -> PersistentStore:
+    global _store
+    if _store is None:
+        _store = PersistentStore()
+        _store.cleanup_all()
+        log.info("Persistent store loaded")
+    return _store
+
 
 def create_session(phone: str, member_data: dict) -> str:
     """Create a session and return the session ID."""
-    sid = uuid.uuid4().hex
-    _sessions[sid] = {"phone": phone, "data": member_data, "ts": time.time()}
-    _cleanup_sessions()
-    return sid
+    return get_store().create_session(phone, member_data)
 
 def get_session(sid: str) -> dict | None:
     """Get session data, or None if expired/missing."""
-    entry = _sessions.get(sid)
-    if not entry:
-        return None
-    if time.time() - entry["ts"] > SESSION_TTL:
-        _sessions.pop(sid, None)
-        return None
-    return entry
-
-def _cleanup_sessions():
-    """Remove expired sessions (called lazily)."""
-    now = time.time()
-    expired = [k for k, v in _sessions.items() if now - v["ts"] > SESSION_TTL]
-    for k in expired:
-        _sessions.pop(k, None)
+    return get_store().get_session(sid, ttl=SESSION_TTL)
 
 # In-memory cache for parsed SOB summaries: {plan_id: {"data": {...}, "ts": float}}
 _sob_cache: dict[str, dict] = {}
 SOB_CACHE_TTL = 3600  # 1 hour
+SOB_CACHE_MAX = 500   # max entries — evict oldest when full
 
 # User Data DB — lazy init
 _user_db = None
@@ -259,7 +280,7 @@ def _session_phone(session_id: str) -> str:
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     # Touch timestamp to extend TTL on activity
-    session["ts"] = time.time()
+    get_store().touch_session(session_id)
     return session["phone"]
 
 
@@ -301,6 +322,16 @@ def get_cms():
     return _cms
 
 
+def _evict_oldest(cache: dict, max_size: int) -> None:
+    """Evict expired entries, then oldest if still over max_size."""
+    now = time.time()
+    expired = [k for k, v in cache.items() if now - v.get("ts", 0) > SOB_CACHE_TTL]
+    for k in expired:
+        del cache[k]
+    if len(cache) >= max_size:
+        oldest = min(cache, key=lambda k: cache[k].get("ts", 0))
+        del cache[oldest]
+
 # SOB tier copays cache: {plan_id: {"data": dict, "ts": float}}
 _sob_tier_cache: dict[str, dict] = {}
 SOB_TIER_CACHE_TTL = 3600  # 1 hour
@@ -324,6 +355,7 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
 
     try:
         tier_copays = extract_tier_copays(text)
+        _evict_oldest(_sob_tier_cache, SOB_CACHE_MAX)
         _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
         log.info(f"SOB tier copays loaded for {pid}: tiers={[k for k in tier_copays if isinstance(k, int)]}")
         return tier_copays
@@ -557,7 +589,7 @@ def metrics():
         "total_requests": total,
         "total_errors": _request_metrics["errors"],
         "avg_latency_ms": round((_request_metrics["latency_sum"] / total) * 1000, 1) if total > 0 else 0,
-        "active_sessions": len(_sessions),
+        "active_sessions": get_store().count_active_sessions(ttl=SESSION_TTL),
         "sob_cache_size": len(_sob_cache),
     }
 
@@ -603,7 +635,7 @@ def lookup_member(req: LookupRequest, request: Request):
 
     if not is_test:
         # Generate + send OTP (skipped for test account — uses TEST_OTP instead)
-        code = generate_otp(
+        code = get_store().generate_otp(
             req.phone,
             otp_ttl=OTP_TTL,
             max_sends=OTP_MAX_SENDS,
@@ -636,7 +668,7 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     # Test account — accept TEST_OTP without going through the OTP store
     is_test = TEST_PHONE and TEST_OTP and req.phone == TEST_PHONE
-    otp_valid = (is_test and req.code == TEST_OTP) or verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
+    otp_valid = (is_test and req.code == TEST_OTP) or get_store().verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
 
     if not otp_valid:
         get_audit_log().record(
@@ -648,10 +680,9 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
 
     # Find the pending session with this phone's member data
     member_data = None
-    for sid, entry in _sessions.items():
-        if entry["phone"] == req.phone:
-            member_data = entry["data"]
-            break
+    pending = get_store().find_session_by_phone(req.phone, ttl=SESSION_TTL)
+    if pending:
+        member_data = pending["data"]
 
     if not member_data:
         # Session expired between lookup and verify — re-fetch from Zoho
@@ -704,10 +735,9 @@ def refresh_token_endpoint(req: RefreshRequest):
 
     # Find member data from an active session
     member_data = None
-    for entry in _sessions.values():
-        if entry["phone"] == phone:
-            member_data = entry["data"]
-            break
+    active = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if active:
+        member_data = active["data"]
 
     if not member_data:
         # Session gone — re-fetch from Zoho
@@ -1132,6 +1162,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
             result = _enrich_sob_with_cms(result, req.plan_number)
         except Exception as e:
             log.warning(f"CMS enrichment failed (non-fatal): {e}")
+        _evict_oldest(_sob_cache, SOB_CACHE_MAX)
         _sob_cache[plan_id] = {"data": result, "ts": time.time()}
         log.info(f"[SOB] {plan_id}: served from pre-extracted benefits")
         return result
@@ -1171,8 +1202,8 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         raw = raw.strip()
         parsed = json.loads(raw)
     except (json.JSONDecodeError, IndexError) as e:
-        print(f"[SOB] JSON parse failed: {e}")
-        print(f"[SOB] Raw response: {raw[:500]}")
+        log.warning("[SOB] JSON parse failed: %s", e)
+        log.debug("[SOB] Raw response: %s", raw[:500])
         raise HTTPException(
             status_code=500,
             detail="Failed to parse SOB benefits. Try again.",
@@ -1199,6 +1230,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         log.warning(f"CMS enrichment failed (non-fatal): {e}")
 
     # Cache it with timestamp
+    _evict_oldest(_sob_cache, SOB_CACHE_MAX)
     _sob_cache[plan_id] = {"data": result, "ts": time.time()}
     return result
 
@@ -1284,7 +1316,7 @@ def _run_sync_background():
 @app.post("/admin/sync-pdfs")
 def sync_pdfs_from_gdrive(body: SyncRequest):
     """Download latest PDFs from the shared Google Drive folder (background)."""
-    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
     if _sync_status["running"]:
         return {"status": "already running — check /admin/sync-status"}
@@ -1296,7 +1328,7 @@ def sync_pdfs_from_gdrive(body: SyncRequest):
 @app.post("/admin/sync-status")
 def sync_status(body: SyncRequest):
     """Check progress of a background sync."""
-    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
     if _sync_status["running"]:
         return {"status": "running"}
@@ -1344,10 +1376,31 @@ def _otc_from_sob_text(plan_number: str) -> dict | None:
     return None
 
 
+# --- Response Caching Helper ─────────────────────────────────────────────────
+
+def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> JSONResponse:
+    """Return a JSONResponse with Cache-Control and ETag headers.
+    If the client sends a matching If-None-Match, returns 304."""
+    body = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    etag = '"' + hashlib.md5(body.encode()).hexdigest() + '"'
+
+    client_etag = request.headers.get("If-None-Match")
+    if client_etag and client_etag == etag:
+        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": f"private, max-age={max_age}, stale-while-revalidate=600",
+            "ETag": etag,
+        },
+    )
+
+
 # --- CMS Benefits Endpoints ---
 
 @app.get("/cms/benefits/{plan_number}")
-def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Full plan benefits from CMS data."""
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
@@ -1362,56 +1415,56 @@ def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
             otc["amount"] = sob_otc["amount"]
             otc["period"] = sob_otc["period"]
 
-    return result
+    return _cached_json_response(result, request)
 
 
 @app.get("/cms/benefits/{plan_number}/medical")
-def cms_medical(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_medical(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """PCP, specialist, ER, urgent care copays."""
     cms = get_cms()
-    return cms.get_medical_copays(plan_number)
+    return _cached_json_response(cms.get_medical_copays(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/dental")
-def cms_dental(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_dental(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Dental preventive + comprehensive benefits."""
     cms = get_cms()
-    return cms.get_dental_benefits(plan_number)
+    return _cached_json_response(cms.get_dental_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/otc")
-def cms_otc(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_otc(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """OTC allowance amount and delivery method."""
     cms = get_cms()
-    return cms.get_otc_allowance(plan_number)
+    return _cached_json_response(cms.get_otc_allowance(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/vision")
-def cms_vision(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_vision(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Eye exam + eyewear vision benefits."""
     cms = get_cms()
-    return cms.get_vision_benefits(plan_number)
+    return _cached_json_response(cms.get_vision_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/hearing")
-def cms_hearing(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_hearing(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Hearing exam + hearing aid benefits."""
     cms = get_cms()
-    return cms.get_hearing_benefits(plan_number)
+    return _cached_json_response(cms.get_hearing_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/flex")
-def cms_flex(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_flex(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Flex card / SSBCI supplemental benefits."""
     cms = get_cms()
-    return cms.get_flex_ssbci(plan_number)
+    return _cached_json_response(cms.get_flex_ssbci(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/giveback")
-def cms_giveback(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_giveback(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Part B premium giveback amount."""
     cms = get_cms()
-    return cms.get_part_b_giveback(plan_number)
+    return _cached_json_response(cms.get_part_b_giveback(plan_number), request)
 
 
 @app.post("/cms/drug")
@@ -1957,7 +2010,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    session["ts"] = time.time()
+    get_store().touch_session(session_id)
 
     phone = session["phone"]
     plan_number = session["data"].get("plan_number", "")
@@ -2069,7 +2122,7 @@ def _split_plan(plan_number: str) -> tuple[str, str]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/cms/id-card/{plan_number}")
-def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
+def get_id_card_data(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Return all data needed to render a digital insurance ID card."""
     from .carrier_config import detect_carrier, get_carrier_config
 
@@ -2086,7 +2139,7 @@ def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
     )
     rx = get_carrier_config(carrier_key) if carrier_key else {}
 
-    return {
+    result = {
         "plan_name": overview.get("plan_name", ""),
         "org_name": overview.get("org_name", ""),
         "contract_id": overview.get("contract_id", ""),
@@ -2106,4 +2159,5 @@ def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
         "prior_auth_phone": rx.get("prior_auth", ""),
         "website": rx.get("website", ""),
     }
+    return _cached_json_response(result, request)
 

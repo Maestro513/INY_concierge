@@ -15,11 +15,18 @@ import jwt
 from fastapi import HTTPException, Request
 
 from . import admin_db
+from .config import APP_ENV
 
 log = logging.getLogger(__name__)
 
 # Separate secret from mobile JWT — fall back to JWT_SECRET if not set
-ADMIN_JWT_SECRET = os.getenv("ADMIN_JWT_SECRET", os.getenv("JWT_SECRET", "admin-dev-secret-change-me"))
+ADMIN_JWT_SECRET = os.getenv("ADMIN_JWT_SECRET", os.getenv("JWT_SECRET", ""))
+
+if APP_ENV == "production" and not ADMIN_JWT_SECRET:
+    raise RuntimeError("ADMIN_JWT_SECRET must be set in production.")
+if not ADMIN_JWT_SECRET:
+    log.warning("ADMIN_JWT_SECRET not set — using insecure default for development only")
+    ADMIN_JWT_SECRET = "admin-dev-secret-change-me"
 ADMIN_ACCESS_TTL = int(os.getenv("ADMIN_ACCESS_TTL", "28800"))    # 8 hours
 ADMIN_REFRESH_TTL = int(os.getenv("ADMIN_REFRESH_TTL", "2592000"))  # 30 days
 
