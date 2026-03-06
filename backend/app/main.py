@@ -3,7 +3,6 @@ InsuranceNYou Backend API
 """
 
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -25,12 +24,10 @@ from .audit import get_audit_log, mask_phone, mask_pii_in_string
 from .auth import create_tokens, decode_token, require_auth
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
-    ADMIN_SECRET,
     ANTHROPIC_API_KEY,
     APP_ENV,
     CORS_ORIGINS,
     EXTRACTED_DIR,
-    GDRIVE_FOLDER_ID,
     JWT_ACCESS_TTL,
     JWT_REFRESH_TTL,
     JWT_SECRET,
@@ -1303,55 +1300,6 @@ def get_sob_pdf(plan_number: str):
     )
 
 
-# --- Admin: sync PDFs from Google Drive ---
-
-class SyncRequest(BaseModel):
-    secret: str = ""
-
-_sync_status: dict = {"running": False, "last_result": None}
-
-def _run_sync_background():
-    """Run the full sync + process pipeline in a background thread."""
-    from .gdrive_sync import sync_folder
-    from .pdf_processor import process_pdf_list
-    try:
-        _sync_status["running"] = True
-        _sync_status["last_result"] = None
-        result = sync_folder(GDRIVE_FOLDER_ID, PDFS_DIR)
-        # Only process newly downloaded PDFs, not all 3600+
-        if result["downloaded"] > 0 and result.get("new_files"):
-            process_pdf_list(result["new_files"])
-        result.pop("new_files", None)  # Don't include file paths in status
-        _sync_status["last_result"] = result
-    except Exception as exc:
-        _sync_status["last_result"] = {"error": str(exc)}
-    finally:
-        _sync_status["running"] = False
-
-@app.post("/admin/sync-pdfs")
-def sync_pdfs_from_gdrive(body: SyncRequest):
-    """Download latest PDFs from the shared Google Drive folder (background)."""
-    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if _sync_status["running"]:
-        return {"status": "already running — check /admin/sync-status"}
-    import threading
-    t = threading.Thread(target=_run_sync_background, daemon=True)
-    t.start()
-    return {"status": "sync started in background — check /admin/sync-status for progress"}
-
-@app.post("/admin/sync-status")
-def sync_status(body: SyncRequest):
-    """Check progress of a background sync."""
-    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if _sync_status["running"]:
-        return {"status": "running"}
-    if _sync_status["last_result"] is None:
-        return {"status": "no sync has been run yet"}
-    return {"status": "complete", "result": _sync_status["last_result"]}
-
-
 # --- OTC fallback from SOB extracted text ---
 
 def _otc_from_sob_text(plan_number: str) -> dict | None:
@@ -2040,7 +1988,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # OTC
     try:
-        otc = cms.get_otc_allowance(*_split_plan(plan_number))
+        otc = cms.get_otc_allowance(plan_number)
         if otc and otc.get("has_otc") and otc.get("amount"):
             amt = otc["amount"]
             # amount may be string with $ — normalize to float
@@ -2053,7 +2001,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Dental
     try:
-        dental = cms.get_dental_benefits(*_split_plan(plan_number))
+        dental = cms.get_dental_benefits(plan_number)
         if dental and dental.get("has_preventive"):
             prev = dental.get("preventive", {})
             max_ben = prev.get("max_benefit")
@@ -2065,9 +2013,17 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Flex / SSBCI
     try:
-        flex = cms.get_flex_ssbci(*_split_plan(plan_number))
+        flex = cms.get_flex_ssbci(plan_number)
         if flex and flex.get("has_ssbci") and flex.get("benefits"):
-            total = sum(b.get("max_amount", 0) for b in flex["benefits"] if b.get("max_amount"))
+            total = 0
+            for b in flex["benefits"]:
+                raw = b.get("amount", "0")
+                if isinstance(raw, str):
+                    raw = raw.replace("$", "").replace(",", "").strip()
+                    if raw and raw != "Included":
+                        total += float(raw)
+                elif isinstance(raw, (int, float)):
+                    total += float(raw)
             if total > 0:
                 categories.append({"category": "flex", "cap": total, "period": "Yearly", "label": "Flex Card"})
     except Exception:
@@ -2075,9 +2031,9 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Vision
     try:
-        vision = cms.get_vision_benefits(*_split_plan(plan_number))
-        if vision and vision.get("has_exams"):
-            exams = vision.get("exams", {})
+        vision = cms.get_vision_benefits(plan_number)
+        if vision and vision.get("has_eye_exam"):
+            exams = vision.get("eye_exam", {})
             max_amt = exams.get("max_benefit")
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
@@ -2087,9 +2043,9 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Hearing
     try:
-        hearing = cms.get_hearing_benefits(*_split_plan(plan_number))
-        if hearing and hearing.get("has_aids"):
-            aids = hearing.get("aids", {})
+        hearing = cms.get_hearing_benefits(plan_number)
+        if hearing and hearing.get("has_hearing_aids"):
+            aids = hearing.get("hearing_aids", {})
             max_amt = aids.get("max_benefit")
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
@@ -2122,14 +2078,6 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     return {"summary": summary}
 
-
-def _split_plan(plan_number: str) -> tuple[str, str]:
-    """Split 'H1234-567' or 'H1234-567-000' into (contract_id, plan_id)."""
-    pid = normalize_plan_id(plan_number)
-    parts = pid.split("-")
-    if len(parts) >= 2:
-        return parts[0], parts[1]
-    return pid, ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

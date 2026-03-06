@@ -36,7 +36,7 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| **CRITICAL (P0)** | 18 | Security vulnerabilities, HIPAA violations, data loss, runtime crashes |
+| **CRITICAL (P0)** | 16 | Security vulnerabilities, HIPAA violations, data loss, runtime crashes |
 | **HIGH (P1)** | 22 | PHI exposure, missing authorization, broken features, compliance gaps |
 | **MEDIUM (P2)** | 30+ | Performance issues, logic bugs, code quality, UX problems |
 | **LOW (P3)** | 25+ | Style issues, minor inefficiencies, cosmetic bugs |
@@ -57,10 +57,7 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - Column names from external CSV files pass through a weak `sanitize_col()` and are interpolated into `CREATE TABLE` SQL via f-string. A crafted CSV header executes arbitrary SQL.
 - **Fix:** Whitelist allowed column names or use parameterized DDL.
 
-**C3. Path Traversal in Google Drive Sync**
-- **File:** `backend/app/gdrive_sync.py:129,151`
-- Filenames from Google Drive API used directly in `os.path.join()` without sanitization.
-- **Fix:** `name = os.path.basename(name)`.
+**C3. ~~REMOVED~~ — Google Drive code deleted; no longer applicable.**
 
 **C4. Tar Extraction Zip-Slip Vulnerability**
 - **File:** `backend/app/admin_router.py:522-528`
@@ -91,10 +88,9 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - `enrich_providers()` only processes the first 15 providers. All providers beyond index 15 are permanently discarded from search results.
 - **Fix:** Append un-enriched providers back to the result list.
 
-**C9. `usage_summary` Endpoint Crashes on Every Call**
+**C9. ~~FIXED~~ `usage_summary` Endpoint Crashes on Every Call**
 - **File:** `backend/app/main.py:2043-2098`
-- `_split_plan()` returns a 2-tuple, unpacked with `*` into CMS methods that accept a single string. Raises `TypeError` on every call. Additionally, response key names are wrong (`"has_exams"` vs `"has_eye_exam"`, `"max_amount"` vs `"amount"`), so 3 of 5 benefit categories silently return empty even if the crash were fixed.
-- **Fix:** Pass `plan_number` directly; fix all key names to match CMS lookup return values.
+- `_split_plan()` was removed. CMS methods now receive `plan_number` directly. Key mismatches fixed: `has_exams`→`has_eye_exam`, `exams`→`eye_exam`, `has_aids`→`has_hearing_aids`, `aids`→`hearing_aids`, `max_amount`→`amount`.
 
 **C10. Out-of-Network Pharmacies Falsely Marked In-Network**
 - **File:** `backend/app/pharmacy_service.py:262`
@@ -377,8 +373,6 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - Comprehensive CMS PBP data coverage
 - Smart section-aware document chunking with TF-IDF scoring
 - IRA insulin cap rules faithfully modeled
-- Atomic file downloads in gdrive_sync (write to .tmp, then os.replace)
-- Good retry with exponential backoff in Google Drive sync
 - Batch inserts in import scripts (10K-50K rows with WAL mode)
 
 ### Frontend Mobile
@@ -411,7 +405,7 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 ### Phase 1: Security Blockers (Week 1)
 1. Fix path traversal in admin SPA route (C1)
 2. Fix SQL injection in cms_import (C2)
-3. Fix path traversal in gdrive_sync (C3)
+3. ~~Fix path traversal in gdrive_sync (C3)~~ — REMOVED (code deleted)
 4. Fix tar extraction vulnerability (C4)
 5. Fix XSS in quote widget (C5)
 6. Fix Zoho query injection (C17)

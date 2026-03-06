@@ -10,9 +10,7 @@ JSON_COUNT=$(find "$EXTRACTED" -iname '*.json' 2>/dev/null | wc -l)
 if [ "$JSON_COUNT" -gt 0 ]; then
     echo "Extracted data present ($JSON_COUNT JSON files) — ready to serve."
 else
-    # Try downloading PDFs; don't crash startup if it fails
-    echo "No extracted data found — attempting PDF download + processing ..."
-    python download_pdfs.py || echo "WARNING: PDF download failed (non-fatal)"
+    echo "No extracted data found — checking for local PDFs ..."
 
     PDF_COUNT=$(find "${PDFS_DIR:-pdf Updated}" -iname '*.pdf' 2>/dev/null | wc -l)
     if [ "$PDF_COUNT" -gt 0 ]; then
