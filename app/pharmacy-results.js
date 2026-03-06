@@ -26,7 +26,7 @@ export default function PharmacyResults() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plan_number: planNumber || '',
-          zip_code: zipCode || '33434',
+          zip_code: zipCode || '',
           radius_miles: 10,
           limit: 30,
         }),
@@ -172,7 +172,7 @@ export default function PharmacyResults() {
         </TouchableOpacity>
         <View style={s.headerCenter}>
           <Text style={s.headerTitle}>Pharmacies</Text>
-          <Text style={s.headerSub}>Near {zipCode || '33434'}</Text>
+          <Text style={s.headerSub}>Near {zipCode || ''}</Text>
         </View>
         <View style={{ width: 36 }} />
       </View>
@@ -205,7 +205,7 @@ export default function PharmacyResults() {
             <Ionicons name="search-outline" size={36} color={COLORS.textTertiary} />
           </View>
           <Text style={s.emptyText}>
-            No pharmacies found near {zipCode || '33434'}.{'\n'}
+            No pharmacies found near {zipCode || ''}.{'\n'}
             Try a different zip code or call us at (844) 463-2931.
           </Text>
         </View>

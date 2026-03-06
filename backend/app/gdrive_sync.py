@@ -210,4 +210,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     result = sync_folder(args.folder_id, args.dest)
-    print(result)
+    log.debug("Sync result: %s", result)

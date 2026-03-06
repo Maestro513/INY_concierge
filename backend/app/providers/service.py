@@ -15,7 +15,7 @@ from .enrichment.geocoding import geocode_address, geocode_zip, haversine_miles
 from .enrichment.google_places import enrich_providers
 from .enrichment.nppes import bulk_lookup_npis
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # Carrier detection keywords → adapter class
 CARRIER_MAP = {
@@ -110,10 +110,10 @@ async def search_providers(
 
     member_lat, member_lon = member_coords
 
-    print(f"[SERVICE] Carrier: {carrier_key}, Specialty: {specialty}, Zip: {zip_code} -> ({member_lat}, {member_lon})")
+    log.debug(f"[SERVICE] Carrier: {carrier_key}, Specialty: {specialty}, Zip: {zip_code} -> ({member_lat}, {member_lon})")
 
     # Step 4: Query carrier FHIR API
-    logger.info(
+    log.info(
         f"Searching {adapter.carrier_name} for {specialty} near {zip_code}"
     )
     providers = await adapter.search_providers(
@@ -123,7 +123,7 @@ async def search_providers(
         limit=limit,
     )
 
-    print(f"[SERVICE] Raw results from adapter: {len(providers)}")
+    log.debug(f"[SERVICE] Raw results from adapter: {len(providers)}")
 
     if not providers:
         return {
@@ -160,7 +160,7 @@ async def search_providers(
     ]
     providers.sort(key=lambda p: p.distance_miles or 999)
 
-    print(f"[SERVICE] After distance filter ({radius_miles}mi): {len(providers)}")
+    log.debug(f"[SERVICE] After distance filter ({radius_miles}mi): {len(providers)}")
 
     # Step 7: NPPES enrichment (for carriers that need it)
     npis_needing_enrichment = [

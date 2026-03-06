@@ -242,7 +242,7 @@ def ask_claude(question: str, plan_number: str) -> dict:
 
     context = find_relevant_chunks(chunks, question)
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",

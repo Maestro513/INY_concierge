@@ -269,11 +269,11 @@ class HumanaAdapter(BaseAdapter):
                 if not loc_ids:
                     state = self._zip_to_state(zip5)
                     if state:
-                        print(f"[HUMANA] No locations for zip {zip5}, trying state {state}")
+                        logger.debug(f"[HUMANA] No locations for zip {zip5}, trying state {state}")
                         loc_ids, locations = await self._get_locations_by_state(client, state)
 
                 if not loc_ids:
-                    print("[HUMANA] No locations found at all")
+                    logger.debug("[HUMANA] No locations found at all")
                     return []
 
                 # ── STEP 2: Find PractitionerRoles at those locations ──
@@ -282,10 +282,10 @@ class HumanaAdapter(BaseAdapter):
                 )
 
                 if not roles:
-                    print(f"[HUMANA] No {specialty_display} found at any location")
+                    logger.debug(f"[HUMANA] No {specialty_display} found at any location")
                     return []
 
-                print(f"[HUMANA] Found {len(roles)} roles, {len(prac_refs)} unique practitioners to fetch")
+                logger.debug(f"[HUMANA] Found {len(roles)} roles, {len(prac_refs)} unique practitioners to fetch")
 
                 # ── STEP 3: Fetch Practitioner resources for names/NPIs ──
                 practitioners = await self._get_practitioners(client, list(prac_refs))
@@ -298,7 +298,7 @@ class HumanaAdapter(BaseAdapter):
                         results.append(result)
 
                 results = self._deduplicate(results, limit)
-                print(f"[HUMANA] Final: {len(results)} providers")
+                logger.debug(f"[HUMANA] Final: {len(results)} providers")
                 return results
 
         except Exception as e:
@@ -311,33 +311,33 @@ class HumanaAdapter(BaseAdapter):
 
     async def _get_locations(self, client: httpx.AsyncClient, zip_code: str):
         """Get all locations in a zip code."""
-        print(f"[HUMANA] Step 1: Locations for zip {zip_code}")
+        logger.debug(f"[HUMANA] Step 1: Locations for zip {zip_code}")
         params = {"address-postalcode": zip_code, "_count": "200"}
         try:
             resp = await client.get(f"{HUMANA_BASE}/Location", params=params, headers=HEADERS)
             resp.raise_for_status()
             return self._parse_location_bundle(resp.json() or {})
         except Exception as e:
-            print(f"[HUMANA] Location fetch failed: {e}")
+            logger.warning(f"[HUMANA] Location fetch failed: {e}")
             return [], {}
 
     async def _get_locations_by_state(self, client: httpx.AsyncClient, state: str):
         """Fallback: get locations by state."""
-        print(f"[HUMANA] Step 1 fallback: Locations for state {state}")
+        logger.debug(f"[HUMANA] Step 1 fallback: Locations for state {state}")
         params = {"address-state": state, "_count": "200"}
         try:
             resp = await client.get(f"{HUMANA_BASE}/Location", params=params, headers=HEADERS)
             resp.raise_for_status()
             return self._parse_location_bundle(resp.json() or {})
         except Exception as e:
-            print(f"[HUMANA] State location fetch failed: {e}")
+            logger.warning(f"[HUMANA] State location fetch failed: {e}")
             return [], {}
 
     def _parse_location_bundle(self, bundle: dict):
         """Parse Location bundle → (loc_ids, locations_dict)."""
         entries = bundle.get("entry", []) or []
         total = bundle.get("total", len(entries))
-        print(f"[HUMANA] Got {len(entries)} locations (total available: {total})")
+        logger.debug(f"[HUMANA] Got {len(entries)} locations (total available: {total})")
 
         locations = {}
         loc_ids = []
@@ -376,7 +376,7 @@ class HumanaAdapter(BaseAdapter):
         prac_refs = set()
 
         max_locs = min(len(loc_ids), 100)
-        print(f"[HUMANA] Step 2: Checking {max_locs} locations for specialty {nucc_code}")
+        logger.debug(f"[HUMANA] Step 2: Checking {max_locs} locations for specialty {nucc_code}")
 
         hits = 0
         misses = 0
@@ -412,7 +412,7 @@ class HumanaAdapter(BaseAdapter):
                     misses += 1
 
             except httpx.TimeoutException:
-                print(f"[HUMANA]   Timeout on location {i+1}/{max_locs}")
+                logger.warning(f"[HUMANA]   Timeout on location {i+1}/{max_locs}")
                 continue
             except Exception:
                 continue
@@ -421,9 +421,9 @@ class HumanaAdapter(BaseAdapter):
                 break
 
             if (i + 1) % 20 == 0:
-                print(f"[HUMANA]   Progress: {i+1}/{max_locs} checked, {hits} hits, {len(all_roles)} roles")
+                logger.debug(f"[HUMANA]   Progress: {i+1}/{max_locs} checked, {hits} hits, {len(all_roles)} roles")
 
-        print(f"[HUMANA] Step 2 done: {hits} hits / {hits + misses} checked, {len(all_roles)} roles")
+        logger.debug(f"[HUMANA] Step 2 done: {hits} hits / {hits + misses} checked, {len(all_roles)} roles")
         return all_roles, prac_refs
 
     # ─────────────────────────────────────────────
@@ -440,7 +440,7 @@ class HumanaAdapter(BaseAdapter):
         if not prac_refs:
             return practitioners
 
-        print(f"[HUMANA] Step 3: Fetching {len(prac_refs)} practitioners")
+        logger.debug(f"[HUMANA] Step 3: Fetching {len(prac_refs)} practitioners")
 
         batch_size = 10
         for i in range(0, len(prac_refs), batch_size):
@@ -457,7 +457,7 @@ class HumanaAdapter(BaseAdapter):
                     practitioners[prac_id] = result
 
         fetched = len(set(id(v) for v in practitioners.values()))
-        print(f"[HUMANA] Step 3 done: got {fetched} practitioners")
+        logger.debug(f"[HUMANA] Step 3 done: got {fetched} practitioners")
         return practitioners
 
     async def _fetch_one_practitioner(self, client: httpx.AsyncClient, ref: str):
