@@ -301,10 +301,18 @@ def get_sms():
 # ── JWT Auth Dependency ──────────────────────────────────────────────────────
 def get_current_user(request: Request) -> dict:
     """FastAPI dependency — validates Bearer token, returns JWT payload.
+    Also verifies the session still exists (enables logout/revocation).
     Skipped entirely in development so you don't need to auth while editing the app."""
     if APP_ENV == "development":
         return {"sub": "dev", "type": "access"}
-    return require_auth(request, jwt_secret=JWT_SECRET)
+    payload = require_auth(request, jwt_secret=JWT_SECRET)
+    # Session-based revocation: verify the user still has an active session
+    phone = payload.get("sub")
+    if phone:
+        session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+        if not session:
+            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    return payload
 
 
 # CMS Lookup — lazy init so server starts even if DB missing
@@ -757,6 +765,21 @@ def refresh_token_endpoint(req: RefreshRequest):
         refresh_ttl=JWT_REFRESH_TTL,
     )
     return tokens
+
+
+@app.post("/auth/logout")
+def logout(request: Request, user: dict = Depends(get_current_user)):
+    """Invalidate all sessions for this user, effectively revoking their tokens."""
+    phone = user.get("sub")
+    if phone and phone != "dev":
+        count = get_store().delete_sessions_by_phone(phone)
+        log.info(f"Logout: deleted {count} session(s) for phone ending ***{phone[-4:]}")
+        get_audit_log().record(
+            actor=phone, action="auth_logout", resource="session",
+            ip_address=request.client.host if request.client else "",
+            detail=f"deleted {count} sessions",
+        )
+    return {"success": True}
 
 
 # Per-phone rate limiter for /ask: max 10 questions per 60 seconds

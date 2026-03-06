@@ -54,9 +54,9 @@ async def search_providers(
     specialty: str,
     zip_code: str,
     radius_miles: float = 25.0,
-    limit: int = 200,
+    limit: int = 25,
     enrich_google: bool = True,
-    max_google_enrich: int = 15,
+    max_google_enrich: int = 25,
 ) -> dict:
     """
     Main provider search function.
@@ -178,15 +178,12 @@ async def search_providers(
                     # NPPES doesn't have this directly, but specialty is the main gap
                     pass
 
-    # Step 8: Google Places enrichment (top N closest)
+    # Step 8: Google Places enrichment (concurrent via asyncio.gather)
     if enrich_google and providers:
         providers = await enrich_providers(
-            providers[:max_google_enrich],
+            providers,
             max_enrich=max_google_enrich,
         )
-        # Add back remaining un-enriched providers
-        if len(providers) < limit:
-            pass  # Already sliced above
 
     # Step 9: Build response
     return {

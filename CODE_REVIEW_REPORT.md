@@ -78,19 +78,17 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 
 ### Data Loss & Runtime Crashes
 
-**C8. Provider Enrichment Drops 185 of 200 Results**
-- **File:** `backend/app/providers/service.py:182-189`
-- `enrich_providers()` only processes the first 15 providers. All providers beyond index 15 are permanently discarded from search results.
-- **Fix:** Append un-enriched providers back to the result list.
+**C8. ~~FIXED~~ Provider Enrichment Drops Results & Sequential Google Places**
+- **File:** `backend/app/providers/service.py`, `backend/app/providers/enrichment/google_places.py`
+- Carrier limit reduced from 200→25 (sufficient for zip-code results). Google Places enrichment rewritten with `asyncio.gather` for concurrent calls instead of sequential. All returned providers now get enriched.
 
 **C9. ~~FIXED~~ `usage_summary` Endpoint Crashes on Every Call**
 - **File:** `backend/app/main.py:2043-2098`
 - `_split_plan()` was removed. CMS methods now receive `plan_number` directly. Key mismatches fixed: `has_exams`→`has_eye_exam`, `exams`→`eye_exam`, `has_aids`→`has_hearing_aids`, `aids`→`hearing_aids`, `max_amount`→`amount`.
 
-**C10. Out-of-Network Pharmacies Falsely Marked In-Network**
+**C10. ~~FIXED~~ Out-of-Network Pharmacies Falsely Marked In-Network**
 - **File:** `backend/app/pharmacy_service.py:262`
-- When a pharmacy's zip code is NOT in the CMS network data, `in_network = True` is set anyway. Members could visit out-of-network pharmacies and face unexpected costs.
-- **Fix:** Set `in_network = False` or `None` when zip is not in network data.
+- Changed fallback from `in_network = True` to `in_network = None` when pharmacy zip is not found in CMS network data.
 
 **C11. Deductible Remaining Calculation Is Wrong**
 - **File:** `backend/app/drug_cost_engine.py:265`
@@ -103,20 +101,18 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - **File:** `backend/app/config.py:36`
 - `JWT_SECRET` now generates a random `secrets.token_urlsafe(32)` fallback when unset (dev only). Production still raises `RuntimeError` if not explicitly configured.
 
-**C13. Auth Bypass in Development Mode**
-- **File:** `backend/app/main.py:303-304`
-- When `APP_ENV == "development"`, all authenticated endpoints return a hardcoded user with no token check. A misconfigured env var in production exposes everything.
-- **Fix:** Use a more robust guard; never default to development mode.
+**C13. ~~FIXED~~ Auth Bypass in Development Mode**
+- **File:** `backend/app/config.py:26`
+- `APP_ENV` default changed from `"development"` to `"production"`. Deploying without setting `APP_ENV` now defaults to full auth enforcement instead of silently disabling it.
 
 **C14. DEV Auth Bypass in Admin Panel**
 - **File:** `admin/src/auth/ProtectedRoute.tsx:8-11`
 - `if (import.meta.env.DEV) return <Outlet />` completely disables authentication in development and could leak into production with misconfigured builds.
 - **Fix:** Remove or gate behind an explicit flag.
 
-**C15. No JWT Token Revocation Mechanism**
-- **Files:** `backend/app/auth.py`, `backend/app/admin_auth.py`
-- No token blacklist or revocation exists. No logout endpoint on backend. Deactivating an admin account doesn't invalidate their existing access token (valid 8 hours). Mobile refresh tokens valid 30 days with no revocation path.
-- **Fix:** Implement token blacklisting or short-lived tokens with server-side session validation.
+**C15. ~~FIXED~~ No JWT Token Revocation Mechanism**
+- **Files:** `backend/app/main.py`, `backend/app/persistent_store.py`
+- Added session-based revocation: `get_current_user` now verifies the session still exists in SQLite on every request. Added `POST /auth/logout` endpoint that deletes all sessions for the user's phone, effectively revoking tokens. Added `delete_sessions_by_phone()` to PersistentStore.
 
 **C16. Hardcoded Test Credentials Active in All Environments**
 - **File:** `backend/.env.example:30-34`

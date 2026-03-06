@@ -23,7 +23,7 @@ ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # App environment
-APP_ENV = os.getenv("APP_ENV", "development")  # development | staging | production
+APP_ENV = os.getenv("APP_ENV", "production")  # development | staging | production
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # CORS — comma-separated extra origins (insurancenyou.com is always allowed in prod)

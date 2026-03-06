@@ -245,6 +245,13 @@ class PersistentStore:
         )
         conn.commit()
 
+    def delete_sessions_by_phone(self, phone: str) -> int:
+        """Delete all sessions for a phone number (logout/revocation)."""
+        conn = self._conn()
+        cursor = conn.execute("DELETE FROM sessions WHERE phone = ?", (phone,))
+        conn.commit()
+        return cursor.rowcount
+
     def find_session_by_phone(self, phone: str, ttl: int = 7200) -> dict | None:
         """Find the most recent session for a phone number."""
         conn = self._conn()
