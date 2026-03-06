@@ -772,8 +772,6 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         "plan_name": member_data["plan_name"],
         "plan_number": member_data["plan_number"],
         "agent": member_data.get("agent", "") or "",
-        "medicare_number": member_data.get("medicare_number", "") or "",
-        "medications": member_data.get("medications", "") or "",
         "zip_code": member_data.get("zip_code", "") or "",
         "session_id": sid,
     }

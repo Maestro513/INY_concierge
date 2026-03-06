@@ -76,7 +76,6 @@ export default function OTPScreen() {
             planName: data.plan_name,
             planNumber: data.plan_number,
             agent: data.agent || '',
-            medicareNumber: data.medicare_number || '',
             zipCode: data.zip_code || '',
           },
           data.session_id || '',
