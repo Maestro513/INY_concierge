@@ -3,6 +3,7 @@ InsuranceNYou Backend API
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from .admin_router import router as admin_router
 from .audit import get_audit_log, mask_phone, mask_pii_in_string
@@ -124,6 +125,18 @@ else:
         allow_headers=["*"],
     )
 
+# ── Security headers middleware ──────────────────────────────────────────────
+@app.middleware("http")
+async def security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if APP_ENV == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
+
 # ── Admin router ─────────────────────────────────────────────────────────────
 app.include_router(admin_router)
 
@@ -218,6 +231,7 @@ def get_session(sid: str) -> dict | None:
 # In-memory cache for parsed SOB summaries: {plan_id: {"data": {...}, "ts": float}}
 _sob_cache: dict[str, dict] = {}
 SOB_CACHE_TTL = 3600  # 1 hour
+SOB_CACHE_MAX = 500   # max entries — evict oldest when full
 
 # User Data DB — lazy init
 _user_db = None
@@ -279,6 +293,16 @@ def get_cms():
     return _cms
 
 
+def _evict_oldest(cache: dict, max_size: int) -> None:
+    """Evict expired entries, then oldest if still over max_size."""
+    now = time.time()
+    expired = [k for k, v in cache.items() if now - v.get("ts", 0) > SOB_CACHE_TTL]
+    for k in expired:
+        del cache[k]
+    if len(cache) >= max_size:
+        oldest = min(cache, key=lambda k: cache[k].get("ts", 0))
+        del cache[oldest]
+
 # SOB tier copays cache: {plan_id: {"data": dict, "ts": float}}
 _sob_tier_cache: dict[str, dict] = {}
 SOB_TIER_CACHE_TTL = 3600  # 1 hour
@@ -302,6 +326,7 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
 
     try:
         tier_copays = extract_tier_copays(text)
+        _evict_oldest(_sob_tier_cache, SOB_CACHE_MAX)
         _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
         log.info(f"SOB tier copays loaded for {pid}: tiers={[k for k in tier_copays if isinstance(k, int)]}")
         return tier_copays
@@ -1033,6 +1058,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
             result = _enrich_sob_with_cms(result, req.plan_number)
         except Exception as e:
             log.warning(f"CMS enrichment failed (non-fatal): {e}")
+        _evict_oldest(_sob_cache, SOB_CACHE_MAX)
         _sob_cache[plan_id] = {"data": result, "ts": time.time()}
         log.info(f"[SOB] {plan_id}: served from pre-extracted benefits")
         return result
@@ -1072,8 +1098,8 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         raw = raw.strip()
         parsed = json.loads(raw)
     except (json.JSONDecodeError, IndexError) as e:
-        print(f"[SOB] JSON parse failed: {e}")
-        print(f"[SOB] Raw response: {raw[:500]}")
+        log.warning("[SOB] JSON parse failed: %s", e)
+        log.debug("[SOB] Raw response: %s", raw[:500])
         raise HTTPException(
             status_code=500,
             detail="Failed to parse SOB benefits. Try again.",
@@ -1100,6 +1126,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         log.warning(f"CMS enrichment failed (non-fatal): {e}")
 
     # Cache it with timestamp
+    _evict_oldest(_sob_cache, SOB_CACHE_MAX)
     _sob_cache[plan_id] = {"data": result, "ts": time.time()}
     return result
 
@@ -1185,7 +1212,7 @@ def _run_sync_background():
 @app.post("/admin/sync-pdfs")
 def sync_pdfs_from_gdrive(body: SyncRequest):
     """Download latest PDFs from the shared Google Drive folder (background)."""
-    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
     if _sync_status["running"]:
         return {"status": "already running — check /admin/sync-status"}
@@ -1197,7 +1224,7 @@ def sync_pdfs_from_gdrive(body: SyncRequest):
 @app.post("/admin/sync-status")
 def sync_status(body: SyncRequest):
     """Check progress of a background sync."""
-    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden")
     if _sync_status["running"]:
         return {"status": "running"}
