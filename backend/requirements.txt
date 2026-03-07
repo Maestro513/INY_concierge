@@ -14,5 +14,6 @@ twilio==9.3.0
 sentry-sdk[fastapi]==2.19.2
 cryptography==44.0.0
 bcrypt==4.2.1
+httpx==0.28.1
 alembic==1.18.4
 sqlalchemy==2.0.48

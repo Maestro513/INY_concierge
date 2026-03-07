@@ -126,7 +126,29 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="InsuranceNYou API", version="0.7.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def _lifespan(application):
+    # Startup — nothing extra needed
+    yield
+    # Shutdown — clean up resources
+    log.info("Shutting down — cleaning up resources...")
+    try:
+        store = get_store()
+        store.cleanup_all()
+    except Exception:
+        pass
+    log.info("Shutdown complete.")
+
+app = FastAPI(
+    title="InsuranceNYou API",
+    version="0.7.0",
+    docs_url="/docs" if APP_ENV == "development" else None,
+    redoc_url="/redoc" if APP_ENV == "development" else None,
+    openapi_url="/openapi.json" if APP_ENV == "development" else None,
+    lifespan=_lifespan,
+)
 
 # ── JWT Secret validation ────────────────────────────────────────────────────
 if APP_ENV in ("production", "staging"):
@@ -321,6 +343,8 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 # ── Request timing + metrics middleware ──────────────────────────────────────
+import threading as _threading
+_metrics_lock = _threading.Lock()
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
 
 @app.middleware("http")
@@ -329,13 +353,15 @@ async def metrics_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        _request_metrics["errors"] += 1
+        with _metrics_lock:
+            _request_metrics["errors"] += 1
         raise
     elapsed = time.time() - start
-    _request_metrics["total"] += 1
-    _request_metrics["latency_sum"] += elapsed
-    if response.status_code >= 500:
-        _request_metrics["errors"] += 1
+    with _metrics_lock:
+        _request_metrics["total"] += 1
+        _request_metrics["latency_sum"] += elapsed
+        if response.status_code >= 500:
+            _request_metrics["errors"] += 1
     # Mask PII from URL paths before logging (e.g. /cms/my-drugs/5551234567)
     path = mask_pii_in_string(str(request.url.path))
     req_id = getattr(request.state, "request_id", "")
@@ -718,11 +744,14 @@ def quote_marketplace(
 @app.get("/metrics")
 def metrics(_user: dict = Depends(get_current_user)):
     """Basic request metrics for monitoring (requires auth)."""
-    total = _request_metrics["total"]
+    with _metrics_lock:
+        total = _request_metrics["total"]
+        errors = _request_metrics["errors"]
+        latency_sum = _request_metrics["latency_sum"]
     return {
         "total_requests": total,
-        "total_errors": _request_metrics["errors"],
-        "avg_latency_ms": round((_request_metrics["latency_sum"] / total) * 1000, 1) if total > 0 else 0,
+        "total_errors": errors,
+        "avg_latency_ms": round((latency_sum / total) * 1000, 1) if total > 0 else 0,
         "active_sessions": get_store().count_active_sessions(ttl=SESSION_TTL),
         "sob_cache_size": len(_sob_cache),
     }
@@ -2247,7 +2276,7 @@ def get_id_card_data(plan_number: str, request: Request, _user: dict = Depends(g
     cms = get_cms()
     overview = cms.get_plan_overview(plan_number)
     if not overview:
-        raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found")
+        raise HTTPException(status_code=404, detail="Plan not found.")
 
     medical = cms.get_medical_copays(plan_number)
 

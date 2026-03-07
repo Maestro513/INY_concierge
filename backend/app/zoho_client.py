@@ -2,10 +2,15 @@
 Zoho CRM client for looking up members by phone number.
 """
 
+import logging
 import threading
 import time
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+log = logging.getLogger(__name__)
 
 from .config import (
     ZOHO_CLIENT_ID,
@@ -20,6 +25,16 @@ API_BASE = "https://www.zohoapis.com/crm/v2"
 _token_cache = {"access_token": "", "expires_at": 0}
 _token_lock = threading.Lock()
 
+# Retry-capable session for transient network errors
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+)
+_http = requests.Session()
+_http.mount("https://", HTTPAdapter(max_retries=_retry_strategy))
+
 
 def get_access_token() -> str:
     """Get an access token using the refresh token. Caches until near expiry."""
@@ -33,7 +48,7 @@ def get_access_token() -> str:
         if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
             return _token_cache["access_token"]
 
-        resp = requests.post(TOKEN_URL, data={
+        resp = _http.post(TOKEN_URL, data={
             "grant_type": "refresh_token",
             "client_id": ZOHO_CLIENT_ID,
             "client_secret": ZOHO_CLIENT_SECRET,
@@ -90,7 +105,7 @@ def search_contact_by_phone(phone: str) -> dict | None:
     # Search by phone and mobile fields
     for field in ["Phone", "Mobile"]:
         search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{clean})"
-        resp = requests.get(search_url, headers=headers, timeout=15)
+        resp = _http.get(search_url, headers=headers, timeout=15)
 
         if resp.status_code == 200:
             data = resp.json()
@@ -102,7 +117,7 @@ def search_contact_by_phone(phone: str) -> dict | None:
         formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}"
         for field in ["Phone", "Mobile"]:
             search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{formatted})"
-            resp = requests.get(search_url, headers=headers, timeout=15)
+            resp = _http.get(search_url, headers=headers, timeout=15)
 
             if resp.status_code == 200:
                 data = resp.json()
