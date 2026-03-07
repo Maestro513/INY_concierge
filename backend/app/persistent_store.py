@@ -76,6 +76,12 @@ class PersistentStore:
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_phone
                 ON sessions(phone);
+
+            CREATE TABLE IF NOT EXISTS used_refresh_tokens (
+                jti             TEXT PRIMARY KEY,
+                phone           TEXT NOT NULL,
+                used_at         REAL NOT NULL
+            );
         """)
         conn.commit()
         log.info(f"Persistent store ready at {self.db_path}")
@@ -286,6 +292,22 @@ class PersistentStore:
 
     # ── Cleanup ───────────────────────────────────────────────────────────
 
+    # ── Refresh Token Rotation ────────────────────────────────────────────
+
+    def consume_refresh_jti(self, jti: str, phone: str) -> bool:
+        """Mark a refresh token JTI as used. Returns False if already used (replay)."""
+        conn = self._conn()
+        try:
+            conn.execute(
+                "INSERT INTO used_refresh_tokens (jti, phone, used_at) VALUES (?, ?, ?)",
+                (jti, phone, time.time()),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # JTI already consumed — this is a replay attack
+            return False
+
     def cleanup_all(self):
         """Remove all expired entries. Call periodically or on startup."""
         now = time.time()
@@ -298,4 +320,6 @@ class PersistentStore:
         conn.execute("DELETE FROM otp_send_log WHERE sent_at < ?", (now - 600,))
         # Expired sessions
         self._cleanup_sessions()
+        # Old used refresh JTIs (older than 30 days)
+        conn.execute("DELETE FROM used_refresh_tokens WHERE used_at < ?", (now - 2592000,))
         conn.commit()

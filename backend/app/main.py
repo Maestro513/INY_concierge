@@ -154,7 +154,7 @@ if APP_ENV == "production":
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
@@ -163,7 +163,7 @@ else:
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
@@ -598,6 +598,35 @@ class UsageCreate(BaseModel):
     benefit_period: str = "Monthly"   # Monthly, Quarterly, Yearly
 
 
+# --- IP-based rate limiter for public endpoints ─────────────────────────────
+_ip_rate: dict[str, list[float]] = {}
+_IP_RATE_CLEANUP_INTERVAL = 300  # purge stale entries every 5 minutes
+_ip_rate_last_cleanup = 0.0
+
+
+def _check_ip_rate(request: Request, *, max_hits: int, window: int, label: str = "endpoint") -> None:
+    """Raise 429 if the client IP exceeds max_hits within window seconds."""
+    global _ip_rate_last_cleanup
+    ip = request.client.host if request.client else "unknown"
+    key = f"{label}:{ip}"
+    now = time.time()
+
+    # Periodic cleanup of stale entries to prevent memory leak
+    if now - _ip_rate_last_cleanup > _IP_RATE_CLEANUP_INTERVAL:
+        cutoff = now - max(window, 600)
+        stale = [k for k, v in _ip_rate.items() if not v or v[-1] < cutoff]
+        for k in stale:
+            del _ip_rate[k]
+        _ip_rate_last_cleanup = now
+
+    hits = _ip_rate.get(key, [])
+    hits = [t for t in hits if now - t < window]
+    if len(hits) >= max_hits:
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait before trying again.")
+    hits.append(now)
+    _ip_rate[key] = hits
+
+
 # --- Endpoints ---
 
 @app.get("/health")
@@ -620,8 +649,9 @@ def get_medicare_search() -> MedicarePlanSearch:
 
 
 @app.get("/quote/counties/{zipcode}")
-def quote_counties(zipcode: str):
+def quote_counties(zipcode: str, request: Request):
     """Get counties for a zip code (public, no auth)."""
+    _check_ip_rate(request, max_hits=30, window=60, label="quote")
     if not re.fullmatch(r"\d{5}", zipcode):
         raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     counties = get_counties_by_zip(zipcode)
@@ -632,6 +662,7 @@ def quote_counties(zipcode: str):
 
 @app.get("/quote/medicare")
 def quote_medicare(
+    request: Request,
     zip: str = None,
     state: str = None,
     county: str = None,
@@ -642,6 +673,7 @@ def quote_medicare(
     Search Medicare Advantage plans (public, no auth).
     Either provide zip (auto-resolves to state/county) or state + county code.
     """
+    _check_ip_rate(request, max_hits=20, window=60, label="quote")
     search = get_medicare_search()
     if zip:
         if not re.fullmatch(r"\d{5}", zip):
@@ -661,7 +693,8 @@ def quote_medicare(
 
 @app.get("/quote/marketplace")
 def quote_marketplace(
-    zip: str,
+    request: Request,
+    zip: str = "",
     fips: str = None,
     age: int = 30,
     income: int = None,
@@ -672,6 +705,7 @@ def quote_marketplace(
     Search ACA Marketplace plans for under-65 (public, no auth).
     Proxies to CMS Marketplace API (marketplace.api.healthcare.gov).
     """
+    _check_ip_rate(request, max_hits=20, window=60, label="quote")
     if not re.fullmatch(r"\d{5}", zip):
         raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     result = search_marketplace_plans(
@@ -839,10 +873,17 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
 
 
 @app.post("/auth/refresh")
-def refresh_token_endpoint(req: RefreshRequest):
+def refresh_token_endpoint(req: RefreshRequest, request: Request):
     """Exchange a refresh token for a new access token."""
+    _check_ip_rate(request, max_hits=10, window=60, label="auth_refresh")
     payload = decode_token(req.refresh_token, jwt_secret=JWT_SECRET, expected_type="refresh")
     phone = payload["sub"]
+
+    # Refresh token rotation — each token can only be used once
+    jti = payload.get("jti")
+    if jti and not get_store().consume_refresh_jti(jti, phone):
+        log.warning("Refresh token replay detected for phone ending ***%s", phone[-4:])
+        raise HTTPException(status_code=401, detail="Token already used. Please log in again.")
 
     # Find member data from an active session
     member_data = None

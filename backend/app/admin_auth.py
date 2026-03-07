@@ -8,6 +8,7 @@ Admin portal authentication — completely separate from mobile OTP auth.
 
 import logging
 import os
+import secrets
 import time
 
 import bcrypt
@@ -68,6 +69,7 @@ def create_admin_tokens(user: dict) -> dict:
     refresh_payload = {
         "sub": str(user["id"]),
         "type": "admin_refresh",
+        "jti": secrets.token_urlsafe(24),
         "iat": now,
         "exp": now + ADMIN_REFRESH_TTL,
     }

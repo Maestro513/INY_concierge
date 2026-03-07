@@ -151,12 +151,19 @@ async def admin_login(body: LoginRequest, request: Request):
 
 @router.post("/auth/refresh")
 async def admin_refresh(request: Request):
-    """Refresh admin access token using refresh token."""
+    """Refresh admin access token using refresh token (with rotation)."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing refresh token.")
     token = auth_header[7:]
     payload = decode_admin_token(token, expected_type="admin_refresh")
+
+    # Refresh token rotation — each token can only be used once
+    jti = payload.get("jti")
+    if jti and not _get_store().consume_refresh_jti(jti, f"admin:{payload['sub']}"):
+        log.warning("Admin refresh token replay detected for user %s", payload["sub"])
+        raise HTTPException(status_code=401, detail="Token already used. Please log in again.")
+
     user = admin_db.get_admin_user_by_id(int(payload["sub"]))
     if not user or not user["is_active"]:
         raise HTTPException(status_code=401, detail="Account not found or deactivated.")

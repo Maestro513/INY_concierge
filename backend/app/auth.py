@@ -126,6 +126,7 @@ def create_tokens(phone: str, member_data: dict = None, *, jwt_secret: str, acce
     refresh_payload = {
         "sub": phone,
         "type": "refresh",
+        "jti": secrets.token_urlsafe(24),
         "iat": now,
         "exp": now + refresh_ttl,
     }
