@@ -45,11 +45,12 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
     """
     try:
         params = {}
+        headers = {"Accept": "application/json"}
         if CMS_MARKETPLACE_API_KEY:
             params["apikey"] = CMS_MARKETPLACE_API_KEY
         resp = requests.get(
             f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
-            headers={"Accept": "application/json"},
+            headers=headers,
             params=params,
             timeout=10,
         )
@@ -65,7 +66,7 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
             for c in counties
         ]
     except Exception as e:
-        log.warning(f"County lookup failed for zip {zipcode}: {e}")
+        log.warning("County lookup failed for zip %s: %s", zipcode, type(e).__name__)
         return []
 
 
@@ -357,40 +358,39 @@ def search_marketplace_plans(
 
     try:
         url = f"{CMS_MARKETPLACE_API}/plans/search"
-        if CMS_MARKETPLACE_API_KEY:
-            url += f"?apikey={CMS_MARKETPLACE_API_KEY}"
+        _mkt_params = {"apikey": CMS_MARKETPLACE_API_KEY} if CMS_MARKETPLACE_API_KEY else {}
+        _mkt_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
         resp = requests.post(
             url,
             json=search_body,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            params=_mkt_params,
+            headers=_mkt_headers,
             timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.HTTPError as e:
-        log.warning(f"Marketplace API error for zip {zipcode}: {e}")
+        log.warning("Marketplace API error for zip %s: %s", zipcode, type(e).__name__)
         # Try with year 2025 if 2026 fails
         search_body["year"] = 2025
         try:
             resp = requests.post(
                 f"{CMS_MARKETPLACE_API}/plans/search",
                 json=search_body,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
+                params=_mkt_params,
+                headers=_mkt_headers,
                 timeout=15,
             )
             resp.raise_for_status()
             data = resp.json()
         except Exception as e2:
-            log.error(f"Marketplace API fallback failed: {e2}")
+            log.error("Marketplace API fallback failed: %s", type(e2).__name__)
             return {"error": "Unable to search marketplace plans", "plans": []}
     except Exception as e:
-        log.error(f"Marketplace API request failed: {e}")
+        log.error("Marketplace API request failed: %s", type(e).__name__)
         return {"error": "Unable to search marketplace plans", "plans": []}
 
     # Step 3: Transform response into plan cards

@@ -15,7 +15,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 from . import admin_db
 from .admin_auth import (
@@ -27,13 +27,42 @@ from .admin_auth import (
     require_admin,
     require_role,
 )
-from .config import ADMIN_SECRET, EXTRACTED_DIR, PDFS_DIR
+from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+_ALLOWED_ADMIN_ORIGINS = {
+    "https://insurancenyou.com",
+    "https://www.insurancenyou.com",
+    "https://admin.insurancenyou.com",
+    "https://api.insurancenyou.com",
+}
+_CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def check_csrf_origin(request: Request):
+    """FastAPI dependency — validate Origin on mutating admin requests (H9)."""
+    if APP_ENV != "production":
+        return
+    if request.method not in _CSRF_METHODS:
+        return
+    origin = request.headers.get("origin", "")
+    if not origin:
+        return  # No Origin header — non-browser client or same-origin
+    if origin not in _ALLOWED_ADMIN_ORIGINS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Origin '{origin}' is not allowed for admin operations.",
+        )
+
+
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(check_csrf_origin)],
+)
 
 # Lazy singleton — shares the same SQLite DB as the mobile OTP store
 _store = None
@@ -48,16 +77,16 @@ def _get_store() -> PersistentStore:
 # ── Request / Response models ────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
 
 
 class CreateAdminRequest(BaseModel):
-    email: str
-    password: str
-    first_name: str = ""
-    last_name: str = ""
-    role: str = "viewer"
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    first_name: str = Field("", max_length=100)
+    last_name: str = Field("", max_length=100)
+    role: str = Field("viewer", pattern=r"^(super_admin|admin|viewer)$")
 
 
 class UpdateAdminRequest(BaseModel):
@@ -69,19 +98,19 @@ class UpdateAdminRequest(BaseModel):
 
 
 class CreateMemberRequest(BaseModel):
-    first_name: str
-    last_name: str
-    phone: str                          # E.164 or raw digits — used for OTP login
-    medicare_number: str = ""           # MBI — will be encrypted at rest
-    zip_code: str = ""
-    carrier: str = ""
-    plan_name: str = ""
-    plan_number: str = ""               # Links SOB extraction → member app
-    send_verification: bool = True      # Send OTP to phone after creation
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    phone: str = Field(..., pattern=r"^[\d\-\+\(\)\s]{7,20}$")  # Normalized in handler
+    medicare_number: str = Field("", max_length=20)
+    zip_code: str = Field("", pattern=r"^(\d{5})?$")
+    carrier: str = Field("", max_length=100)
+    plan_name: str = Field("", max_length=200)
+    plan_number: str = Field("", max_length=20)
+    send_verification: bool = True
 
 
 class SendOTPRequest(BaseModel):
-    phone: str
+    phone: str = Field(..., pattern=r"^[\d\-\+\(\)\s]{7,20}$")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -219,13 +248,11 @@ async def create_member(body: CreateMemberRequest,
     try:
         existing = search_contact_by_phone(phone)
     except Exception:
-        log.warning("Zoho lookup failed for %s, continuing with creation", phone)
+        log.warning("Zoho lookup failed for ***%s, continuing with creation", phone[-4:])
 
     if existing:
-        raise HTTPException(status_code=409, detail=f"Member with phone {phone} already exists.")
+        raise HTTPException(status_code=409, detail="A member with this phone number already exists.")
 
-    # TODO: Create contact in Zoho CRM via zoho_client.create_contact()
-    # For now, we log the creation and return the data
     member_data = {
         "phone": phone,
         "first_name": body.first_name,
@@ -236,8 +263,8 @@ async def create_member(body: CreateMemberRequest,
         "plan_name": body.plan_name,
         "plan_number": body.plan_number,
     }
-    log.info("Admin %s created member: %s %s (%s)",
-             payload.get("sub"), body.first_name, body.last_name, phone)
+    log.info("Admin %s created member: ***%s",
+             payload.get("sub"), phone[-4:])
 
     # Send OTP verification if requested
     otp_sent = False
@@ -247,15 +274,15 @@ async def create_member(body: CreateMemberRequest,
             if code:
                 sms = create_sms_provider()
                 otp_sent = sms.send_otp(phone, code)
-                log.info("OTP sent to new member %s: %s", phone, "success" if otp_sent else "failed")
+                log.info("OTP sent to new member ***%s: %s", phone[-4:], "success" if otp_sent else "failed")
         except Exception as e:
-            log.error("Failed to send OTP to %s: %s", phone, e)
+            log.error("Failed to send OTP to ***%s: %s", phone[-4:], type(e).__name__)
 
     return {
         "success": True,
         "member": member_data,
         "otp_sent": otp_sent,
-        "message": f"Member created. {'Verification code sent to ' + phone if otp_sent else 'OTP send failed — member can request code from the app.'}",
+        "message": f"Member created. {'Verification code sent.' if otp_sent else 'OTP send failed — member can request code from the app.'}",
     }
 
 
@@ -278,11 +305,11 @@ async def admin_send_otp(body: SendOTPRequest,
     except HTTPException:
         raise
     except Exception as e:
-        log.error("OTP send error for %s: %s", phone, e)
+        log.error("OTP send error for ***%s: %s", phone[-4:], type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to send OTP.")
 
-    log.info("Admin %s sent OTP to member %s", payload.get("sub"), phone)
-    return {"success": True, "message": f"Verification code sent to {phone}."}
+    log.info("Admin %s sent OTP to member ***%s", payload.get("sub"), phone[-4:])
+    return {"success": True, "message": "Verification code sent."}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -298,7 +325,6 @@ async def analytics_logins(days: int = 30, payload: dict = Depends(require_admin
 @router.get("/analytics/enrollments")
 async def analytics_enrollments(days: int = 30, payload: dict = Depends(require_admin)):
     """Enrollment stats (placeholder — will pull from Zoho)."""
-    # TODO: Pull from Zoho CRM contact creation dates
     return {"total_new": 0, "days": days, "note": "Coming soon — Zoho CRM integration"}
 
 
