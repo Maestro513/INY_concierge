@@ -280,14 +280,27 @@ log.info("Static dir resolved (exists=%s)", os.path.isdir(_static_dir))
 _widget_js_path = os.path.join(_static_dir, "quote-widget.js")
 
 @app.get("/static/quote-widget.js")
-async def serve_widget_js():
-    """Serve widget JS with permissive CORS for cross-origin embedding."""
+async def serve_widget_js(request: Request):
+    """Serve widget JS with scoped CORS for cross-origin embedding."""
     from starlette.responses import FileResponse as _FR
     if not os.path.isfile(_widget_js_path):
         log.error("Widget JS not found")
         return JSONResponse({"error": "widget not found"}, status_code=404)
     resp = _FR(_widget_js_path, media_type="application/javascript")
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+    # Restrict CORS to known embedding domains in production
+    origin = request.headers.get("origin", "")
+    _WIDGET_ALLOWED_ORIGINS = {
+        "https://insurancenyou.com",
+        "https://www.insurancenyou.com",
+        "https://webflow.insurancenyou.com",
+    }
+    if APP_ENV == "production" and origin:
+        if origin in _WIDGET_ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+        # else: no CORS header → browser blocks cross-origin use
+    else:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
@@ -598,33 +611,13 @@ class UsageCreate(BaseModel):
     benefit_period: str = "Monthly"   # Monthly, Quarterly, Yearly
 
 
-# --- IP-based rate limiter for public endpoints ─────────────────────────────
-_ip_rate: dict[str, list[float]] = {}
-_IP_RATE_CLEANUP_INTERVAL = 300  # purge stale entries every 5 minutes
-_ip_rate_last_cleanup = 0.0
-
-
+# --- IP-based rate limiter for public endpoints (persistent) ─────────────────
 def _check_ip_rate(request: Request, *, max_hits: int, window: int, label: str = "endpoint") -> None:
     """Raise 429 if the client IP exceeds max_hits within window seconds."""
-    global _ip_rate_last_cleanup
     ip = request.client.host if request.client else "unknown"
     key = f"{label}:{ip}"
-    now = time.time()
-
-    # Periodic cleanup of stale entries to prevent memory leak
-    if now - _ip_rate_last_cleanup > _IP_RATE_CLEANUP_INTERVAL:
-        cutoff = now - max(window, 600)
-        stale = [k for k, v in _ip_rate.items() if not v or v[-1] < cutoff]
-        for k in stale:
-            del _ip_rate[k]
-        _ip_rate_last_cleanup = now
-
-    hits = _ip_rate.get(key, [])
-    hits = [t for t in hits if now - t < window]
-    if len(hits) >= max_hits:
+    if not get_store().check_rate_limit(key, max_hits, window):
         raise HTTPException(status_code=429, detail="Too many requests. Please wait before trying again.")
-    hits.append(now)
-    _ip_rate[key] = hits
 
 
 # --- Endpoints ---
@@ -924,8 +917,7 @@ def logout(request: Request, user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
-# Per-phone rate limiter for /ask: max 10 questions per 60 seconds
-_ask_rate: dict[str, list[float]] = {}
+# Per-phone rate limiter for /ask
 _ASK_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 _ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
 
@@ -934,13 +926,8 @@ _ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
 def ask_question(req: AskRequest, _user: dict = Depends(get_current_user)):
     """Ask a question about a member's plan benefits."""
     phone = _user.get("sub", "anon")
-    now = time.time()
-    hits = _ask_rate.get(phone, [])
-    hits = [t for t in hits if now - t < _ASK_WINDOW]
-    if len(hits) >= _ASK_MAX:
+    if not get_store().check_rate_limit(f"ask:{phone}", _ASK_MAX, _ASK_WINDOW):
         raise HTTPException(status_code=429, detail="Too many questions. Please wait a minute.")
-    hits.append(now)
-    _ask_rate[phone] = hits
 
     plan_id = normalize_plan_id(req.plan_number)
     result = ask_claude(question=req.question, plan_number=plan_id)
@@ -1517,7 +1504,7 @@ def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> 
     """Return a JSONResponse with Cache-Control and ETag headers.
     If the client sends a matching If-None-Match, returns 304."""
     body = json.dumps(data, sort_keys=True, separators=(",", ":"))
-    etag = '"' + hashlib.md5(body.encode()).hexdigest() + '"'
+    etag = '"' + hashlib.sha256(body.encode()).hexdigest()[:32] + '"'
 
     client_etag = request.headers.get("If-None-Match")
     if client_etag and client_etag == etag:

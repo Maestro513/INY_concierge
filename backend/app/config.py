@@ -56,6 +56,15 @@ OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
 TEST_PHONE = os.getenv("TEST_PHONE", "") if APP_ENV != "production" else ""
 TEST_OTP = os.getenv("TEST_OTP", "") if APP_ENV != "production" else ""
 
+# Warn if well-known/predictable test credentials are being used
+if TEST_PHONE and TEST_OTP:
+    import logging as _log_cfg
+    _KNOWN_WEAK = {("5555550100", "123456"), ("0000000000", "000000")}
+    if (TEST_PHONE, TEST_OTP) in _KNOWN_WEAK:
+        _log_cfg.getLogger(__name__).warning(
+            "TEST_PHONE/TEST_OTP use well-known values — change them to unique values"
+        )
+
 # Sentry
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")  # Set in Render env vars for production
 

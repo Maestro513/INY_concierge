@@ -30,6 +30,7 @@ from .admin_auth import (
 from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
+from .audit import get_audit_log
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
@@ -215,6 +216,7 @@ async def list_admins(payload: dict = Depends(require_role("super_admin"))):
 
 @router.post("/users")
 async def create_admin(body: CreateAdminRequest,
+                       request: Request,
                        payload: dict = Depends(require_role("super_admin"))):
     """Create a new admin user."""
     existing = admin_db.get_admin_user_by_email(body.email)
@@ -225,19 +227,37 @@ async def create_admin(body: CreateAdminRequest,
         email=body.email, password_hash=pw_hash,
         first_name=body.first_name, last_name=body.last_name, role=body.role,
     )
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="admin_user",
+        resource_id=str(user["id"]),
+        ip_address=request.client.host if request.client else "",
+        detail=f"email={body.email} role={body.role}",
+    )
     return {"id": user["id"], "email": user["email"], "role": user["role"]}
 
 
 @router.patch("/users/{user_id}")
 async def update_admin(user_id: int, body: UpdateAdminRequest,
+                       request: Request,
                        payload: dict = Depends(require_role("super_admin"))):
     """Update an admin user."""
     fields = body.model_dump(exclude_none=True)
+    changed_fields = list(fields.keys())
     if "password" in fields:
         fields["password_hash"] = hash_password(fields.pop("password"))
     user = admin_db.update_admin_user(user_id, **fields)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="update",
+        resource="admin_user",
+        resource_id=str(user_id),
+        ip_address=request.client.host if request.client else "",
+        detail=f"fields={','.join(changed_fields)}",
+    )
     return {"id": user["id"], "email": user["email"], "role": user["role"],
             "is_active": bool(user["is_active"])}
 
@@ -257,6 +277,7 @@ def _normalize_phone(raw: str) -> str:
 
 @router.post("/members/create")
 async def create_member(body: CreateMemberRequest,
+                        request: Request,
                         payload: dict = Depends(require_admin)):
     """
     Create a new member account.
@@ -289,6 +310,14 @@ async def create_member(body: CreateMemberRequest,
     }
     log.info("Admin %s created member: ***%s",
              payload.get("sub"), phone[-4:])
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="member",
+        resource_id=f"***{phone[-4:]}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_member_create",
+    )
 
     # Send OTP verification if requested
     otp_sent = False
@@ -312,6 +341,7 @@ async def create_member(body: CreateMemberRequest,
 
 @router.post("/members/send-otp")
 async def admin_send_otp(body: SendOTPRequest,
+                         request: Request,
                          payload: dict = Depends(require_admin)):
     """Send OTP login code to a member's phone (triggered by admin)."""
     phone = _normalize_phone(body.phone)
@@ -333,6 +363,14 @@ async def admin_send_otp(body: SendOTPRequest,
         raise HTTPException(status_code=500, detail="Failed to send OTP.")
 
     log.info("Admin %s sent OTP to member ***%s", payload.get("sub"), phone[-4:])
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="otp",
+        resource_id=f"***{phone[-4:]}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_send_otp",
+    )
     return {"success": True, "message": "Verification code sent."}
 
 

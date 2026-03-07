@@ -82,6 +82,14 @@ class PersistentStore:
                 phone           TEXT NOT NULL,
                 used_at         REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS rate_limit_hits (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                key             TEXT NOT NULL,
+                hit_at          REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_rate_limit_key
+                ON rate_limit_hits(key, hit_at);
         """)
         conn.commit()
         log.info(f"Persistent store ready at {self.db_path}")
@@ -308,6 +316,33 @@ class PersistentStore:
             # JTI already consumed — this is a replay attack
             return False
 
+    # ── Rate Limiting ────────────────────────────────────────────────
+
+    def check_rate_limit(self, key: str, max_hits: int, window: int) -> bool:
+        """Check and record a rate limit hit. Returns True if allowed, False if blocked."""
+        now = time.time()
+        conn = self._conn()
+        cutoff = now - window
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM rate_limit_hits WHERE key = ? AND hit_at > ?",
+            (key, cutoff),
+        ).fetchone()
+        if row["cnt"] >= max_hits:
+            return False
+        conn.execute(
+            "INSERT INTO rate_limit_hits (key, hit_at) VALUES (?, ?)",
+            (key, now),
+        )
+        conn.commit()
+        return True
+
+    def cleanup_rate_limits(self, max_age: int = 600):
+        """Remove old rate limit entries."""
+        cutoff = time.time() - max_age
+        conn = self._conn()
+        conn.execute("DELETE FROM rate_limit_hits WHERE hit_at < ?", (cutoff,))
+        conn.commit()
+
     def cleanup_all(self):
         """Remove all expired entries. Call periodically or on startup."""
         now = time.time()
@@ -322,4 +357,6 @@ class PersistentStore:
         self._cleanup_sessions()
         # Old used refresh JTIs (older than 30 days)
         conn.execute("DELETE FROM used_refresh_tokens WHERE used_at < ?", (now - 2592000,))
+        # Old rate limit entries
+        conn.execute("DELETE FROM rate_limit_hits WHERE hit_at < ?", (now - 600,))
         conn.commit()
