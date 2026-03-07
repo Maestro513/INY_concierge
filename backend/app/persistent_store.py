@@ -192,6 +192,14 @@ class PersistentStore:
         ).fetchone()
         return row["cnt"]
 
+    # ── Phone Hashing ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _hash_phone(phone: str) -> str:
+        """L2: Deterministic hash of phone for indexed lookups (no plaintext storage)."""
+        key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+        return hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
+
     # ── PHI Encryption Helpers ────────────────────────────────────────────
 
     @staticmethod
@@ -225,10 +233,14 @@ class PersistentStore:
     def create_session(self, phone: str, member_data: dict) -> str:
         sid = secrets.token_urlsafe(32)
         conn = self._conn()
-        encrypted = self._encrypt_phi(member_data)
+        # L2: Store phone inside encrypted data blob (column stores hash only)
+        # Use _session_phone key to avoid collision with PHI_FIELDS "phone" encryption
+        data_with_phone = {**member_data, "_session_phone": phone}
+        encrypted = self._encrypt_phi(data_with_phone)
+        phone_hash = self._hash_phone(phone)
         conn.execute(
             "INSERT INTO sessions (session_id, phone, data, created_at) VALUES (?, ?, ?, ?)",
-            (sid, phone, json.dumps(encrypted), time.time()),
+            (sid, phone_hash, json.dumps(encrypted), time.time()),
         )
         conn.commit()
         self._cleanup_sessions()
@@ -245,9 +257,11 @@ class PersistentStore:
             conn.execute("DELETE FROM sessions WHERE session_id = ?", (sid,))
             conn.commit()
             return None
+        data = self._decrypt_phi(json.loads(row["data"]))
+        phone = data.pop("_session_phone", None) or data.get("phone", row["phone"])
         return {
-            "phone": row["phone"],
-            "data": self._decrypt_phi(json.loads(row["data"])),
+            "phone": phone,
+            "data": data,
             "ts": row["created_at"],
         }
 
@@ -263,24 +277,30 @@ class PersistentStore:
     def delete_sessions_by_phone(self, phone: str) -> int:
         """Delete all sessions for a phone number (logout/revocation)."""
         conn = self._conn()
-        cursor = conn.execute("DELETE FROM sessions WHERE phone = ?", (phone,))
+        phone_hash = self._hash_phone(phone)
+        # Support both hashed and legacy plaintext lookups
+        cursor = conn.execute("DELETE FROM sessions WHERE phone = ? OR phone = ?", (phone_hash, phone))
         conn.commit()
         return cursor.rowcount
 
     def find_session_by_phone(self, phone: str, ttl: int = 7200) -> dict | None:
         """Find the most recent session for a phone number."""
         conn = self._conn()
+        phone_hash = self._hash_phone(phone)
+        # Support both hashed and legacy plaintext lookups
         row = conn.execute(
-            "SELECT * FROM sessions WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
-            (phone,),
+            "SELECT * FROM sessions WHERE phone = ? OR phone = ? ORDER BY created_at DESC LIMIT 1",
+            (phone_hash, phone),
         ).fetchone()
         if not row:
             return None
         if time.time() - row["created_at"] > ttl:
             return None
+        data = self._decrypt_phi(json.loads(row["data"]))
+        actual_phone = data.pop("_session_phone", None) or data.get("phone", phone)
         return {
-            "phone": row["phone"],
-            "data": self._decrypt_phi(json.loads(row["data"])),
+            "phone": actual_phone,
+            "data": data,
             "ts": row["created_at"],
         }
 

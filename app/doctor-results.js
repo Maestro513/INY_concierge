@@ -10,11 +10,23 @@ import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 import { getMemberSession } from '../constants/session';
 
+// L7: Whitelist of valid specialty values (matches SPECIALTY_KEYWORDS values in VoiceHelp)
+const VALID_SPECIALTIES = new Set([
+  'dermatologist', 'cardiologist', 'primary care', 'family medicine',
+  'ophthalmologist', 'podiatrist', 'ent', 'orthopedic', 'neurologist',
+  'urologist', 'psychiatrist', 'pulmonologist', 'gastroenterologist',
+  'endocrinologist', 'rheumatologist', 'oncologist', 'surgeon',
+  'pain management', 'physical therapist', 'dentist', 'optometrist',
+  'nephrologist', 'obgyn', 'pediatrician',
+]);
+
 export default function DoctorResults() {
-  const { specialty } = useLocalSearchParams();
+  const { specialty: rawSpecialty } = useLocalSearchParams();
   const router = useRouter();
   const { member: _mem } = getMemberSession();
   const { zipCode, planName } = _mem || {};
+  // L7: Validate and sanitize specialty param from deep link
+  const specialty = VALID_SPECIALTIES.has(rawSpecialty) ? rawSpecialty : 'primary care';
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

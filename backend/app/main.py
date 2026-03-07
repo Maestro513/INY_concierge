@@ -246,8 +246,8 @@ async def phi_audit_middleware(request: Request, call_next) -> Response:
                 ip_address=request.client.host if request.client else "",
                 detail=f"{request.method} {response.status_code}",
             )
-        except Exception:
-            pass  # Never let audit logging break request flow
+        except Exception as exc:
+            log.debug("PHI audit write failed: %s", exc)  # L1: log but don't break request
     return response
 
 # ── Admin router ─────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { useEffect, useRef } from 'react';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Text } from 'react-native';
+import { Text, AppState } from 'react-native';
 import {
   useFonts,
   Inter_400Regular,
@@ -70,6 +70,31 @@ Text.render = function (...args) {
   return origin;
 };
 
+// L6: Idle timeout — auto-lock after 10 minutes of inactivity
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+function useIdleTimeout() {
+  const router = useRouter();
+  const segments = useSegments();
+  const backgroundedAt = useRef(null);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        backgroundedAt.current = Date.now();
+      } else if (nextState === 'active' && backgroundedAt.current) {
+        const elapsed = Date.now() - backgroundedAt.current;
+        backgroundedAt.current = null;
+        // Only redirect if on an authenticated screen (not login/otp)
+        if (elapsed >= IDLE_TIMEOUT_MS && segments[0] && segments[0] !== 'index' && segments[0] !== 'otp') {
+          router.replace('/');
+        }
+      }
+    });
+    return () => subscription.remove();
+  }, [segments]);
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
@@ -77,6 +102,8 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+
+  useIdleTimeout();
 
   // Set up Android notification channel on app launch
   useEffect(() => {

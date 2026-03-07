@@ -418,18 +418,21 @@ async def admin_send_otp(body: SendOTPRequest,
 @router.get("/analytics/logins")
 async def analytics_logins(days: int = 30, payload: dict = Depends(require_admin)):
     """Login statistics for the given period."""
+    days = max(1, min(days, 365))  # L4: cap to prevent expensive queries
     return admin_db.get_login_stats(days)
 
 
 @router.get("/analytics/enrollments")
 async def analytics_enrollments(days: int = 30, payload: dict = Depends(require_admin)):
     """Enrollment stats (placeholder — will pull from Zoho)."""
+    days = max(1, min(days, 365))
     return {"total_new": 0, "days": days, "note": "Coming soon — Zoho CRM integration"}
 
 
 @router.get("/analytics/features")
 async def analytics_features(days: int = 30, payload: dict = Depends(require_admin)):
     """Feature usage from search_events table."""
+    days = max(1, min(days, 365))
     return admin_db.get_search_stats(days)
 
 
