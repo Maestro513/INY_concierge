@@ -61,9 +61,7 @@ function _xor(text, hexKey) {
   }
   const result = [];
   for (let i = 0; i < text.length; i++) {
-    result.push(
-      String.fromCharCode(text.charCodeAt(i) ^ keyBytes[i % keyBytes.length]),
-    );
+    result.push(String.fromCharCode(text.charCodeAt(i) ^ keyBytes[i % keyBytes.length]));
   }
   return result.join('');
 }

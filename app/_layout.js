@@ -86,13 +86,18 @@ function useIdleTimeout() {
         const elapsed = Date.now() - backgroundedAt.current;
         backgroundedAt.current = null;
         // Only redirect if on an authenticated screen (not login/otp)
-        if (elapsed >= IDLE_TIMEOUT_MS && segments[0] && segments[0] !== 'index' && segments[0] !== 'otp') {
+        if (
+          elapsed >= IDLE_TIMEOUT_MS &&
+          segments[0] &&
+          segments[0] !== 'index' &&
+          segments[0] !== 'otp'
+        ) {
           router.replace('/');
         }
       }
     });
     return () => subscription.remove();
-  }, [segments]);
+  }, [segments, router]);
 }
 
 export default function RootLayout() {
@@ -113,7 +118,13 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <Sentry.ErrorBoundary fallback={<Text style={{ padding: 40, textAlign: 'center' }}>Something went wrong. Please restart the app.</Text>}>
+    <Sentry.ErrorBoundary
+      fallback={
+        <Text style={{ padding: 40, textAlign: 'center' }}>
+          Something went wrong. Please restart the app.
+        </Text>
+      }
+    >
       <SafeAreaProvider>
         <StatusBar style="dark" />
         <Stack
