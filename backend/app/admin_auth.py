@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 # Admin JWT secret — MUST be different from mobile JWT_SECRET (H7)
 ADMIN_JWT_SECRET = os.getenv("ADMIN_JWT_SECRET", "")
 
-if APP_ENV == "production":
+if APP_ENV in ("production", "staging"):
     if not ADMIN_JWT_SECRET:
-        raise RuntimeError("ADMIN_JWT_SECRET must be set in production.")
+        raise RuntimeError("ADMIN_JWT_SECRET must be set in production/staging.")
     # Ensure admin and mobile secrets are different so tokens can't cross boundaries
     _mobile_secret = os.getenv("JWT_SECRET", "")
     if ADMIN_JWT_SECRET == _mobile_secret:
@@ -33,8 +33,9 @@ if APP_ENV == "production":
             "A shared secret allows mobile tokens to be used as admin tokens."
         )
 elif not ADMIN_JWT_SECRET:
-    log.warning("ADMIN_JWT_SECRET not set — using insecure default for development only")
-    ADMIN_JWT_SECRET = "admin-dev-secret-change-me"
+    import secrets as _admin_secrets
+    ADMIN_JWT_SECRET = _admin_secrets.token_urlsafe(32)
+    log.warning("ADMIN_JWT_SECRET not set — using random per-startup key (dev only)")
 ADMIN_ACCESS_TTL = int(os.getenv("ADMIN_ACCESS_TTL", "28800"))    # 8 hours
 ADMIN_REFRESH_TTL = int(os.getenv("ADMIN_REFRESH_TTL", "2592000"))  # 30 days
 
@@ -144,12 +145,12 @@ def bootstrap_super_admin(email: str, password: str, first_name: str = "Admin",
     """Create the first super_admin account. Used from CLI."""
     existing = admin_db.get_admin_user_by_email(email)
     if existing:
-        log.info(f"Admin user {email} already exists (id={existing['id']})")
+        log.info("Admin user already exists (id=%s)", existing['id'])
         return existing
     pw_hash = hash_password(password)
     user = admin_db.create_admin_user(
         email=email, password_hash=pw_hash,
         first_name=first_name, last_name=last_name, role="super_admin",
     )
-    log.info(f"Created super_admin: {email} (id={user['id']})")
+    log.info("Created super_admin (id=%s)", user['id'])
     return user

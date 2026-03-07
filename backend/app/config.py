@@ -52,10 +52,9 @@ OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "4"))   # lockout after 4 w
 OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "4"))         # max 4 sends per window
 OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
 
-# Test account (works in any environment — for app review & admin access)
-# Set these in Render env vars so you can always log in without a real phone
-TEST_PHONE = os.getenv("TEST_PHONE", "")          # e.g. "5555550100"
-TEST_OTP = os.getenv("TEST_OTP", "")              # e.g. "123456"
+# Test account — only enabled in development/staging (never in production)
+TEST_PHONE = os.getenv("TEST_PHONE", "") if APP_ENV != "production" else ""
+TEST_OTP = os.getenv("TEST_OTP", "") if APP_ENV != "production" else ""
 
 # Sentry
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")  # Set in Render env vars for production

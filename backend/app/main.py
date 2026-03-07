@@ -16,7 +16,7 @@ import jwt
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -129,10 +129,9 @@ log = logging.getLogger(__name__)
 app = FastAPI(title="InsuranceNYou API", version="0.7.0")
 
 # ── JWT Secret validation ────────────────────────────────────────────────────
-if APP_ENV == "production" and JWT_SECRET == os.getenv("JWT_SECRET", ""):
-    # In production, JWT_SECRET must be explicitly set via env var
+if APP_ENV in ("production", "staging"):
     if not os.getenv("JWT_SECRET"):
-        raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
+        raise RuntimeError("JWT_SECRET must be set in production/staging. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
 elif not os.getenv("JWT_SECRET"):
     log.warning("JWT_SECRET not set — using random per-startup key (dev only, tokens won't survive restarts)")
 
@@ -158,8 +157,8 @@ else:
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
 
 # ── Security headers middleware ──────────────────────────────────────────────
@@ -170,6 +169,18 @@ async def security_headers(request: Request, call_next) -> Response:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    )
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
     if APP_ENV == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
@@ -246,9 +257,9 @@ if os.path.isdir(_admin_dist):
     async def admin_root():
         return FileResponse(os.path.join(_admin_dist, "index.html"))
 
-    log.info(f"Admin portal mounted at /admin/ from {_admin_dist}")
+    log.info("Admin portal mounted at /admin/")
 else:
-    log.warning(f"Admin dist not found at {_admin_dist} — /admin/ routes will 404")
+    log.warning("Admin dist not found — /admin/ routes will 404")
 
 # ── Static widget files ─────────────────────────────────────────────────────
 _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
@@ -256,7 +267,7 @@ if not os.path.isdir(_static_dir):
     _static_dir = "/opt/render/project/src/static"
 if not os.path.isdir(_static_dir):
     _static_dir = "/opt/render/project/src/backend/static"
-log.info(f"Static dir resolved to: {_static_dir} (exists={os.path.isdir(_static_dir)})")
+log.info("Static dir resolved (exists=%s)", os.path.isdir(_static_dir))
 
 # Serve widget JS with CORS headers (StaticFiles mount doesn't inherit CORS middleware)
 _widget_js_path = os.path.join(_static_dir, "quote-widget.js")
@@ -266,7 +277,7 @@ async def serve_widget_js():
     """Serve widget JS with permissive CORS for cross-origin embedding."""
     from starlette.responses import FileResponse as _FR
     if not os.path.isfile(_widget_js_path):
-        log.error(f"Widget JS not found at {_widget_js_path}")
+        log.error("Widget JS not found")
         return JSONResponse({"error": "widget not found"}, status_code=404)
     resp = _FR(_widget_js_path, media_type="application/javascript")
     resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -277,7 +288,7 @@ async def serve_widget_js():
 if os.path.isdir(_static_dir):
     from starlette.staticfiles import StaticFiles as _SF2
     app.mount("/static", _SF2(directory=_static_dir), name="static-files")
-    log.info(f"Static files mounted at /static/ from {_static_dir}")
+    log.info("Static files mounted at /static/")
 
 # ── Request ID correlation middleware ─────────────────────────────────────────
 @app.middleware("http")
@@ -407,7 +418,7 @@ def get_cms():
             _cms = CMSLookup()
             log.info("CMS database loaded")
         except Exception as e:
-            log.warning(f"CMS database not available: {e}")
+            log.warning("CMS database not available: %s", type(e).__name__)
             raise HTTPException(status_code=503, detail="CMS database not loaded")
     return _cms
 
@@ -450,7 +461,7 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
         log.info(f"SOB tier copays loaded for {pid}: tiers={[k for k in tier_copays if isinstance(k, int)]}")
         return tier_copays
     except Exception as e:
-        log.warning(f"SOB tier copay extraction failed for {pid}: {e}")
+        log.warning("SOB tier copay extraction failed for %s: %s", pid, type(e).__name__)
         return None
 
 
@@ -502,8 +513,8 @@ def parse_medications(raw: str) -> list[dict]:
 # --- Models ---
 
 class AskRequest(BaseModel):
-    question: str
-    plan_number: str
+    question: str = Field(..., min_length=1, max_length=2000)
+    plan_number: str = Field(..., pattern=r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$")
 
 class AskResponse(BaseModel):
     answer: str
@@ -511,48 +522,39 @@ class AskResponse(BaseModel):
     has_context: bool
 
 class LookupRequest(BaseModel):
-    phone: str
+    phone: str = Field(..., pattern=r"^\d{10}$")
 
 class LookupResponse(BaseModel):
     found: bool
     first_name: str = ""
-    last_name: str = ""
-    plan_name: str = ""
-    plan_number: str = ""
-    agent: str = ""
-    medicare_number: str = ""
-    phone: str = ""
-    medications: str = ""
-    zip_code: str = ""
-    session_id: str = ""
 
 class ProviderSearchRequest(BaseModel):
-    plan_name: str
-    specialty: str
-    zip_code: str
-    radius_miles: float = 25.0
-    limit: int = 200
+    plan_name: str = Field(..., min_length=1, max_length=200)
+    specialty: str = Field(..., min_length=1, max_length=200)
+    zip_code: str = Field(..., pattern=r"^\d{5}$")
+    radius_miles: float = Field(25.0, ge=1, le=100)
+    limit: int = Field(200, ge=1, le=500)
     enrich_google: bool = True
 
 class PharmacySearchRequest(BaseModel):
-    plan_number: str = ""
-    zip_code: str
-    radius_miles: int = 10
-    limit: int = 30
+    plan_number: str = Field("", max_length=20)
+    zip_code: str = Field(..., pattern=r"^\d{5}$")
+    radius_miles: int = Field(10, ge=1, le=100)
+    limit: int = Field(30, ge=1, le=200)
 
 class SOBRequest(BaseModel):
-    plan_number: str
+    plan_number: str = Field(..., pattern=r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$")
 
 class DrugLookupRequest(BaseModel):
-    plan_number: str
-    drug_name: str
+    plan_number: str = Field(..., pattern=r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$")
+    drug_name: str = Field(..., min_length=1, max_length=200)
 
 
 # --- OTP / Auth Models ---
 
 class OTPVerifyRequest(BaseModel):
-    phone: str
-    code: str
+    phone: str = Field(..., pattern=r"^\d{10}$")
+    code: str = Field(..., pattern=r"^\d{4,8}$")
 
 class RefreshRequest(BaseModel):
     refresh_token: str
@@ -613,6 +615,8 @@ def get_medicare_search() -> MedicarePlanSearch:
 @app.get("/quote/counties/{zipcode}")
 def quote_counties(zipcode: str):
     """Get counties for a zip code (public, no auth)."""
+    if not re.fullmatch(r"\d{5}", zipcode):
+        raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     counties = get_counties_by_zip(zipcode)
     if not counties:
         raise HTTPException(status_code=404, detail="No counties found for this zip code")
@@ -633,6 +637,8 @@ def quote_medicare(
     """
     search = get_medicare_search()
     if zip:
+        if not re.fullmatch(r"\d{5}", zip):
+            raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
         result = search.search_by_zip(zip, limit=limit)
     elif state:
         result = {
@@ -641,7 +647,8 @@ def quote_medicare(
     else:
         raise HTTPException(status_code=400, detail="Provide zip or state parameter")
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        log.warning("Medicare plan search error: %s", result["error"])
+        raise HTTPException(status_code=404, detail="No plans found for the given criteria.")
     return result
 
 
@@ -658,6 +665,8 @@ def quote_marketplace(
     Search ACA Marketplace plans for under-65 (public, no auth).
     Proxies to CMS Marketplace API (marketplace.api.healthcare.gov).
     """
+    if not re.fullmatch(r"\d{5}", zip):
+        raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     result = search_marketplace_plans(
         zipcode=zip,
         fips=fips,
@@ -667,7 +676,8 @@ def quote_marketplace(
         limit=limit,
     )
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        log.warning("Marketplace plan search error: %s", result["error"])
+        raise HTTPException(status_code=404, detail="No plans found for the given criteria.")
     return result
 
 
@@ -696,7 +706,7 @@ def lookup_member(req: LookupRequest, request: Request):
     try:
         member = search_contact_by_phone(req.phone)
     except Exception as e:
-        log.error(f"Zoho lookup failed: {e}")
+        log.error("Zoho lookup failed: %s", type(e).__name__)
         if is_test:
             # Fallback for test account if Zoho is unreachable
             member = {
@@ -782,7 +792,7 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         try:
             member_data = search_contact_by_phone(req.phone)
         except Exception as e:
-            log.error(f"Zoho re-fetch failed after OTP verify: {e}")
+            log.error("Zoho re-fetch failed after OTP verify: %s", type(e).__name__)
             raise HTTPException(status_code=500, detail="Verification succeeded but couldn't load your account. Please try again.")
         if not member_data:
             raise HTTPException(status_code=404, detail="Account not found.")
@@ -905,7 +915,8 @@ async def provider_search(req: ProviderSearchRequest, _user: dict = Depends(get_
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
+        log.warning("Provider search error: %s", result.get("error", "unknown"))
+        raise HTTPException(status_code=400, detail="Provider search failed. Please check your criteria and try again.")
 
     return result
 
@@ -926,7 +937,8 @@ async def pharmacy_search(req: PharmacySearchRequest, _user: dict = Depends(get_
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
+        log.warning("Pharmacy search error: %s", result.get("error", "unknown"))
+        raise HTTPException(status_code=400, detail="Pharmacy search failed. Please check your criteria and try again.")
 
     return result
 
@@ -996,7 +1008,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             if dental.get("has_comprehensive") and cmp_value:
                 _upsert_medical(medical, label_map, "Dental (comprehensive)", cmp_value, force=True)
     except Exception as e:
-        log.warning(f"CMS dental enrichment failed: {e}")
+        log.warning("CMS dental enrichment failed: %s", type(e).__name__)
 
     # ── Medical copays (CMS is authoritative) ──
     try:
@@ -1011,7 +1023,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             if value:
                 _upsert_medical(medical, label_map, label, value, force=True)
     except Exception as e:
-        log.warning(f"CMS medical copay enrichment failed: {e}")
+        log.warning("CMS medical copay enrichment failed: %s", type(e).__name__)
 
     # ── Vision (CMS is authoritative) ──
     try:
@@ -1036,7 +1048,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 ew_value = f"{copay} copay"
             _upsert_medical(medical, label_map, "Vision (eyewear)", ew_value, force=True)
     except Exception as e:
-        log.warning(f"CMS vision enrichment failed: {e}")
+        log.warning("CMS vision enrichment failed: %s", type(e).__name__)
 
     # ── Hearing (CMS is authoritative) ──
     try:
@@ -1067,7 +1079,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 parts.append(period)
             _upsert_medical(medical, label_map, "Hearing (aids)", ", ".join(parts) if parts else "Covered", force=True)
     except Exception as e:
-        log.warning(f"CMS hearing enrichment failed: {e}")
+        log.warning("CMS hearing enrichment failed: %s", type(e).__name__)
 
     # ── OTC allowance (only fill if Claude missed it) ──
     try:
@@ -1078,7 +1090,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             otc_value = f"{amt} {period}".strip() if amt else "Included"
             _upsert_medical(medical, label_map, "OTC allowance", otc_value)
     except Exception as e:
-        log.warning(f"CMS OTC enrichment failed: {e}")
+        log.warning("CMS OTC enrichment failed: %s", type(e).__name__)
 
     # ── Flex card / SSBCI (only fill if Claude missed it) ──
     try:
@@ -1100,7 +1112,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 flex_value = ", ".join(cats[:3])
             _upsert_medical(medical, label_map, "Flex card / SSBCI", flex_value)
     except Exception as e:
-        log.warning(f"CMS flex enrichment failed: {e}")
+        log.warning("CMS flex enrichment failed: %s", type(e).__name__)
 
     # ── Part B giveback (only fill if Claude missed it) ──
     try:
@@ -1109,7 +1121,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             gb_value = f"{giveback['monthly_amount']}/mo reduction"
             _upsert_medical(medical, label_map, "Part B giveback", gb_value)
     except Exception as e:
-        log.warning(f"CMS giveback enrichment failed: {e}")
+        log.warning("CMS giveback enrichment failed: %s", type(e).__name__)
 
     result["medical"] = medical
     return result
@@ -1233,7 +1245,7 @@ def _load_pre_extracted_benefits(plan_id: str) -> dict | None:
         with open(path, "r") as f:
             return json.load(f)
     except (json.JSONDecodeError, IOError) as e:
-        log.warning(f"Failed to load pre-extracted benefits for {plan_id}: {e}")
+        log.warning("Failed to load pre-extracted benefits for %s: %s", plan_id, type(e).__name__)
         return None
 
 
@@ -1285,7 +1297,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         try:
             result = _enrich_sob_with_cms(result, req.plan_number)
         except Exception as e:
-            log.warning(f"CMS enrichment failed (non-fatal): {e}")
+            log.warning("CMS enrichment failed (non-fatal): %s", type(e).__name__)
         _evict_oldest(_sob_cache, SOB_CACHE_MAX)
         _sob_cache[plan_id] = {"data": result, "ts": time.time()}
         log.info(f"[SOB] {plan_id}: served from pre-extracted benefits")
