@@ -10,6 +10,8 @@ module.exports = {
     clearInterval: 'readonly',
     AbortController: 'readonly',
     __DEV__: 'readonly',
+    btoa: 'readonly',
+    atob: 'readonly',
   },
   rules: {
     'prettier/prettier': 'warn',

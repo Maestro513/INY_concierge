@@ -72,6 +72,7 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")  # Set in Render env vars for productio
 
 # Field-level encryption for PHI at rest (medications, Medicare numbers)
 # Generate with: python -c "from app.encryption import generate_key; print(generate_key())"
+# Enforced at startup in main.py — RuntimeError if missing in production/staging
 FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
 
 # Paths

@@ -38,12 +38,12 @@ export default function PharmacyResults() {
       setPharmacies(data.pharmacies || []);
       setMeta({ total: data.total, has_network_data: data.has_network_data });
     } catch (err) {
-      console.log('Pharmacy search error:', err);
+      if (__DEV__) console.log('Pharmacy search error:', err);
       if (err.name === 'AbortError') {
         setError('Search is taking too long. Check your connection and try again.');
       } else if (err.message === 'Network request failed' || err.name === 'TypeError') {
         setError("Can't connect to the server right now. Check your connection and try again.");
-      } else { setError(err.message || 'Something went wrong. Please try again.'); }
+      } else { setError('Search failed. Please try again or call us at (844) 463-2931.'); }
     } finally { setLoading(false); }
   };
 

@@ -131,7 +131,7 @@ class CreateAdminRequest(BaseModel):
 class UpdateAdminRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[str] = Field(None, pattern=r"^(super_admin|admin|viewer)$")
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
@@ -337,6 +337,9 @@ async def create_member(body: CreateMemberRequest,
         "plan_name": body.plan_name,
         "plan_number": body.plan_number,
     }
+    # Persist member data via a session so they can log in after OTP
+    _get_store().create_session(phone, member_data)
+
     log.info("Admin %s created member: ***%s",
              payload.get("sub"), phone[-4:])
     get_audit_log().record(
@@ -362,7 +365,12 @@ async def create_member(body: CreateMemberRequest,
 
     return {
         "success": True,
-        "member": member_data,
+        "member": {
+            "first_name": member_data["first_name"],
+            "last_name": member_data["last_name"],
+            "phone": f"***{phone[-4:]}",
+            "plan_number": member_data.get("plan_number", ""),
+        },
         "otp_sent": otp_sent,
         "message": f"Member created. {'Verification code sent.' if otp_sent else 'OTP send failed — member can request code from the app.'}",
     }
@@ -410,18 +418,21 @@ async def admin_send_otp(body: SendOTPRequest,
 @router.get("/analytics/logins")
 async def analytics_logins(days: int = 30, payload: dict = Depends(require_admin)):
     """Login statistics for the given period."""
+    days = max(1, min(days, 365))  # L4: cap to prevent expensive queries
     return admin_db.get_login_stats(days)
 
 
 @router.get("/analytics/enrollments")
 async def analytics_enrollments(days: int = 30, payload: dict = Depends(require_admin)):
     """Enrollment stats (placeholder — will pull from Zoho)."""
+    days = max(1, min(days, 365))
     return {"total_new": 0, "days": days, "note": "Coming soon — Zoho CRM integration"}
 
 
 @router.get("/analytics/features")
 async def analytics_features(days: int = 30, payload: dict = Depends(require_admin)):
     """Feature usage from search_events table."""
+    days = max(1, min(days, 365))
     return admin_db.get_search_stats(days)
 
 
@@ -474,6 +485,8 @@ async def analytics_age_groups(payload: dict = Depends(require_admin)):
 async def list_plans(search: str = "", page: int = 1, per_page: int = 50,
                      payload: dict = Depends(require_admin)):
     """List all plans with extraction status."""
+    per_page = max(1, min(per_page, 200))  # M16: cap pagination
+    page = max(1, page)
     plans = []
     if not os.path.isdir(EXTRACTED_DIR):
         return {"data": [], "total": 0, "page": page, "per_page": per_page}
@@ -544,6 +557,13 @@ async def get_plan_detail(plan_number: str, payload: dict = Depends(require_admi
     """Get full plan data including extracted JSON and benefits."""
     extracted_path = os.path.join(EXTRACTED_DIR, f"{plan_number}.json")
     benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_number}_benefits.json")
+
+    # Path traversal prevention: resolved path must stay within EXTRACTED_DIR
+    extract_real = os.path.realpath(EXTRACTED_DIR)
+    if not os.path.realpath(extracted_path).startswith(extract_real + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid plan number.")
+    if not os.path.realpath(benefits_path).startswith(extract_real + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid plan number.")
 
     if not os.path.isfile(extracted_path):
         raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found.")
@@ -663,6 +683,13 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
 
         log.info("Received %d MB tar.gz — extracting to %s",
                  total_bytes // (1024 * 1024), EXTRACTED_DIR)
+
+        # M17: Validate gzip magic bytes before extraction
+        with open(tmp.name, "rb") as f:
+            magic = f.read(2)
+        if magic != b"\x1f\x8b":
+            os.unlink(tmp.name)
+            raise HTTPException(status_code=400, detail="File is not a valid gzip archive.")
 
         # Extract — with path validation to prevent zip-slip attacks
         count = 0

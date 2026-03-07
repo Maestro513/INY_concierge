@@ -9,11 +9,11 @@ import os
 import re
 import time
 import uuid
-from typing import Optional
+from typing import Annotated, Optional
 
 import anthropic
 import jwt
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
@@ -246,8 +246,8 @@ async def phi_audit_middleware(request: Request, call_next) -> Response:
                 ip_address=request.client.host if request.client else "",
                 detail=f"{request.method} {response.status_code}",
             )
-        except Exception:
-            pass  # Never let audit logging break request flow
+        except Exception as exc:
+            log.debug("PHI audit write failed: %s", exc)  # L1: log but don't break request
     return response
 
 # ── Admin router ─────────────────────────────────────────────────────────────
@@ -455,6 +455,24 @@ def get_current_user(request: Request) -> dict:
     return payload
 
 
+def _authorize_plan(user: dict, plan_number: str) -> None:
+    """Verify the authenticated user owns the requested plan_number (IDOR prevention).
+    Raises 403 if the user's session plan doesn't match."""
+    if APP_ENV == "development":
+        return  # Skip in dev mode
+    phone = user.get("sub")
+    if not phone or phone == "dev":
+        return
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    user_plan = normalize_plan_id(session["data"].get("plan_number", ""))
+    requested = normalize_plan_id(plan_number)
+    if user_plan and requested and user_plan != requested:
+        log.warning("IDOR attempt: user plan %s tried to access %s", user_plan[:5], requested[:5])
+        raise HTTPException(status_code=403, detail="Not authorized for this plan.")
+
+
 # CMS Lookup — lazy init so server starts even if DB missing
 _cms = None
 
@@ -615,32 +633,37 @@ class RefreshRequest(BaseModel):
 # --- Reminder / Usage Models ---
 
 class ReminderCreate(BaseModel):
-    drug_name: str
-    dose_label: str = ""
-    time_hour: int          # 0-23
-    time_minute: int = 0
-    days_supply: int = 30
+    drug_name: str = Field(..., min_length=1, max_length=200)
+    dose_label: str = Field("", max_length=200)
+    time_hour: int = Field(..., ge=0, le=23)
+    time_minute: int = Field(0, ge=0, le=59)
+    days_supply: int = Field(30, ge=1, le=365)
     refill_reminder: bool = False
-    last_refill_date: Optional[str] = None
+    last_refill_date: Optional[str] = Field(None, max_length=20)
 
 class ReminderUpdate(BaseModel):
     enabled: Optional[bool] = None
-    time_hour: Optional[int] = None
-    time_minute: Optional[int] = None
+    time_hour: Optional[int] = Field(None, ge=0, le=23)
+    time_minute: Optional[int] = Field(None, ge=0, le=59)
     refill_reminder: Optional[bool] = None
-    last_refill_date: Optional[str] = None
-    dose_label: Optional[str] = None
+    last_refill_date: Optional[str] = Field(None, max_length=20)
+    dose_label: Optional[str] = Field(None, max_length=200)
 
 class BulkReminderCreate(BaseModel):
-    reminders: list[ReminderCreate]
-    created_by: str = "member"
+    reminders: list[ReminderCreate] = Field(..., max_length=50)
+    created_by: str = Field("member", pattern=r"^(member|agent|admin)$")
 
 class UsageCreate(BaseModel):
-    category: str           # otc, dental, flex, vision, hearing
-    amount: float
-    description: str = ""
-    usage_date: Optional[str] = None  # defaults to today
-    benefit_period: str = "Monthly"   # Monthly, Quarterly, Yearly
+    category: str = Field(..., max_length=50)
+    amount: float = Field(..., gt=0, le=100000)
+    description: str = Field("", max_length=500)
+    usage_date: Optional[str] = Field(None, max_length=20)
+    benefit_period: str = Field("Monthly", pattern=r"^(Monthly|Quarterly|Yearly)$")
+
+
+# Validated plan_number path parameter for GET endpoints (H3: prevent injection)
+_PLAN_NUMBER_PATTERN = r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$"
+ValidPlanNumber = Annotated[str, Path(pattern=_PLAN_NUMBER_PATTERN)]
 
 
 # --- IP-based rate limiter for public endpoints (persistent) ─────────────────
@@ -769,6 +792,8 @@ def lookup_member(req: LookupRequest, request: Request):
     Step 1: Look up member by phone, send OTP.
     Returns only {found, first_name} — no sensitive data until OTP verified.
     """
+    _check_ip_rate(request, max_hits=5, window=60, label="auth_lookup")
+
     # Test account — still fetch real data from Zoho, just skip SMS
     is_test = TEST_PHONE and req.phone == TEST_PHONE
 
@@ -799,11 +824,8 @@ def lookup_member(req: LookupRequest, request: Request):
         )
         return {"found": False}
 
-    # Store only the fields needed for downstream endpoints (H4: minimize PHI in sessions)
-    _SESSION_FIELDS = ("first_name", "last_name", "plan_name", "plan_number",
-                       "agent", "medications", "zip_code")
-    session_member = {k: member.get(k, "") for k in _SESSION_FIELDS}
-    create_session(req.phone, session_member)
+    # H1: Session creation deferred to /auth/verify-otp — no PHI materialized pre-auth.
+    # The verify-otp endpoint will re-fetch from Zoho if needed.
 
     if not is_test:
         # Generate + send OTP (skipped for test account — uses TEST_OTP instead)
@@ -838,6 +860,8 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     Step 2: Verify OTP → return JWT tokens + full member data.
     """
+    _check_ip_rate(request, max_hits=10, window=60, label="auth_verify")
+
     # Test account — accept TEST_OTP without going through the OTP store
     is_test = TEST_PHONE and TEST_OTP and req.phone == TEST_PHONE
     otp_valid = (is_test and req.code == TEST_OTP) or get_store().verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
@@ -1340,6 +1364,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     2. Fall back to on-demand Claude extraction if no pre-extracted file
     Results are cached in memory so it only parses once per plan.
     """
+    _authorize_plan(_user, req.plan_number)
     plan_id = normalize_plan_id(req.plan_number)
 
     # Check cache first (with TTL)
@@ -1483,8 +1508,9 @@ def _find_sob_pdf(plan_number: str) -> str | None:
 
 
 @app.get("/sob/pdf/{plan_number}")
-def get_sob_pdf(plan_number: str, _user: dict = Depends(get_current_user)):
+def get_sob_pdf(plan_number: ValidPlanNumber, _user: dict = Depends(get_current_user)):
     """Serve the SOB PDF file for download."""
+    _authorize_plan(_user, plan_number)
     path = _find_sob_pdf(plan_number)
     if not path:
         raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
@@ -1560,8 +1586,9 @@ def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> 
 # --- CMS Benefits Endpoints ---
 
 @app.get("/cms/benefits/{plan_number}")
-def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_benefits(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Full plan benefits from CMS data."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
     if "error" in result:
@@ -1579,50 +1606,57 @@ def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_c
 
 
 @app.get("/cms/benefits/{plan_number}/medical")
-def cms_medical(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_medical(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """PCP, specialist, ER, urgent care copays."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_medical_copays(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/dental")
-def cms_dental(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_dental(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Dental preventive + comprehensive benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_dental_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/otc")
-def cms_otc(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_otc(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """OTC allowance amount and delivery method."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_otc_allowance(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/vision")
-def cms_vision(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_vision(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Eye exam + eyewear vision benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_vision_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/hearing")
-def cms_hearing(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_hearing(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Hearing exam + hearing aid benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_hearing_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/flex")
-def cms_flex(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_flex(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Flex card / SSBCI supplemental benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_flex_ssbci(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/giveback")
-def cms_giveback(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def cms_giveback(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Part B premium giveback amount."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_part_b_giveback(plan_number), request)
 
@@ -1630,6 +1664,7 @@ def cms_giveback(plan_number: str, request: Request, _user: dict = Depends(get_c
 @app.post("/cms/drug")
 def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_user)):
     """Look up drug by name — returns tier, copay, restrictions."""
+    _authorize_plan(_user, req.plan_number)
     cms = get_cms()
     result = cms.get_drug_by_name(req.plan_number, req.drug_name)
     if "error" in result:
@@ -1638,8 +1673,9 @@ def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_us
 
 
 @app.get("/cms/drug/{plan_number}/{drug_name}")
-def cms_drug_lookup_get(plan_number: str, drug_name: str, _user: dict = Depends(get_current_user)):
+def cms_drug_lookup_get(plan_number: ValidPlanNumber, drug_name: str, _user: dict = Depends(get_current_user)):
     """GET version. Example: /cms/drug/H1036-077/Eliquis"""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     result = cms.get_drug_by_name(plan_number, drug_name)
     if "error" in result:
@@ -2068,6 +2104,10 @@ def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(
         refill_reminder=req.refill_reminder,
         last_refill_date=req.last_refill_date,
     )
+    get_audit_log().record(
+        actor=phone, action="create", resource="reminder",
+        resource_id=str(reminder.get("id", "")), detail="reminder_create",
+    )
     return {"reminder": reminder}
 
 
@@ -2081,6 +2121,10 @@ def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict 
         reminders=[r.model_dump() for r in req.reminders],
         created_by=req.created_by,
     )
+    get_audit_log().record(
+        actor=phone, action="create", resource="reminder",
+        detail=f"bulk_create:{len(reminders)}",
+    )
     return {"reminders": reminders, "count": len(reminders)}
 
 
@@ -2092,6 +2136,10 @@ def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _use
     reminder = db.update_reminder(phone, reminder_id, **req.model_dump(exclude_none=True))
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
+    get_audit_log().record(
+        actor=phone, action="update", resource="reminder",
+        resource_id=str(reminder_id), detail="reminder_update",
+    )
     return {"reminder": reminder}
 
 
@@ -2103,6 +2151,10 @@ def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get
     deleted = db.delete_reminder(phone, reminder_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Reminder not found")
+    get_audit_log().record(
+        actor=phone, action="delete", resource="reminder",
+        resource_id=str(reminder_id), detail="reminder_delete",
+    )
     return {"deleted": True}
 
 
@@ -2130,6 +2182,10 @@ def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_curre
         benefit_period=req.benefit_period,
         description=req.description,
         usage_date=req.usage_date,
+    )
+    get_audit_log().record(
+        actor=phone, action="create", resource="usage",
+        detail=f"category:{cat},amount:{req.amount}",
     )
     return {"usage": entry}
 
@@ -2189,8 +2245,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
                 amt = float(amt.replace("$", "").replace(",", "").strip())
             period = otc.get("period", "Monthly")
             categories.append({"category": "otc", "cap": amt, "period": period, "label": "OTC Allowance"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("OTC category parse error: %s", e)
 
     # Dental
     try:
@@ -2201,8 +2257,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
             if max_ben:
                 cap = float(str(max_ben).replace("$", "").replace(",", ""))
                 categories.append({"category": "dental", "cap": cap, "period": "Yearly", "label": "Dental"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Dental category parse error: %s", e)
 
     # Flex / SSBCI
     try:
@@ -2219,8 +2275,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
                     total += float(raw)
             if total > 0:
                 categories.append({"category": "flex", "cap": total, "period": "Yearly", "label": "Flex Card"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Flex category parse error: %s", e)
 
     # Vision
     try:
@@ -2231,8 +2287,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
                 categories.append({"category": "vision", "cap": cap, "period": "Yearly", "label": "Vision"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Vision category parse error: %s", e)
 
     # Hearing
     try:
@@ -2243,8 +2299,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
                 categories.append({"category": "hearing", "cap": cap, "period": "Yearly", "label": "Hearing"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Hearing category parse error: %s", e)
 
     if not categories:
         return {"summary": []}
@@ -2278,8 +2334,9 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/cms/id-card/{plan_number}")
-def get_id_card_data(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
+def get_id_card_data(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Return all data needed to render a digital insurance ID card."""
+    _authorize_plan(_user, plan_number)
     from .carrier_config import detect_carrier, get_carrier_config
 
     cms = get_cms()

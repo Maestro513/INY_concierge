@@ -65,7 +65,10 @@ export default function PhoneScreen() {
   };
 
   const rawDigits = phone.replace(/\D/g, '');
-  const isValid = rawDigits.length === 10;
+  const isValid = rawDigits.length === 10
+    && !/^(\d)\1{9}$/.test(rawDigits)
+    && !rawDigits.startsWith('000')
+    && !rawDigits.startsWith('1');
 
   const handleSubmit = async () => {
     if (!isValid) return;

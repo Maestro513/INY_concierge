@@ -147,7 +147,10 @@ def bootstrap_super_admin(email: str, password: str, first_name: str = "Admin",
     """Create the first super_admin account. Used from CLI."""
     existing = admin_db.get_admin_user_by_email(email)
     if existing:
-        log.info("Admin user already exists (id=%s)", existing['id'])
+        # L3: Update password hash so bootstrap always sets the intended credentials
+        pw_hash = hash_password(password)
+        admin_db.update_admin_user(existing["id"], password_hash=pw_hash)
+        log.info("Admin user already exists (id=%s) — password updated", existing['id'])
         return existing
     pw_hash = hash_password(password)
     user = admin_db.create_admin_user(

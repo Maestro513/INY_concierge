@@ -156,9 +156,9 @@ function AddReminderModal({ visible, onClose, onSave }) {
             </TouchableOpacity>
           </View>
           <Text style={styles.fieldLabel}>Medication</Text>
-          <TextInput style={styles.modalInput} value={drugName} onChangeText={setDrugName} placeholder="e.g. Metformin" placeholderTextColor={COLORS.textTertiary} autoFocus accessibilityLabel="Medication name" />
+          <TextInput style={styles.modalInput} value={drugName} onChangeText={setDrugName} placeholder="e.g. Metformin" placeholderTextColor={COLORS.textTertiary} autoFocus maxLength={200} accessibilityLabel="Medication name" />
           <Text style={styles.fieldLabel}>Dose (optional)</Text>
-          <TextInput style={styles.modalInput} value={doseLabel} onChangeText={setDoseLabel} placeholder="e.g. 500mg" placeholderTextColor={COLORS.textTertiary} accessibilityLabel="Dose, optional" />
+          <TextInput style={styles.modalInput} value={doseLabel} onChangeText={setDoseLabel} placeholder="e.g. 500mg" placeholderTextColor={COLORS.textTertiary} maxLength={200} accessibilityLabel="Dose, optional" />
           <Text style={styles.fieldLabel}>Reminder Time</Text>
           <View style={styles.timeRow}>
             <View style={styles.timeSpinner}>
@@ -191,7 +191,7 @@ function AddReminderModal({ visible, onClose, onSave }) {
 }
 
 // ── Main component ──────────────────────────────────────────────
-export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder, drugsData }) {
+export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder, drugsData, onLogout }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showMedsModal, setShowMedsModal] = useState(false);
@@ -226,7 +226,14 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
       {/* Header: Greeting + Name + Agent | Carrier Logo + Plan Name */}
       <Animated.View style={[styles.header, { opacity: greetFade, transform: [{ translateY: greetSlide }] }]}>
         <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>{greeting()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={styles.greeting}>{greeting()}</Text>
+            {onLogout && (
+              <TouchableOpacity onPress={onLogout} accessibilityLabel="Log out" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
           <Text style={styles.name}>
             {member.firstName} {member.lastName}
           </Text>
