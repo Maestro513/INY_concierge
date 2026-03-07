@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-After fixing 40+ issues from Pass 1, a complete re-audit found **8 Critical**, **15 High**, **18 Medium**, and **7 Low** new or residual issues across the full stack. The most urgent are missing rate limiting on auth endpoints, IDOR on CMS/SOB endpoints, PHI cached plaintext on mobile devices, and no logout flow in the mobile app.
+After fixing 40+ issues from Pass 1, a complete re-audit found **8 Critical**, **15 High**, **18 Medium**, and **7 Low** security issues plus **16 production readiness findings** (3 P0, 5 P1, 8 P2) across the full stack. The most urgent security issues are missing rate limiting on auth endpoints, IDOR on CMS/SOB endpoints, PHI cached plaintext on mobile devices, and no logout flow. The most urgent production issues are SQLite on ephemeral filesystem (data loss on deploy), no DB backup strategy, and a shallow health check.
 
 ---
 
@@ -208,6 +208,41 @@ After fixing 40+ issues from Pass 1, a complete re-audit found **8 Critical**, *
 16. **P2-H11** — Certificate pinning for mobile
 17. **P2-M15** — Gate console.log behind `__DEV__`
 18. **P2-M10** — Add semaphore to RTPBC batch
+
+---
+
+## Production Readiness Findings
+
+### Infrastructure (P0)
+
+| # | Area | Issue |
+|---|------|-------|
+| PR1 | Database | **SQLite on ephemeral filesystem** — 4 separate `.db` files store mutable state (sessions, reminders, admin accounts, audit logs). On Render's ephemeral FS, all data lost on every deploy unless persistent disk is mounted. No evidence of persistent disk config in repo. |
+| PR2 | Database | **No database backup strategy** for PHI data — no scheduled backup, no WAL checkpoint, no DB export. HIPAA compliance gap. |
+| PR3 | Health | **Shallow health check** — `/health` returns `{"status": "ok"}` unconditionally without verifying DB accessibility, CMS DB loaded, or API keys configured. Bad deploys pass health check and serve 500s. |
+
+### Infrastructure (P1)
+
+| # | Area | Issue |
+|---|------|-------|
+| PR4 | Testing | **Zero HTTP integration tests** — no `TestClient(app)` anywhere. Entire request/response pipeline untested: auth flow, CMS endpoints, provider search, admin router, rate limiting, session cross-user check, refresh token rotation. |
+| PR5 | Caching | **Cache stampede on SOB extraction** — when cache entry expires, concurrent requests all miss and all call Claude API simultaneously. Lock only protects dict access, not the API call itself. Cost spike + latency. |
+| PR6 | Observability | **Per-process metrics** — with 4 workers, each has its own `_request_metrics` dict. `/metrics` returns only the current worker's stats. Metrics lost on restart. |
+| PR7 | Resilience | **No circuit breakers** on any downstream service (Zoho, Anthropic, RxNorm, CMS Marketplace). Service outage = every request blocks for full timeout before failing. |
+| PR8 | Config | **`AUDIT_HMAC_KEY` defaults to static hardcoded value** — already tracked as P2-H2. |
+
+### Infrastructure (P2)
+
+| # | Area | Issue |
+|---|------|-------|
+| PR9 | Server | **Missing `--timeout-keep-alive`** in `start.sh` — default 5s, Render LB may hold connections longer, causing 502s. Should be ≥65s. |
+| PR10 | Config | **16+ env vars undocumented** in `.env.example` — `SENTRY_DSN`, `FIELD_ENCRYPTION_KEY`, `ADMIN_SECRET`, `ZOHO_*`, `GOOGLE_API_KEY`, `AUDIT_HMAC_KEY`, `STORE_DB_PATH`, `CMS_API_CONCURRENCY`, etc. |
+| PR11 | Database | **SQLite write contention** — 4 workers with `timeout=10` means concurrent writes block up to 10s. OTP flow does ≥3 writes per login. |
+| PR12 | Observability | **Audit logging failures silently swallowed** (`except Exception: pass`) — already tracked as L1. |
+| PR13 | Testing | **Admin router has zero test coverage** — CSRF, login brute-force protection, user CRUD, member creation, file upload zip-slip protection all untested. |
+| PR14 | Deploy | **Alembic migrations not run in `start.sh`** — schema changes rely on fragile `CREATE TABLE IF NOT EXISTS` + try/except `ALTER TABLE`. |
+| PR15 | Observability | **No structured (JSON) logging** — `basicConfig` with simple format string. Multi-line stack traces split across log entries. |
+| PR16 | Resilience | **Retry includes 429 in `status_forcelist`** — retrying rate-limited requests can amplify into a retry storm with 4 workers under load. |
 
 ---
 
