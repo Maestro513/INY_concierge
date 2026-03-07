@@ -147,7 +147,60 @@ class MedicarePlanSearch:
                 seen.add(key)
                 unique_plans.append(p)
 
-        # Enrich with benefit highlights
+        # Batch-fetch all benefit data in a single JOIN query
+        # instead of 6 individual queries per plan (N+1 → 1)
+        if not unique_plans:
+            return []
+
+        plan_keys = [(p["contract_id"], p["plan_id"]) for p in unique_plans]
+        placeholders = " OR ".join(
+            ["(sa.pbp_a_hnumber = ? AND sa.pbp_a_plan_identifier = ?)"] * len(plan_keys)
+        )
+        flat_params = [v for pair in plan_keys for v in pair]
+
+        benefits_sql = f"""
+            SELECT sa.pbp_a_hnumber AS contract_id,
+                   sa.pbp_a_plan_identifier AS plan_id,
+                   sa.pbp_a_org_marketing_name, sa.pbp_a_plan_name, sa.pbp_a_plan_type,
+                   b7.pbp_b7a_copay_amt_mc_min, b7.pbp_b7b_copay_mc_amt_min,
+                   sd.pbp_d_mplusc_bonly_premium,
+                   b16.pbp_b16b_copay_ov_amt, b16.pbp_b16b_copay_ov_amt_min,
+                   b16.pbp_b16c_maxplan_cmp_amt, b16.pbp_b16c_maxenr_cmp_amt,
+                   b17.pbp_b17a_bendesc_yn,
+                   b13.pbp_b13b_bendesc_otc, b13.pbp_b13b_maxplan_amt, b13.pbp_b13b_maxenr_amt
+            FROM pbp_section_a sa
+            LEFT JOIN pbp_b7_health_prof b7
+                ON b7.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b7.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_section_d sd
+                ON sd.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND sd.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_b16_dental b16
+                ON b16.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b16.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_b17_vision b17
+                ON b17.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b17.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_b13_other_services b13
+                ON b13.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b13.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            WHERE {placeholders}
+        """
+        benefit_rows = self._query_all(benefits_sql, tuple(flat_params))
+
+        # Index benefit rows by plan key
+        benefits_by_key = {}
+        for row in benefit_rows:
+            key = f"{row['contract_id']}-{row['plan_id']}"
+            if key not in benefits_by_key:
+                benefits_by_key[key] = row
+
+        plan_type_map = {
+            "1": "HMO", "2": "HMOPOS", "3": "Local PPO",
+            "4": "Regional PPO", "5": "PFFS", "6": "Cost",
+            "9": "ESRD",
+        }
+
         results = []
         for p in unique_plans:
             plan_number = f"{p['contract_id']}-{p['plan_id']}"
@@ -162,100 +215,48 @@ class MedicarePlanSearch:
                 "type": "medicare",
             }
 
-            # Get org marketing name from section_a if available
-            section_a = self._query_one(
-                """SELECT pbp_a_org_marketing_name, pbp_a_plan_name,
-                          pbp_a_plan_type
-                   FROM pbp_section_a
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if section_a:
-                if section_a.get("pbp_a_org_marketing_name"):
-                    card["org_name"] = section_a["pbp_a_org_marketing_name"]
-                if section_a.get("pbp_a_plan_name"):
-                    card["plan_name"] = section_a["pbp_a_plan_name"]
-                plan_type_map = {
-                    "1": "HMO", "2": "HMOPOS", "3": "Local PPO",
-                    "4": "Regional PPO", "5": "PFFS", "6": "Cost",
-                    "9": "ESRD",
-                }
-                pt = str(section_a.get("pbp_a_plan_type", "")).strip()
+            b = benefits_by_key.get(plan_number)
+            if b:
+                # Section A
+                if b.get("pbp_a_org_marketing_name"):
+                    card["org_name"] = b["pbp_a_org_marketing_name"]
+                if b.get("pbp_a_plan_name"):
+                    card["plan_name"] = b["pbp_a_plan_name"]
+                pt = str(b.get("pbp_a_plan_type", "")).strip()
                 card["plan_type"] = plan_type_map.get(pt, pt)
 
-            # Medical copays
-            b7 = self._query_one(
-                """SELECT pbp_b7a_copay_amt_mc_min, pbp_b7b_copay_mc_amt_min
-                   FROM pbp_b7_health_prof
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b7:
-                pcp = self._safe_float(b7.get("pbp_b7a_copay_amt_mc_min"))
-                spec = self._safe_float(b7.get("pbp_b7b_copay_mc_amt_min"))
+                # Medical copays (b7)
+                pcp = self._safe_float(b.get("pbp_b7a_copay_amt_mc_min"))
+                spec = self._safe_float(b.get("pbp_b7b_copay_mc_amt_min"))
                 card["pcp_copay"] = f"${pcp:.0f}" if pcp is not None else None
                 card["specialist_copay"] = f"${spec:.0f}" if spec is not None else None
 
-            # Part B giveback
-            sd = self._query_one(
-                """SELECT pbp_d_mplusc_bonly_premium
-                   FROM pbp_section_d
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if sd:
-                gb = self._safe_float(sd.get("pbp_d_mplusc_bonly_premium"))
+                # Part B giveback (section_d)
+                gb = self._safe_float(b.get("pbp_d_mplusc_bonly_premium"))
                 if gb and gb > 0:
                     card["part_b_giveback"] = f"${gb:.2f}"
 
-            # Dental
-            b16 = self._query_one(
-                """SELECT pbp_b16b_copay_ov_amt, pbp_b16b_copay_ov_amt_min,
-                          pbp_b16c_maxplan_cmp_amt, pbp_b16c_maxenr_cmp_amt
-                   FROM pbp_b16_dental
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b16:
-                card["has_dental"] = True
-                cmp_max = self._safe_float(
-                    b16.get("pbp_b16c_maxplan_cmp_amt") or
-                    b16.get("pbp_b16c_maxenr_cmp_amt")
-                )
-                if cmp_max:
-                    card["dental_max"] = f"${cmp_max:.0f}"
+                # Dental (b16)
+                if b.get("pbp_b16b_copay_ov_amt") is not None or b.get("pbp_b16c_maxplan_cmp_amt") is not None:
+                    card["has_dental"] = True
+                    cmp_max = self._safe_float(
+                        b.get("pbp_b16c_maxplan_cmp_amt") or b.get("pbp_b16c_maxenr_cmp_amt")
+                    )
+                    if cmp_max:
+                        card["dental_max"] = f"${cmp_max:.0f}"
 
-            # Vision
-            b17 = self._query_one(
-                """SELECT pbp_b17a_bendesc_yn
-                   FROM pbp_b17_vision
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b17 and str(b17.get("pbp_b17a_bendesc_yn", "")).strip().upper() in ("Y", "1"):
-                card["has_vision"] = True
+                # Vision (b17)
+                if str(b.get("pbp_b17a_bendesc_yn", "")).strip().upper() in ("Y", "1"):
+                    card["has_vision"] = True
 
-            # OTC
-            b13 = self._query_one(
-                """SELECT pbp_b13b_bendesc_otc, pbp_b13b_maxplan_amt,
-                          pbp_b13b_maxenr_amt
-                   FROM pbp_b13_other_services
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b13 and str(b13.get("pbp_b13b_bendesc_otc", "")).strip().upper() in ("Y", "1"):
-                card["has_otc"] = True
-                otc_amt = self._safe_float(
-                    b13.get("pbp_b13b_maxplan_amt") or b13.get("pbp_b13b_maxenr_amt")
-                )
-                if otc_amt and otc_amt > 0:
-                    card["otc_amount"] = f"${otc_amt:.0f}"
+                # OTC (b13)
+                if str(b.get("pbp_b13b_bendesc_otc", "")).strip().upper() in ("Y", "1"):
+                    card["has_otc"] = True
+                    otc_amt = self._safe_float(
+                        b.get("pbp_b13b_maxplan_amt") or b.get("pbp_b13b_maxenr_amt")
+                    )
+                    if otc_amt and otc_amt > 0:
+                        card["otc_amount"] = f"${otc_amt:.0f}"
 
             results.append(card)
 

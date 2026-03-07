@@ -11,6 +11,7 @@ Token: https://apif1.aetna.com/fhir/v1/fhirserver_auth/oauth2/token
 Scope: Public NonPII
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -37,8 +38,9 @@ AETNA_TOKEN_URL = os.getenv(
 HEADERS = {"Accept": "application/fhir+json"}
 TIMEOUT = 30.0
 
-# Cache the OAuth token in memory
+# Cache the OAuth token in memory (with lock to prevent concurrent refresh storms)
 _token_cache = {"access_token": "", "expires_at": 0}
+_token_lock = asyncio.Lock()
 
 
 async def _get_access_token(client: httpx.AsyncClient) -> str:
@@ -47,35 +49,40 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
 
-    # Re-read at runtime so dotenv has a chance to load
-    client_id = os.getenv("AETNA_CLIENT_ID", "") or AETNA_CLIENT_ID
-    client_secret = os.getenv("AETNA_CLIENT_SECRET", "") or AETNA_CLIENT_SECRET
+    async with _token_lock:
+        # Double-check after acquiring lock (another coroutine may have refreshed)
+        now = time.time()
+        if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["access_token"]
 
-    if not client_id or not client_secret:
-        raise ValueError("AETNA_CLIENT_ID and AETNA_CLIENT_SECRET must be set")
+        client_id = os.getenv("AETNA_CLIENT_ID", "") or AETNA_CLIENT_ID
+        client_secret = os.getenv("AETNA_CLIENT_SECRET", "") or AETNA_CLIENT_SECRET
 
-    logger.debug(f"[AETNA] Fetching OAuth token from {AETNA_TOKEN_URL}")
+        if not client_id or not client_secret:
+            raise ValueError("AETNA_CLIENT_ID and AETNA_CLIENT_SECRET must be set")
 
-    resp = await client.post(
-        AETNA_TOKEN_URL,
-        data={
-            "grant_type": "client_credentials",
-            "scope": "Public NonPII",
-        },
-        auth=(client_id, client_secret),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=15.0,
-    )
-    if resp.status_code != 200:
-        logger.warning(f"[AETNA] Token error {resp.status_code}: {resp.text[:500]}")
-    resp.raise_for_status()
-    token_data = resp.json()
+        logger.debug(f"[AETNA] Fetching OAuth token from {AETNA_TOKEN_URL}")
 
-    _token_cache["access_token"] = token_data["access_token"]
-    _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+        resp = await client.post(
+            AETNA_TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "scope": "Public NonPII",
+            },
+            auth=(client_id, client_secret),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[AETNA] Token error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+        token_data = resp.json()
 
-    logger.debug(f"[AETNA] Token acquired, expires in {token_data.get('expires_in', '?')}s")
-    return _token_cache["access_token"]
+        _token_cache["access_token"] = token_data["access_token"]
+        _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+
+        logger.debug(f"[AETNA] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+        return _token_cache["access_token"]
 
 
 class AetnaAdapter(BaseAdapter):

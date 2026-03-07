@@ -52,14 +52,52 @@ from .zoho_client import search_contact_by_phone
 
 # ── Sentry error monitoring ──────────────────────────────────────────────────
 
+def _scrub_pii(text: str) -> str:
+    """Remove phone numbers and Medicare numbers from a string."""
+    text = re.sub(r'\b\d{10}\b', '***PHONE***', text)
+    text = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', text)
+    return text
+
+
+def _scrub_dict(obj):
+    """Recursively scrub PII from strings in dicts/lists."""
+    if isinstance(obj, str):
+        return _scrub_pii(obj)
+    if isinstance(obj, dict):
+        return {k: _scrub_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_dict(item) for item in obj]
+    return obj
+
+
 def _sentry_before_send(event, hint):
     """Strip PII from Sentry events before sending."""
-    # Remove phone numbers and Medicare numbers from breadcrumbs/messages
+    # Scrub log messages
     if "logentry" in event and "message" in event["logentry"]:
-        msg = event["logentry"]["message"]
-        msg = re.sub(r'\b\d{10}\b', '***PHONE***', msg)
-        msg = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', msg)
-        event["logentry"]["message"] = msg
+        event["logentry"]["message"] = _scrub_pii(event["logentry"]["message"])
+
+    # Scrub exception frames (variable values in stack traces)
+    for exc_info in (event.get("exception") or {}).get("values", []):
+        for frame in (exc_info.get("stacktrace") or {}).get("frames", []):
+            if "vars" in frame:
+                frame["vars"] = _scrub_dict(frame["vars"])
+
+    # Scrub breadcrumbs
+    for crumb in (event.get("breadcrumbs") or {}).get("values", []):
+        if "message" in crumb:
+            crumb["message"] = _scrub_pii(crumb["message"])
+        if "data" in crumb:
+            crumb["data"] = _scrub_dict(crumb["data"])
+
+    # Scrub request data (URLs, query strings, body)
+    req = event.get("request")
+    if req:
+        for key in ("url", "query_string"):
+            if key in req:
+                req[key] = _scrub_pii(req[key])
+        if "data" in req:
+            req["data"] = _scrub_dict(req["data"])
+
     return event
 
 if SENTRY_DSN:
@@ -634,8 +672,8 @@ def quote_marketplace(
 
 
 @app.get("/metrics")
-def metrics():
-    """Basic request metrics for monitoring."""
+def metrics(_user: dict = Depends(get_current_user)):
+    """Basic request metrics for monitoring (requires auth)."""
     total = _request_metrics["total"]
     return {
         "total_requests": total,
@@ -1570,22 +1608,11 @@ def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user
 
 @app.get("/cms/my-drugs/{phone}")
 def cms_my_drugs(phone: str, _user: dict = Depends(get_current_user)):
-    """
-    Pull member's medications from Zoho, look up each in CMS formulary.
-    SOB (Summary of Benefits) governs over CMS for tier copays.
-    Returns individual drug costs + estimated monthly total.
-    """
-    # 1. Look up member in Zoho
-    try:
-        member = search_contact_by_phone(phone)
-    except Exception as e:
-        log.error(f"Zoho lookup failed in my-drugs: {e}")
-        raise HTTPException(status_code=500, detail="Unable to look up your account right now.")
-
-    if not member:
-        raise HTTPException(status_code=404, detail="Member not found")
-
-    return _my_drugs_impl(member)
+    """Deprecated — use /cms/my-drugs-session/{session_id} instead."""
+    raise HTTPException(
+        status_code=410,
+        detail="This endpoint is deprecated. Use /cms/my-drugs-session/{session_id} instead.",
+    )
 
 
 def _my_drugs_impl(member: dict):

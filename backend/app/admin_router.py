@@ -90,11 +90,32 @@ class SendOTPRequest(BaseModel):
 
 @router.post("/auth/login")
 async def admin_login(body: LoginRequest, request: Request):
-    """Admin email + password login."""
-    result = authenticate_admin(body.email, body.password)
+    """Admin email + password login with brute-force protection."""
+    ip = request.client.host if request.client else ""
+    ua = request.headers.get("user-agent", "")
+
+    # H10: Check for too many recent failed attempts (lockout)
+    failed_count = admin_db.count_recent_failed_logins(body.email)
+    if failed_count >= 5:
+        admin_db.record_login_event(
+            phone=body.email, ip_address=ip, user_agent=ua, success=False,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Please try again in 15 minutes.",
+        )
+
+    # H11: Record failed attempts, not just successes
+    try:
+        result = authenticate_admin(body.email, body.password)
+    except HTTPException:
+        admin_db.record_login_event(
+            phone=body.email, ip_address=ip, user_agent=ua, success=False,
+        )
+        raise
+
     admin_db.record_login_event(
-        phone=body.email, ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", ""), success=True,
+        phone=body.email, ip_address=ip, user_agent=ua, success=True,
     )
     return result
 

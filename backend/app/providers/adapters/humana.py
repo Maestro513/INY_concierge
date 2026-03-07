@@ -370,6 +370,7 @@ class HumanaAdapter(BaseAdapter):
         """
         For each location, ask: does a doctor with this specialty work here?
         Returns (roles_list, practitioner_refs_set).
+        Fetches concurrently in batches of 10.
         """
         NUCC_SYSTEM = "http://nucc.org/provider-taxonomy"
         all_roles = []
@@ -380,14 +381,14 @@ class HumanaAdapter(BaseAdapter):
 
         hits = 0
         misses = 0
+        BATCH_SIZE = 10
 
-        for i, loc_id in enumerate(loc_ids[:max_locs]):
+        async def _check_location(loc_id: str):
             params = [
                 ("specialty", f"{NUCC_SYSTEM}|{nucc_code}"),
                 ("location", f"Location/{loc_id}"),
                 ("_count", "50"),
             ]
-
             try:
                 resp = await client.get(
                     f"{HUMANA_BASE}/PractitionerRole",
@@ -396,8 +397,20 @@ class HumanaAdapter(BaseAdapter):
                 )
                 resp.raise_for_status()
                 bundle = resp.json() or {}
-                entries = bundle.get("entry", []) or []
+                return loc_id, bundle.get("entry", []) or []
+            except httpx.TimeoutException:
+                logger.warning(f"[HUMANA]   Timeout on location {loc_id}")
+                return loc_id, []
+            except Exception:
+                return loc_id, []
 
+        locs_to_check = loc_ids[:max_locs]
+        for i in range(0, len(locs_to_check), BATCH_SIZE):
+            if len(all_roles) >= limit:
+                break
+            batch = locs_to_check[i:i + BATCH_SIZE]
+            results = await asyncio.gather(*[_check_location(lid) for lid in batch])
+            for loc_id, entries in results:
                 if entries:
                     hits += 1
                     for entry in entries:
@@ -411,17 +424,9 @@ class HumanaAdapter(BaseAdapter):
                 else:
                     misses += 1
 
-            except httpx.TimeoutException:
-                logger.warning(f"[HUMANA]   Timeout on location {i+1}/{max_locs}")
-                continue
-            except Exception:
-                continue
-
-            if len(all_roles) >= limit:
-                break
-
-            if (i + 1) % 20 == 0:
-                logger.debug(f"[HUMANA]   Progress: {i+1}/{max_locs} checked, {hits} hits, {len(all_roles)} roles")
+            checked = min(i + BATCH_SIZE, len(locs_to_check))
+            if checked % 20 == 0 or checked == len(locs_to_check):
+                logger.debug(f"[HUMANA]   Progress: {checked}/{max_locs} checked, {hits} hits, {len(all_roles)} roles")
 
         logger.debug(f"[HUMANA] Step 2 done: {hits} hits / {hits + misses} checked, {len(all_roles)} roles")
         return all_roles, prac_refs

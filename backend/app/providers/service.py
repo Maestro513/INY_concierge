@@ -4,6 +4,7 @@ Detects carrier from plan name, routes to the correct adapter,
 enriches results with NPPES/Google data, calculates distances.
 """
 
+import asyncio
 import logging
 
 from .adapters.aetna import AetnaAdapter
@@ -137,6 +138,7 @@ async def search_providers(
         }
 
     # Step 5: Calculate distances & geocode providers without coordinates
+    needs_geocode = []
     for provider in providers:
         if provider.latitude and provider.longitude:
             provider.distance_miles = haversine_miles(
@@ -144,14 +146,23 @@ async def search_providers(
                 provider.latitude, provider.longitude,
             )
         elif provider.zip_code:
-            # Geocode from provider's zip (cheaper than full address)
-            coords = await geocode_zip(provider.zip_code[:5])
+            needs_geocode.append(provider)
+
+    # Geocode missing coordinates concurrently in batches of 10
+    if needs_geocode:
+        async def _geocode_provider(p):
+            coords = await geocode_zip(p.zip_code[:5])
             if coords:
-                provider.latitude, provider.longitude = coords
-                provider.distance_miles = haversine_miles(
-                    member_lat, member_lon,
-                    coords[0], coords[1],
+                p.latitude, p.longitude = coords
+                p.distance_miles = haversine_miles(
+                    member_lat, member_lon, coords[0], coords[1],
                 )
+
+        BATCH = 10
+        for i in range(0, len(needs_geocode), BATCH):
+            await asyncio.gather(*[
+                _geocode_provider(p) for p in needs_geocode[i:i + BATCH]
+            ])
 
     # Step 6: Filter by radius and sort by distance
     providers = [
