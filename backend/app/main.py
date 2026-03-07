@@ -392,6 +392,7 @@ def get_session(sid: str) -> dict | None:
 
 # In-memory cache for parsed SOB summaries: {plan_id: {"data": {...}, "ts": float}}
 _sob_cache: dict[str, dict] = {}
+_sob_cache_lock = _threading.Lock()
 SOB_CACHE_TTL = 3600  # 1 hour
 SOB_CACHE_MAX = 500   # max entries — evict oldest when full
 
@@ -481,6 +482,7 @@ def _evict_oldest(cache: dict, max_size: int) -> None:
 
 # SOB tier copays cache: {plan_id: {"data": dict, "ts": float}}
 _sob_tier_cache: dict[str, dict] = {}
+_sob_tier_cache_lock = _threading.Lock()
 SOB_TIER_CACHE_TTL = 3600  # 1 hour
 
 
@@ -492,9 +494,10 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
     Cached in memory for 1 hour.
     """
     pid = normalize_plan_id(plan_id)
-    cached = _sob_tier_cache.get(pid)
-    if cached and (time.time() - cached["ts"]) < SOB_TIER_CACHE_TTL:
-        return cached["data"]
+    with _sob_tier_cache_lock:
+        cached = _sob_tier_cache.get(pid)
+        if cached and (time.time() - cached["ts"]) < SOB_TIER_CACHE_TTL:
+            return cached["data"]
 
     text = load_plan_text(pid)
     if text is None:
@@ -502,8 +505,9 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
 
     try:
         tier_copays = extract_tier_copays(text)
-        _evict_oldest(_sob_tier_cache, SOB_CACHE_MAX)
-        _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
+        with _sob_tier_cache_lock:
+            _evict_oldest(_sob_tier_cache, SOB_CACHE_MAX)
+            _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
         log.info(f"SOB tier copays loaded for {pid}: tiers={[k for k in tier_copays if isinstance(k, int)]}")
         return tier_copays
     except Exception as e:
@@ -1337,9 +1341,10 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     plan_id = normalize_plan_id(req.plan_number)
 
     # Check cache first (with TTL)
-    cached = _sob_cache.get(plan_id)
-    if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
-        return cached["data"]
+    with _sob_cache_lock:
+        cached = _sob_cache.get(plan_id)
+        if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
+            return cached["data"]
 
     # --- Try pre-extracted benefits first (instant, no API cost) ---
     pre = _load_pre_extracted_benefits(plan_id)
@@ -1362,8 +1367,9 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
             result = _enrich_sob_with_cms(result, req.plan_number)
         except Exception as e:
             log.warning("CMS enrichment failed (non-fatal): %s", type(e).__name__)
-        _evict_oldest(_sob_cache, SOB_CACHE_MAX)
-        _sob_cache[plan_id] = {"data": result, "ts": time.time()}
+        with _sob_cache_lock:
+            _evict_oldest(_sob_cache, SOB_CACHE_MAX)
+            _sob_cache[plan_id] = {"data": result, "ts": time.time()}
         log.info(f"[SOB] {plan_id}: served from pre-extracted benefits")
         return result
 
@@ -1430,8 +1436,9 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         log.warning(f"CMS enrichment failed (non-fatal): {e}")
 
     # Cache it with timestamp
-    _evict_oldest(_sob_cache, SOB_CACHE_MAX)
-    _sob_cache[plan_id] = {"data": result, "ts": time.time()}
+    with _sob_cache_lock:
+        _evict_oldest(_sob_cache, SOB_CACHE_MAX)
+        _sob_cache[plan_id] = {"data": result, "ts": time.time()}
     return result
 
 

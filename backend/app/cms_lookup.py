@@ -23,8 +23,20 @@ import threading
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
+
+# Retry-capable session for transient network errors (RxNorm API)
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+_http = requests.Session()
+_http.mount("https://", HTTPAdapter(max_retries=_retry_strategy))
 
 # Default DB path — checks both same dir and parent dir
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -349,7 +361,7 @@ class CMSLookup:
         rxcuis = []
         try:
             # Strategy 1: /drugs endpoint returns all products for a drug name
-            resp = requests.get(
+            resp = _http.get(
                 "https://rxnav.nlm.nih.gov/REST/drugs.json",
                 params={"name": drug_name},
                 timeout=10,
@@ -363,7 +375,7 @@ class CMSLookup:
             # Strategy 2: /approximateTerm for fuzzy matching (helps with
             # brand names like Humalog that may return inconsistent results)
             try:
-                resp2 = requests.get(
+                resp2 = _http.get(
                     "https://rxnav.nlm.nih.gov/REST/approximateTerm.json",
                     params={"term": drug_name, "maxEntries": 20},
                     timeout=10,
@@ -379,7 +391,7 @@ class CMSLookup:
 
             if not rxcuis:
                 # Strategy 3: try approximate name search for ingredient RXCUI
-                resp3 = requests.get(
+                resp3 = _http.get(
                     "https://rxnav.nlm.nih.gov/REST/rxcui.json",
                     params={"name": drug_name, "search": 2},
                     timeout=10,
