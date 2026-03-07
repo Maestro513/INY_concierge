@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 import { cachedFetch } from '../utils/offlineCache';
-import { getMemberSession } from '../constants/session';
+import { getMemberSession, logout } from '../constants/session';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
@@ -274,6 +274,26 @@ export default function HomeScreen() {
     }
   }, [sessionId]);
 
+  // ── Logout ─────────────────────────────────────────────────────
+
+  const handleLogout = useCallback(() => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out? Your cached data will be cleared.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+            router.replace('/');
+          },
+        },
+      ],
+    );
+  }, [router]);
+
   // ── Render ──────────────────────────────────────────────────────
 
   return (
@@ -292,6 +312,7 @@ export default function HomeScreen() {
           onDeleteReminder={handleDeleteReminder}
           onAddReminder={handleAddReminder}
           drugsData={drugsData}
+          onLogout={handleLogout}
         />
         <VoiceHelp
           planNumber={planNumber || ''}

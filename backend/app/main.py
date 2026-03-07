@@ -455,6 +455,24 @@ def get_current_user(request: Request) -> dict:
     return payload
 
 
+def _authorize_plan(user: dict, plan_number: str) -> None:
+    """Verify the authenticated user owns the requested plan_number (IDOR prevention).
+    Raises 403 if the user's session plan doesn't match."""
+    if APP_ENV == "development":
+        return  # Skip in dev mode
+    phone = user.get("sub")
+    if not phone or phone == "dev":
+        return
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    user_plan = normalize_plan_id(session["data"].get("plan_number", ""))
+    requested = normalize_plan_id(plan_number)
+    if user_plan and requested and user_plan != requested:
+        log.warning("IDOR attempt: user plan %s tried to access %s", user_plan[:5], requested[:5])
+        raise HTTPException(status_code=403, detail="Not authorized for this plan.")
+
+
 # CMS Lookup — lazy init so server starts even if DB missing
 _cms = None
 
@@ -769,6 +787,8 @@ def lookup_member(req: LookupRequest, request: Request):
     Step 1: Look up member by phone, send OTP.
     Returns only {found, first_name} — no sensitive data until OTP verified.
     """
+    _check_ip_rate(request, max_hits=5, window=60, label="auth_lookup")
+
     # Test account — still fetch real data from Zoho, just skip SMS
     is_test = TEST_PHONE and req.phone == TEST_PHONE
 
@@ -838,6 +858,8 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     Step 2: Verify OTP → return JWT tokens + full member data.
     """
+    _check_ip_rate(request, max_hits=10, window=60, label="auth_verify")
+
     # Test account — accept TEST_OTP without going through the OTP store
     is_test = TEST_PHONE and TEST_OTP and req.phone == TEST_PHONE
     otp_valid = (is_test and req.code == TEST_OTP) or get_store().verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
@@ -1340,6 +1362,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     2. Fall back to on-demand Claude extraction if no pre-extracted file
     Results are cached in memory so it only parses once per plan.
     """
+    _authorize_plan(_user, req.plan_number)
     plan_id = normalize_plan_id(req.plan_number)
 
     # Check cache first (with TTL)
@@ -1485,6 +1508,7 @@ def _find_sob_pdf(plan_number: str) -> str | None:
 @app.get("/sob/pdf/{plan_number}")
 def get_sob_pdf(plan_number: str, _user: dict = Depends(get_current_user)):
     """Serve the SOB PDF file for download."""
+    _authorize_plan(_user, plan_number)
     path = _find_sob_pdf(plan_number)
     if not path:
         raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
@@ -1562,6 +1586,7 @@ def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> 
 @app.get("/cms/benefits/{plan_number}")
 def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Full plan benefits from CMS data."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
     if "error" in result:
@@ -1581,6 +1606,7 @@ def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_c
 @app.get("/cms/benefits/{plan_number}/medical")
 def cms_medical(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """PCP, specialist, ER, urgent care copays."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_medical_copays(plan_number), request)
 
@@ -1588,6 +1614,7 @@ def cms_medical(plan_number: str, request: Request, _user: dict = Depends(get_cu
 @app.get("/cms/benefits/{plan_number}/dental")
 def cms_dental(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Dental preventive + comprehensive benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_dental_benefits(plan_number), request)
 
@@ -1595,6 +1622,7 @@ def cms_dental(plan_number: str, request: Request, _user: dict = Depends(get_cur
 @app.get("/cms/benefits/{plan_number}/otc")
 def cms_otc(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """OTC allowance amount and delivery method."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_otc_allowance(plan_number), request)
 
@@ -1602,6 +1630,7 @@ def cms_otc(plan_number: str, request: Request, _user: dict = Depends(get_curren
 @app.get("/cms/benefits/{plan_number}/vision")
 def cms_vision(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Eye exam + eyewear vision benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_vision_benefits(plan_number), request)
 
@@ -1609,6 +1638,7 @@ def cms_vision(plan_number: str, request: Request, _user: dict = Depends(get_cur
 @app.get("/cms/benefits/{plan_number}/hearing")
 def cms_hearing(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Hearing exam + hearing aid benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_hearing_benefits(plan_number), request)
 
@@ -1616,6 +1646,7 @@ def cms_hearing(plan_number: str, request: Request, _user: dict = Depends(get_cu
 @app.get("/cms/benefits/{plan_number}/flex")
 def cms_flex(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Flex card / SSBCI supplemental benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_flex_ssbci(plan_number), request)
 
@@ -1623,6 +1654,7 @@ def cms_flex(plan_number: str, request: Request, _user: dict = Depends(get_curre
 @app.get("/cms/benefits/{plan_number}/giveback")
 def cms_giveback(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Part B premium giveback amount."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     return _cached_json_response(cms.get_part_b_giveback(plan_number), request)
 
@@ -1630,6 +1662,7 @@ def cms_giveback(plan_number: str, request: Request, _user: dict = Depends(get_c
 @app.post("/cms/drug")
 def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_user)):
     """Look up drug by name — returns tier, copay, restrictions."""
+    _authorize_plan(_user, req.plan_number)
     cms = get_cms()
     result = cms.get_drug_by_name(req.plan_number, req.drug_name)
     if "error" in result:
@@ -1640,6 +1673,7 @@ def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_us
 @app.get("/cms/drug/{plan_number}/{drug_name}")
 def cms_drug_lookup_get(plan_number: str, drug_name: str, _user: dict = Depends(get_current_user)):
     """GET version. Example: /cms/drug/H1036-077/Eliquis"""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     result = cms.get_drug_by_name(plan_number, drug_name)
     if "error" in result:
@@ -2280,6 +2314,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 @app.get("/cms/id-card/{plan_number}")
 def get_id_card_data(plan_number: str, request: Request, _user: dict = Depends(get_current_user)):
     """Return all data needed to render a digital insurance ID card."""
+    _authorize_plan(_user, plan_number)
     from .carrier_config import detect_carrier, get_carrier_config
 
     cms = get_cms()

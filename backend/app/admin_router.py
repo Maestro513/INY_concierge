@@ -545,6 +545,13 @@ async def get_plan_detail(plan_number: str, payload: dict = Depends(require_admi
     extracted_path = os.path.join(EXTRACTED_DIR, f"{plan_number}.json")
     benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_number}_benefits.json")
 
+    # Path traversal prevention: resolved path must stay within EXTRACTED_DIR
+    extract_real = os.path.realpath(EXTRACTED_DIR)
+    if not os.path.realpath(extracted_path).startswith(extract_real + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid plan number.")
+    if not os.path.realpath(benefits_path).startswith(extract_real + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid plan number.")
+
     if not os.path.isfile(extracted_path):
         raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found.")
 

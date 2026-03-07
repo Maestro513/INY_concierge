@@ -37,3 +37,25 @@ export function clearMemberSession() {
   _member = null;
   _sessionId = null;
 }
+
+/**
+ * Full logout: clear all in-memory state, tokens, and cached PHI.
+ * Call this from the logout button to ensure nothing persists.
+ */
+export async function logout() {
+  // Clear in-memory state
+  clearMemberSession();
+  clearPendingOtp();
+
+  // Clear auth tokens (SecureStore or AsyncStorage)
+  const { clearTokens } = require('./api');
+  await clearTokens();
+
+  // Clear encrypted offline cache (API responses)
+  const { clearAllCache } = require('../utils/offlineCache');
+  await clearAllCache();
+
+  // Destroy encryption key so any remaining cached data is unreadable
+  const { destroyEncryptionKey } = require('../utils/secureCache');
+  await destroyEncryptionKey();
+}

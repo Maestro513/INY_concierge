@@ -15,27 +15,28 @@ import { COLORS } from '../constants/theme';
 import { setupNotificationChannel } from '../utils/notifications';
 
 // ── Sentry error monitoring ─────────────────────────────────────
-const SENTRY_DSN =
-  process.env.EXPO_PUBLIC_SENTRY_DSN ||
-  'https://d9858cf436e68998a5d2b4a31a8c7262@o4510966668132352.ingest.us.sentry.io/4510966737207297';
+// DSN must come from environment — no hardcoded fallback (prevents event flooding)
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
 
-Sentry.init({
-  dsn: SENTRY_DSN,
-  environment: __DEV__ ? 'development' : 'production',
-  tracesSampleRate: __DEV__ ? 1.0 : 0.2,
-  beforeSend(event) {
-    // Strip phone numbers from breadcrumbs
-    if (event.breadcrumbs) {
-      event.breadcrumbs = event.breadcrumbs.map((b) => {
-        if (b.message) {
-          b.message = b.message.replace(/\b\d{10}\b/g, '***PHONE***');
-        }
-        return b;
-      });
-    }
-    return event;
-  },
-});
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: __DEV__ ? 'development' : 'production',
+    tracesSampleRate: __DEV__ ? 1.0 : 0.2,
+    beforeSend(event) {
+      // Strip phone numbers from breadcrumbs
+      if (event.breadcrumbs) {
+        event.breadcrumbs = event.breadcrumbs.map((b) => {
+          if (b.message) {
+            b.message = b.message.replace(/\b\d{10}\b/g, '***PHONE***');
+          }
+          return b;
+        });
+      }
+      return event;
+    },
+  });
+}
 
 // expo-notifications requires a dev build (not available in Expo Go).
 // Notification handler is set up in utils/notifications.js when reminders are created.

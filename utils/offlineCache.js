@@ -2,10 +2,13 @@
  * Offline-first cache layer for API responses.
  *
  * Strategy: network-first with AsyncStorage fallback.
- * - On success: cache response + serve fresh data
+ * - On success: cache response (encrypted) + serve fresh data
  * - On failure: serve cached data if available
  * - ETags are stored so the backend can return 304 Not Modified
+ * - All cached data is encrypted via secureCache (key in OS keychain)
  */
+
+import { secureSet, secureGet } from './secureCache';
 
 let AsyncStorage = null;
 try {
@@ -22,16 +25,15 @@ const ETAG_PREFIX = '@iny_etag:';
  * @returns {{ data: any, etag: string|null } | null}
  */
 export async function getCached(url) {
-  if (!AsyncStorage) return null;
   try {
-    const raw = await AsyncStorage.getItem(CACHE_PREFIX + url);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    const parsed = await secureGet(CACHE_PREFIX + url);
+    if (!parsed) return null;
     // Check TTL if set (optional, mainly for non-ETag endpoints)
     if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
       return null;
     }
-    const etag = await AsyncStorage.getItem(ETAG_PREFIX + url);
+    // ETags are non-sensitive — can stay in plain AsyncStorage
+    const etag = AsyncStorage ? await AsyncStorage.getItem(ETAG_PREFIX + url) : null;
     return { data: parsed.data, etag };
   } catch {
     return null;
@@ -39,21 +41,20 @@ export async function getCached(url) {
 }
 
 /**
- * Store data + ETag for a URL.
+ * Store data + ETag for a URL (data is encrypted at rest).
  * @param {string} url
  * @param {any} data
  * @param {string|null} etag
  * @param {number} ttlMs - optional TTL in ms (default: 24 hours)
  */
 export async function setCache(url, data, etag = null, ttlMs = 86400000) {
-  if (!AsyncStorage) return;
   try {
     const entry = { data, expiresAt: Date.now() + ttlMs };
-    const pairs = [[CACHE_PREFIX + url, JSON.stringify(entry)]];
-    if (etag) {
-      pairs.push([ETAG_PREFIX + url, etag]);
+    await secureSet(CACHE_PREFIX + url, entry);
+    // ETags are non-sensitive cache validators
+    if (etag && AsyncStorage) {
+      await AsyncStorage.setItem(ETAG_PREFIX + url, etag);
     }
-    await AsyncStorage.multiSet(pairs);
   } catch {
     // Cache write failures are non-fatal
   }
