@@ -128,6 +128,7 @@ log = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
 
+
 @asynccontextmanager
 async def _lifespan(application):
     # Startup — nothing extra needed
@@ -344,6 +345,7 @@ async def request_id_middleware(request: Request, call_next):
 
 # ── Request timing + metrics middleware ──────────────────────────────────────
 import threading as _threading
+
 _metrics_lock = _threading.Lock()
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
 

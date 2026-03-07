@@ -61,7 +61,7 @@ class TestGeocodingCache:
 
     def test_expired_cache_calls_api(self):
         """Expired cache entry should trigger a fresh API call."""
-        from app.plan_search import _geo_cache, _geo_lock, _GEO_CACHE_TTL, get_counties_by_zip
+        from app.plan_search import _GEO_CACHE_TTL, _geo_cache, _geo_lock, get_counties_by_zip
 
         # Pre-populate with expired entry
         with _geo_lock:
@@ -142,7 +142,7 @@ class TestCacheThreadSafety:
 
     def test_concurrent_cache_access_safe(self):
         """Multiple threads accessing SOB cache should not raise."""
-        from app.main import _sob_cache, _sob_cache_lock, SOB_CACHE_TTL
+        from app.main import SOB_CACHE_TTL, _sob_cache, _sob_cache_lock
 
         errors = []
 
