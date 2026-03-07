@@ -18,13 +18,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => {
-    const token = localStorage.getItem('admin_token');
+    const token = sessionStorage.getItem('admin_token');
     return { user: null, token, loading: !!token };
   });
 
   // Fetch the current user profile on mount (if token exists)
   useEffect(() => {
-    const token = localStorage.getItem('admin_token');
+    const token = sessionStorage.getItem('admin_token');
     if (!token) return;
 
     client
@@ -34,8 +34,8 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => {
         // Token invalid / expired
-        localStorage.removeItem('admin_token');
-        localStorage.removeItem('admin_refresh');
+        sessionStorage.removeItem('admin_token');
+        sessionStorage.removeItem('admin_refresh');
         setState({ user: null, token: null, loading: false });
       });
   }, []);
@@ -43,14 +43,14 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await client.post(ENDPOINTS.LOGIN, { email, password });
     const { access_token, refresh_token, user } = res.data;
-    localStorage.setItem('admin_token', access_token);
-    if (refresh_token) localStorage.setItem('admin_refresh', refresh_token);
+    sessionStorage.setItem('admin_token', access_token);
+    if (refresh_token) sessionStorage.setItem('admin_refresh', refresh_token);
     setState({ user, token: access_token, loading: false });
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('admin_token');
-    localStorage.removeItem('admin_refresh');
+    sessionStorage.removeItem('admin_token');
+    sessionStorage.removeItem('admin_refresh');
     setState({ user: null, token: null, loading: false });
   }, []);
 

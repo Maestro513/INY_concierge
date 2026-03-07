@@ -14,8 +14,10 @@ import tempfile
 import time
 from typing import Optional
 
+import re as _re
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from . import admin_db
 from .admin_auth import (
@@ -30,6 +32,7 @@ from .admin_auth import (
 from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
+from .audit import get_audit_log
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
@@ -49,13 +52,30 @@ def check_csrf_origin(request: Request):
     if request.method not in _CSRF_METHODS:
         return
     origin = request.headers.get("origin", "")
-    if not origin:
-        return  # No Origin header — non-browser client or same-origin
-    if origin not in _ALLOWED_ADMIN_ORIGINS:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Origin '{origin}' is not allowed for admin operations.",
-        )
+    if origin:
+        if origin not in _ALLOWED_ADMIN_ORIGINS:
+            raise HTTPException(
+                status_code=403,
+                detail="Origin is not allowed for admin operations.",
+            )
+        return
+    # No Origin header — fall back to Referer check
+    referer = request.headers.get("referer", "")
+    if referer:
+        from urllib.parse import urlparse
+        ref_origin = f"{urlparse(referer).scheme}://{urlparse(referer).netloc}"
+        if ref_origin not in _ALLOWED_ADMIN_ORIGINS:
+            raise HTTPException(
+                status_code=403,
+                detail="Request origin not allowed for admin operations.",
+            )
+        return
+    # Neither Origin nor Referer — reject (non-browser API clients use Bearer auth,
+    # but we still block to prevent CSRF from tools that strip these headers)
+    raise HTTPException(
+        status_code=403,
+        detail="Missing Origin or Referer header on mutating request.",
+    )
 
 
 router = APIRouter(
@@ -81,12 +101,32 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+def _validate_password_complexity(password: str) -> str:
+    """Enforce password complexity: 8+ chars, upper, lower, digit, special."""
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    if not _re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter.")
+    if not _re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter.")
+    if not _re.search(r"\d", password):
+        raise ValueError("Password must contain at least one digit.")
+    if not _re.search(r"[^A-Za-z0-9]", password):
+        raise ValueError("Password must contain at least one special character.")
+    return password
+
+
 class CreateAdminRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     first_name: str = Field("", max_length=100)
     last_name: str = Field("", max_length=100)
     role: str = Field("viewer", pattern=r"^(super_admin|admin|viewer)$")
+
+    @field_validator("password")
+    @classmethod
+    def check_complexity(cls, v: str) -> str:
+        return _validate_password_complexity(v)
 
 
 class UpdateAdminRequest(BaseModel):
@@ -95,6 +135,13 @@ class UpdateAdminRequest(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def check_complexity(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_password_complexity(v)
+        return v
 
 
 class CreateMemberRequest(BaseModel):
@@ -146,17 +193,25 @@ async def admin_login(body: LoginRequest, request: Request):
     admin_db.record_login_event(
         phone=body.email, ip_address=ip, user_agent=ua, success=True,
     )
+    admin_db.clear_failed_logins(body.email)
     return result
 
 
 @router.post("/auth/refresh")
 async def admin_refresh(request: Request):
-    """Refresh admin access token using refresh token."""
+    """Refresh admin access token using refresh token (with rotation)."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing refresh token.")
     token = auth_header[7:]
     payload = decode_admin_token(token, expected_type="admin_refresh")
+
+    # Refresh token rotation — each token can only be used once
+    jti = payload.get("jti")
+    if jti and not _get_store().consume_refresh_jti(jti, f"admin:{payload['sub']}"):
+        log.warning("Admin refresh token replay detected for user %s", payload["sub"])
+        raise HTTPException(status_code=401, detail="Token already used. Please log in again.")
+
     user = admin_db.get_admin_user_by_id(int(payload["sub"]))
     if not user or not user["is_active"]:
         raise HTTPException(status_code=401, detail="Account not found or deactivated.")
@@ -191,6 +246,7 @@ async def list_admins(payload: dict = Depends(require_role("super_admin"))):
 
 @router.post("/users")
 async def create_admin(body: CreateAdminRequest,
+                       request: Request,
                        payload: dict = Depends(require_role("super_admin"))):
     """Create a new admin user."""
     existing = admin_db.get_admin_user_by_email(body.email)
@@ -201,19 +257,37 @@ async def create_admin(body: CreateAdminRequest,
         email=body.email, password_hash=pw_hash,
         first_name=body.first_name, last_name=body.last_name, role=body.role,
     )
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="admin_user",
+        resource_id=str(user["id"]),
+        ip_address=request.client.host if request.client else "",
+        detail=f"email={body.email} role={body.role}",
+    )
     return {"id": user["id"], "email": user["email"], "role": user["role"]}
 
 
 @router.patch("/users/{user_id}")
 async def update_admin(user_id: int, body: UpdateAdminRequest,
+                       request: Request,
                        payload: dict = Depends(require_role("super_admin"))):
     """Update an admin user."""
     fields = body.model_dump(exclude_none=True)
+    changed_fields = list(fields.keys())
     if "password" in fields:
         fields["password_hash"] = hash_password(fields.pop("password"))
     user = admin_db.update_admin_user(user_id, **fields)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="update",
+        resource="admin_user",
+        resource_id=str(user_id),
+        ip_address=request.client.host if request.client else "",
+        detail=f"fields={','.join(changed_fields)}",
+    )
     return {"id": user["id"], "email": user["email"], "role": user["role"],
             "is_active": bool(user["is_active"])}
 
@@ -233,6 +307,7 @@ def _normalize_phone(raw: str) -> str:
 
 @router.post("/members/create")
 async def create_member(body: CreateMemberRequest,
+                        request: Request,
                         payload: dict = Depends(require_admin)):
     """
     Create a new member account.
@@ -265,6 +340,14 @@ async def create_member(body: CreateMemberRequest,
     }
     log.info("Admin %s created member: ***%s",
              payload.get("sub"), phone[-4:])
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="member",
+        resource_id=f"***{phone[-4:]}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_member_create",
+    )
 
     # Send OTP verification if requested
     otp_sent = False
@@ -288,6 +371,7 @@ async def create_member(body: CreateMemberRequest,
 
 @router.post("/members/send-otp")
 async def admin_send_otp(body: SendOTPRequest,
+                         request: Request,
                          payload: dict = Depends(require_admin)):
     """Send OTP login code to a member's phone (triggered by admin)."""
     phone = _normalize_phone(body.phone)
@@ -309,6 +393,14 @@ async def admin_send_otp(body: SendOTPRequest,
         raise HTTPException(status_code=500, detail="Failed to send OTP.")
 
     log.info("Admin %s sent OTP to member ***%s", payload.get("sub"), phone[-4:])
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="otp",
+        resource_id=f"***{phone[-4:]}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_send_otp",
+    )
     return {"success": True, "message": "Verification code sent."}
 
 

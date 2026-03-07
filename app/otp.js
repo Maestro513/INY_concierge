@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, ActivityIndicator } from 'react-native';
 import GradientBg from '../components/GradientBg';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
-import { setMemberSession } from '../constants/session';
+import { setMemberSession, getPendingOtp, clearPendingOtp } from '../constants/session';
 
 export default function OTPScreen() {
-  const { phone, firstName } = useLocalSearchParams();
+  const pending = getPendingOtp();
+  const phone = pending?.phone || '';
+  const firstName = pending?.firstName || '';
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -81,6 +83,7 @@ export default function OTPScreen() {
           data.session_id || '',
         );
 
+        clearPendingOtp();
         router.replace('/home');
       } else {
         setError('Verification failed. Please try again.');

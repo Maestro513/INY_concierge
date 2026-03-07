@@ -173,13 +173,13 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - **File:** `backend/app/main.py:1291-1303`
 - `/sob/pdf/{plan_number}` has no `get_current_user` dependency. Unauthenticated users can enumerate and download SOB PDFs.
 
-**H10. No Admin Login Brute-Force Protection**
-- **File:** `backend/app/admin_auth.py:117`
-- Unlimited password attempts. Failed logins recorded but never checked for lockout.
+**H10. ~~FIXED~~ No Admin Login Brute-Force Protection**
+- **File:** `backend/app/admin_router.py`
+- Lockout after 5 failed attempts within 15 minutes (429 response). Counter resets on successful login via `clear_failed_logins()`.
 
-**H11. Failed Admin Login Attempts Never Recorded**
-- **File:** `backend/app/admin_router.py:83-90`
-- `record_login_event()` called only after successful auth. Failed attempts generate no audit trail.
+**H11. ~~FIXED~~ Failed Admin Login Attempts Never Recorded**
+- **File:** `backend/app/admin_router.py`
+- Failed attempts now recorded before re-raising. Both success and failure events logged with IP and user-agent.
 
 ### Audit & Compliance
 
@@ -187,9 +187,9 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - **File:** `backend/app/main.py`
 - `get_audit_log().record()` called at only 4 points (all auth-related). No audit trail for: medication data, reminders, benefits usage, SOB summaries, CMS lookups, ID card data, or any admin data access.
 
-**H13. Audit Logs Mask Actor Identity**
-- **File:** `backend/app/audit.py:102`
-- Phone numbers masked to last-4-digits before storage. Not unique, making it impossible to reliably identify who accessed what.
+**H13. ~~FIXED~~ Audit Logs Mask Actor Identity**
+- **File:** `backend/app/audit.py`
+- Actor identity now stored as HMAC-SHA256 keyed hash (`actor:<hash>:<last4>`) — deterministic, unique, searchable, and irreversible without the HMAC key.
 
 **H14. SQLite Database Files Have Default Permissions**
 - **Files:** `persistent_store.py`, `user_data.py`, `audit.py`, `admin_db.py`
@@ -270,14 +270,18 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - **M25.** Thread-unsafe global metrics `_request_metrics` - non-atomic `+=` from async middleware
 - **M26.** Unbounded `_ask_rate` dict - memory leak over months of production
 - **M27.** `touch_session` overwrites `created_at` - sessions can be kept alive indefinitely
-- **M28.** Single uvicorn worker in production `start.sh` - bottleneck under load
+- **M28.** ~~FIXED~~ `start.sh` now runs `--workers $WEB_CONCURRENCY` (default 4)
 - **M29.** Auth never tested in production mode - conftest.py forces `APP_ENV=development`
 - **M30.** No Content-Security-Policy header on admin panel
 - **M31.** Inconsistent paths between import scripts (`pdfs/CMS` vs `Pdfs/CMS`)
 - **M32.** `persistent_store.db` and `cms_benefits.db` missing from `.gitignore`
 - **M33.** `start.sh` does not run `alembic upgrade head` before starting
-- **M34.** No admin password complexity validation
-- **M35.** Unpinned `anthropic>=0.84.0` dependency - no upper bound
+- **M34.** ~~FIXED~~ Password complexity enforced: 8+ chars, upper, lower, digit, special character required
+- **M35.** ~~FIXED~~ `anthropic` pinned to `==0.84.0`
+- **M36.** ~~FIXED~~ Session IDs used `uuid4().hex` (predictable) — replaced with `secrets.token_urlsafe(32)` (cryptographic)
+- **M37.** ~~FIXED~~ CMS error messages leaked internal details in HTTP responses — replaced with generic messages
+- **M38.** ~~FIXED~~ Admin CSRF error echoed request `Origin` header — removed from response
+- **M39.** ~~FIXED~~ False "SOC 2" compliance claim in admin login page — removed
 
 ---
 

@@ -135,6 +135,13 @@ if APP_ENV in ("production", "staging"):
 elif not os.getenv("JWT_SECRET"):
     log.warning("JWT_SECRET not set — using random per-startup key (dev only, tokens won't survive restarts)")
 
+# ── PHI encryption validation ────────────────────────────────────────────────
+if APP_ENV in ("production", "staging") and not os.getenv("FIELD_ENCRYPTION_KEY"):
+    raise RuntimeError(
+        "FIELD_ENCRYPTION_KEY must be set in production/staging to encrypt PHI at rest. "
+        "Generate one with: python -c \"from app.encryption import generate_key; print(generate_key())\""
+    )
+
 # ── CORS — env-based ─────────────────────────────────────────────────────────
 _default_prod_origins = [
     "https://insurancenyou.com",
@@ -147,7 +154,7 @@ if APP_ENV == "production":
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
@@ -156,7 +163,7 @@ else:
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
@@ -273,14 +280,27 @@ log.info("Static dir resolved (exists=%s)", os.path.isdir(_static_dir))
 _widget_js_path = os.path.join(_static_dir, "quote-widget.js")
 
 @app.get("/static/quote-widget.js")
-async def serve_widget_js():
-    """Serve widget JS with permissive CORS for cross-origin embedding."""
+async def serve_widget_js(request: Request):
+    """Serve widget JS with scoped CORS for cross-origin embedding."""
     from starlette.responses import FileResponse as _FR
     if not os.path.isfile(_widget_js_path):
         log.error("Widget JS not found")
         return JSONResponse({"error": "widget not found"}, status_code=404)
     resp = _FR(_widget_js_path, media_type="application/javascript")
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+    # Restrict CORS to known embedding domains in production
+    origin = request.headers.get("origin", "")
+    _WIDGET_ALLOWED_ORIGINS = {
+        "https://insurancenyou.com",
+        "https://www.insurancenyou.com",
+        "https://webflow.insurancenyou.com",
+    }
+    if APP_ENV == "production" and origin:
+        if origin in _WIDGET_ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+        # else: no CORS header → browser blocks cross-origin use
+    else:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
@@ -591,6 +611,15 @@ class UsageCreate(BaseModel):
     benefit_period: str = "Monthly"   # Monthly, Quarterly, Yearly
 
 
+# --- IP-based rate limiter for public endpoints (persistent) ─────────────────
+def _check_ip_rate(request: Request, *, max_hits: int, window: int, label: str = "endpoint") -> None:
+    """Raise 429 if the client IP exceeds max_hits within window seconds."""
+    ip = request.client.host if request.client else "unknown"
+    key = f"{label}:{ip}"
+    if not get_store().check_rate_limit(key, max_hits, window):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait before trying again.")
+
+
 # --- Endpoints ---
 
 @app.get("/health")
@@ -613,8 +642,9 @@ def get_medicare_search() -> MedicarePlanSearch:
 
 
 @app.get("/quote/counties/{zipcode}")
-def quote_counties(zipcode: str):
+def quote_counties(zipcode: str, request: Request):
     """Get counties for a zip code (public, no auth)."""
+    _check_ip_rate(request, max_hits=30, window=60, label="quote")
     if not re.fullmatch(r"\d{5}", zipcode):
         raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     counties = get_counties_by_zip(zipcode)
@@ -625,6 +655,7 @@ def quote_counties(zipcode: str):
 
 @app.get("/quote/medicare")
 def quote_medicare(
+    request: Request,
     zip: str = None,
     state: str = None,
     county: str = None,
@@ -635,6 +666,7 @@ def quote_medicare(
     Search Medicare Advantage plans (public, no auth).
     Either provide zip (auto-resolves to state/county) or state + county code.
     """
+    _check_ip_rate(request, max_hits=20, window=60, label="quote")
     search = get_medicare_search()
     if zip:
         if not re.fullmatch(r"\d{5}", zip):
@@ -654,7 +686,8 @@ def quote_medicare(
 
 @app.get("/quote/marketplace")
 def quote_marketplace(
-    zip: str,
+    request: Request,
+    zip: str = "",
     fips: str = None,
     age: int = 30,
     income: int = None,
@@ -665,6 +698,7 @@ def quote_marketplace(
     Search ACA Marketplace plans for under-65 (public, no auth).
     Proxies to CMS Marketplace API (marketplace.api.healthcare.gov).
     """
+    _check_ip_rate(request, max_hits=20, window=60, label="quote")
     if not re.fullmatch(r"\d{5}", zip):
         raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     result = search_marketplace_plans(
@@ -832,10 +866,17 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
 
 
 @app.post("/auth/refresh")
-def refresh_token_endpoint(req: RefreshRequest):
+def refresh_token_endpoint(req: RefreshRequest, request: Request):
     """Exchange a refresh token for a new access token."""
+    _check_ip_rate(request, max_hits=10, window=60, label="auth_refresh")
     payload = decode_token(req.refresh_token, jwt_secret=JWT_SECRET, expected_type="refresh")
     phone = payload["sub"]
+
+    # Refresh token rotation — each token can only be used once
+    jti = payload.get("jti")
+    if jti and not get_store().consume_refresh_jti(jti, phone):
+        log.warning("Refresh token replay detected for phone ending ***%s", phone[-4:])
+        raise HTTPException(status_code=401, detail="Token already used. Please log in again.")
 
     # Find member data from an active session
     member_data = None
@@ -876,8 +917,7 @@ def logout(request: Request, user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
-# Per-phone rate limiter for /ask: max 10 questions per 60 seconds
-_ask_rate: dict[str, list[float]] = {}
+# Per-phone rate limiter for /ask
 _ASK_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 _ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
 
@@ -886,13 +926,8 @@ _ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
 def ask_question(req: AskRequest, _user: dict = Depends(get_current_user)):
     """Ask a question about a member's plan benefits."""
     phone = _user.get("sub", "anon")
-    now = time.time()
-    hits = _ask_rate.get(phone, [])
-    hits = [t for t in hits if now - t < _ASK_WINDOW]
-    if len(hits) >= _ASK_MAX:
+    if not get_store().check_rate_limit(f"ask:{phone}", _ASK_MAX, _ASK_WINDOW):
         raise HTTPException(status_code=429, detail="Too many questions. Please wait a minute.")
-    hits.append(now)
-    _ask_rate[phone] = hits
 
     plan_id = normalize_plan_id(req.plan_number)
     result = ask_claude(question=req.question, plan_number=plan_id)
@@ -1410,8 +1445,8 @@ def _find_sob_pdf(plan_number: str) -> str | None:
 
 
 @app.get("/sob/pdf/{plan_number}")
-def get_sob_pdf(plan_number: str):
-    """Serve the actual SOB PDF file for download (public — CMS documents)."""
+def get_sob_pdf(plan_number: str, _user: dict = Depends(get_current_user)):
+    """Serve the SOB PDF file for download."""
     path = _find_sob_pdf(plan_number)
     if not path:
         raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
@@ -1469,7 +1504,7 @@ def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> 
     """Return a JSONResponse with Cache-Control and ETag headers.
     If the client sends a matching If-None-Match, returns 304."""
     body = json.dumps(data, sort_keys=True, separators=(",", ":"))
-    etag = '"' + hashlib.md5(body.encode()).hexdigest() + '"'
+    etag = '"' + hashlib.sha256(body.encode()).hexdigest()[:32] + '"'
 
     client_etag = request.headers.get("If-None-Match")
     if client_etag and client_etag == etag:
@@ -1492,7 +1527,7 @@ def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_c
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Plan not found.")
 
     # OTC fallback: if CMS says plan has OTC but no dollar amount, check SOB text
     otc = result.get("otc", {})
@@ -1560,7 +1595,7 @@ def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_us
     cms = get_cms()
     result = cms.get_drug_by_name(req.plan_number, req.drug_name)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Drug not found on this plan's formulary.")
     return result
 
 
@@ -1570,7 +1605,7 @@ def cms_drug_lookup_get(plan_number: str, drug_name: str, _user: dict = Depends(
     cms = get_cms()
     result = cms.get_drug_by_name(plan_number, drug_name)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Drug not found on this plan's formulary.")
     return result
 
 

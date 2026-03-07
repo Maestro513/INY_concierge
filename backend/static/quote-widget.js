@@ -515,14 +515,14 @@
       // Badges
       let badges = "";
       if (plan.plan_type) {
-        badges += `<span class="iny-badge iny-badge-type">${plan.plan_type}</span>`;
+        badges += `<span class="iny-badge iny-badge-type">${this.esc(plan.plan_type)}</span>`;
       }
       if (plan.metal_level) {
-        const ml = plan.metal_level.toLowerCase();
-        badges += `<span class="iny-badge iny-badge-metal ${ml}">${plan.metal_level}</span>`;
+        const ml = this.esc(plan.metal_level.toLowerCase());
+        badges += `<span class="iny-badge iny-badge-metal ${ml}">${this.esc(plan.metal_level)}</span>`;
       }
       if (plan.part_b_giveback) {
-        badges += `<span class="iny-badge iny-badge-giveback">Part B Giveback ${plan.part_b_giveback}/mo</span>`;
+        badges += `<span class="iny-badge iny-badge-giveback">Part B Giveback ${this.esc(plan.part_b_giveback)}/mo</span>`;
       }
       if (plan.snp_type && plan.snp_type !== "No" && plan.snp_type.trim()) {
         badges += `<span class="iny-badge iny-badge-snp">SNP</span>`;
@@ -535,9 +535,9 @@
       let benefits = "";
       benefits += this.benefitItem("Deductible", deductibleDisplay);
       if (plan.pcp_copay)
-        benefits += this.benefitItem("PCP Visit", plan.pcp_copay);
+        benefits += this.benefitItem("PCP Visit", this.esc(plan.pcp_copay));
       if (plan.specialist_copay)
-        benefits += this.benefitItem("Specialist", plan.specialist_copay);
+        benefits += this.benefitItem("Specialist", this.esc(plan.specialist_copay));
       if (plan.moop)
         benefits += this.benefitItem(
           "Max Out-of-Pocket",
@@ -549,13 +549,13 @@
       if (plan.has_dental) extras += this.extraTag("Dental");
       if (plan.has_vision) extras += this.extraTag("Vision");
       if (plan.has_otc) {
-        const otcLabel = plan.otc_amount ? `OTC ${plan.otc_amount}` : "OTC";
+        const otcLabel = plan.otc_amount ? `OTC ${this.esc(plan.otc_amount)}` : "OTC";
         extras += this.extraTag(otcLabel);
       }
       if (plan.dental_max)
-        extras += this.extraTag(`Dental Max ${plan.dental_max}`);
+        extras += this.extraTag(`Dental Max ${this.esc(plan.dental_max)}`);
       if (plan.quality_rating)
-        extras += this.extraTag(`${plan.quality_rating} Stars`);
+        extras += this.extraTag(`${this.esc(plan.quality_rating)} Stars`);
 
       // Premium display for U65 with credit
       let premiumSection = "";
@@ -602,14 +602,14 @@
       const isFree = value === "$0";
       return `
         <div class="iny-benefit-item">
-          <div class="iny-benefit-label">${label}</div>
-          <div class="iny-benefit-value ${isFree ? "free" : ""}">${value}</div>
+          <div class="iny-benefit-label">${this.esc(label)}</div>
+          <div class="iny-benefit-value ${isFree ? "free" : ""}">${this.esc(value)}</div>
         </div>
       `;
     }
 
     extraTag(label) {
-      return `<span class="iny-extra-tag">${CHECK_SVG} ${label}</span>`;
+      return `<span class="iny-extra-tag">${CHECK_SVG} ${this.esc(label)}</span>`;
     }
 
     esc(str) {

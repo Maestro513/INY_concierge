@@ -9,6 +9,21 @@
 let _member = null;
 let _sessionId = null;
 
+// Pending OTP context — avoids passing phone via URL params
+let _pendingOtp = null;
+
+export function setPendingOtp(phone, firstName) {
+  _pendingOtp = { phone, firstName };
+}
+
+export function getPendingOtp() {
+  return _pendingOtp;
+}
+
+export function clearPendingOtp() {
+  _pendingOtp = null;
+}
+
 export function setMemberSession(member, sessionId) {
   _member = { ...member };
   _sessionId = sessionId;

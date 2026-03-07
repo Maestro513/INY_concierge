@@ -44,10 +44,11 @@ class TestFieldEncryption:
         assert cipher.decrypt("plain text") == "plain text"
 
     def test_disabled_cipher(self):
-        """No key = no encryption, values pass through."""
+        """No key = encrypt raises RuntimeError, decrypt passes through."""
         cipher = FieldCipher(key="")
         assert cipher.enabled is False
-        assert cipher.encrypt("secret") == "secret"
+        with pytest.raises(RuntimeError, match="FIELD_ENCRYPTION_KEY is not configured"):
+            cipher.encrypt("secret")
         assert cipher.decrypt("secret") == "secret"
 
     def test_different_keys_cannot_decrypt(self):
