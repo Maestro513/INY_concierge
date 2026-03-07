@@ -183,11 +183,13 @@ class PersistentStore:
 
     @staticmethod
     def _encrypt_phi(member_data: dict) -> dict:
-        """Encrypt PHI fields in member_data before storing."""
-        cipher = get_cipher()
-        if not cipher.enabled:
-            return member_data
+        """Encrypt PHI fields in member_data before storing.
+
+        Raises RuntimeError if encryption is not configured (prevents
+        silent plaintext storage of PHI).
+        """
         data = dict(member_data)
+        cipher = get_cipher()
         for field in _PHI_FIELDS:
             if field in data and data[field]:
                 data[field] = cipher.encrypt(str(data[field]))

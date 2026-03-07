@@ -135,6 +135,13 @@ if APP_ENV in ("production", "staging"):
 elif not os.getenv("JWT_SECRET"):
     log.warning("JWT_SECRET not set — using random per-startup key (dev only, tokens won't survive restarts)")
 
+# ── PHI encryption validation ────────────────────────────────────────────────
+if APP_ENV in ("production", "staging") and not os.getenv("FIELD_ENCRYPTION_KEY"):
+    raise RuntimeError(
+        "FIELD_ENCRYPTION_KEY must be set in production/staging to encrypt PHI at rest. "
+        "Generate one with: python -c \"from app.encryption import generate_key; print(generate_key())\""
+    )
+
 # ── CORS — env-based ─────────────────────────────────────────────────────────
 _default_prod_origins = [
     "https://insurancenyou.com",

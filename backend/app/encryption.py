@@ -53,11 +53,20 @@ class FieldCipher:
         return self._fernet is not None
 
     def encrypt(self, value: str) -> str:
-        """Encrypt a plaintext value. Returns prefixed ciphertext."""
-        if not value or not self._fernet:
-            return value or ""
+        """Encrypt a plaintext value. Returns prefixed ciphertext.
+
+        Raises RuntimeError if encryption is not configured, to prevent
+        silent storage of PHI as plaintext.
+        """
+        if not value:
+            return ""
         if value.startswith(_ENC_PREFIX):
             return value  # already encrypted
+        if not self._fernet:
+            raise RuntimeError(
+                "PHI encryption required but FIELD_ENCRYPTION_KEY is not configured. "
+                "Generate a key with: python -c \"from app.encryption import generate_key; print(generate_key())\""
+            )
         token = self._fernet.encrypt(value.encode())
         return _ENC_PREFIX + token.decode()
 
