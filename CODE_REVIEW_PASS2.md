@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-After fixing 40+ issues from Pass 1, a complete re-audit found **8 Critical**, **15 High**, **16 Medium**, and **7 Low** new or residual issues across the full stack. The most urgent are missing rate limiting on auth endpoints, IDOR on CMS/SOB endpoints, PHI cached plaintext on mobile devices, and no logout flow in the mobile app.
+After fixing 40+ issues from Pass 1, a complete re-audit found **8 Critical**, **15 High**, **18 Medium**, and **7 Low** new or residual issues across the full stack. The most urgent are missing rate limiting on auth endpoints, IDOR on CMS/SOB endpoints, PHI cached plaintext on mobile devices, and no logout flow in the mobile app.
 
 ---
 
@@ -164,6 +164,8 @@ After fixing 40+ issues from Pass 1, a complete re-audit found **8 Critical**, *
 | M14 | `main.py:636` | `created_by` in `BulkReminderCreate` is user-controlled (mass assignment) |
 | M15 | `app/home.js` + 8 files | 30+ `console.log` calls active in production may leak PHI |
 | M16 | `app/_layout.js:26` | Mobile Sentry scrubbing only strips phone from breadcrumbs, not names/Medicare IDs |
+| M17 | `components/SOBModal.js:20` | SOB PDF opened via `Linking.openURL` without JWT — unauthenticated download or broken auth |
+| M18 | `admin/src/pages/members/*.tsx` | Mock data contains realistic PII (names, phones, DOBs) — compliance audit risk |
 
 ---
 
