@@ -27,13 +27,42 @@ from .admin_auth import (
     require_admin,
     require_role,
 )
-from .config import ADMIN_SECRET, EXTRACTED_DIR, PDFS_DIR
+from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+_ALLOWED_ADMIN_ORIGINS = {
+    "https://insurancenyou.com",
+    "https://www.insurancenyou.com",
+    "https://admin.insurancenyou.com",
+    "https://api.insurancenyou.com",
+}
+_CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def check_csrf_origin(request: Request):
+    """FastAPI dependency — validate Origin on mutating admin requests (H9)."""
+    if APP_ENV != "production":
+        return
+    if request.method not in _CSRF_METHODS:
+        return
+    origin = request.headers.get("origin", "")
+    if not origin:
+        return  # No Origin header — non-browser client or same-origin
+    if origin not in _ALLOWED_ADMIN_ORIGINS:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Origin '{origin}' is not allowed for admin operations.",
+        )
+
+
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(check_csrf_origin)],
+)
 
 # Lazy singleton — shares the same SQLite DB as the mobile OTP store
 _store = None

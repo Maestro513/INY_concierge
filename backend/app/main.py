@@ -720,8 +720,11 @@ def lookup_member(req: LookupRequest, request: Request):
         )
         return {"found": False}
 
-    # Store member data in a pending session (will be promoted after OTP verify)
-    create_session(req.phone, member)
+    # Store only the fields needed for downstream endpoints (H4: minimize PHI in sessions)
+    _SESSION_FIELDS = ("first_name", "last_name", "plan_name", "plan_number",
+                       "agent", "medications", "zip_code")
+    session_member = {k: member.get(k, "") for k in _SESSION_FIELDS}
+    create_session(req.phone, session_member)
 
     if not is_test:
         # Generate + send OTP (skipped for test account — uses TEST_OTP instead)
@@ -784,8 +787,11 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         if not member_data:
             raise HTTPException(status_code=404, detail="Account not found.")
 
-    # Create a real session for session-based endpoints
-    sid = create_session(req.phone, member_data)
+    # Create a real session — store only needed fields (H4: minimize PHI)
+    _SESSION_FIELDS = ("first_name", "last_name", "plan_name", "plan_number",
+                       "agent", "medications", "zip_code")
+    session_member = {k: member_data.get(k, "") for k in _SESSION_FIELDS}
+    sid = create_session(req.phone, session_member)
 
     # Generate JWT tokens
     tokens = create_tokens(
