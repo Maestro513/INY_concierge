@@ -1417,8 +1417,8 @@ def _find_sob_pdf(plan_number: str) -> str | None:
 
 
 @app.get("/sob/pdf/{plan_number}")
-def get_sob_pdf(plan_number: str):
-    """Serve the actual SOB PDF file for download (public — CMS documents)."""
+def get_sob_pdf(plan_number: str, _user: dict = Depends(get_current_user)):
+    """Serve the SOB PDF file for download."""
     path = _find_sob_pdf(plan_number)
     if not path:
         raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
