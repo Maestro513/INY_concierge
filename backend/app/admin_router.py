@@ -49,13 +49,30 @@ def check_csrf_origin(request: Request):
     if request.method not in _CSRF_METHODS:
         return
     origin = request.headers.get("origin", "")
-    if not origin:
-        return  # No Origin header — non-browser client or same-origin
-    if origin not in _ALLOWED_ADMIN_ORIGINS:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Origin '{origin}' is not allowed for admin operations.",
-        )
+    if origin:
+        if origin not in _ALLOWED_ADMIN_ORIGINS:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Origin '{origin}' is not allowed for admin operations.",
+            )
+        return
+    # No Origin header — fall back to Referer check
+    referer = request.headers.get("referer", "")
+    if referer:
+        from urllib.parse import urlparse
+        ref_origin = f"{urlparse(referer).scheme}://{urlparse(referer).netloc}"
+        if ref_origin not in _ALLOWED_ADMIN_ORIGINS:
+            raise HTTPException(
+                status_code=403,
+                detail="Request origin not allowed for admin operations.",
+            )
+        return
+    # Neither Origin nor Referer — reject (non-browser API clients use Bearer auth,
+    # but we still block to prevent CSRF from tools that strip these headers)
+    raise HTTPException(
+        status_code=403,
+        detail="Missing Origin or Referer header on mutating request.",
+    )
 
 
 router = APIRouter(
