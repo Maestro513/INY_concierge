@@ -1527,7 +1527,7 @@ def cms_benefits(plan_number: str, request: Request, _user: dict = Depends(get_c
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Plan not found.")
 
     # OTC fallback: if CMS says plan has OTC but no dollar amount, check SOB text
     otc = result.get("otc", {})
@@ -1595,7 +1595,7 @@ def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_us
     cms = get_cms()
     result = cms.get_drug_by_name(req.plan_number, req.drug_name)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Drug not found on this plan's formulary.")
     return result
 
 
@@ -1605,7 +1605,7 @@ def cms_drug_lookup_get(plan_number: str, drug_name: str, _user: dict = Depends(
     cms = get_cms()
     result = cms.get_drug_by_name(plan_number, drug_name)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Drug not found on this plan's formulary.")
     return result
 
 

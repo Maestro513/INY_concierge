@@ -14,8 +14,10 @@ import tempfile
 import time
 from typing import Optional
 
+import re as _re
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from . import admin_db
 from .admin_auth import (
@@ -54,7 +56,7 @@ def check_csrf_origin(request: Request):
         if origin not in _ALLOWED_ADMIN_ORIGINS:
             raise HTTPException(
                 status_code=403,
-                detail=f"Origin '{origin}' is not allowed for admin operations.",
+                detail="Origin is not allowed for admin operations.",
             )
         return
     # No Origin header — fall back to Referer check
@@ -99,12 +101,32 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+def _validate_password_complexity(password: str) -> str:
+    """Enforce password complexity: 8+ chars, upper, lower, digit, special."""
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    if not _re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter.")
+    if not _re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter.")
+    if not _re.search(r"\d", password):
+        raise ValueError("Password must contain at least one digit.")
+    if not _re.search(r"[^A-Za-z0-9]", password):
+        raise ValueError("Password must contain at least one special character.")
+    return password
+
+
 class CreateAdminRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
     first_name: str = Field("", max_length=100)
     last_name: str = Field("", max_length=100)
     role: str = Field("viewer", pattern=r"^(super_admin|admin|viewer)$")
+
+    @field_validator("password")
+    @classmethod
+    def check_complexity(cls, v: str) -> str:
+        return _validate_password_complexity(v)
 
 
 class UpdateAdminRequest(BaseModel):
@@ -113,6 +135,13 @@ class UpdateAdminRequest(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def check_complexity(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_password_complexity(v)
+        return v
 
 
 class CreateMemberRequest(BaseModel):
@@ -164,6 +193,7 @@ async def admin_login(body: LoginRequest, request: Request):
     admin_db.record_login_event(
         phone=body.email, ip_address=ip, user_agent=ua, success=True,
     )
+    admin_db.clear_failed_logins(body.email)
     return result
 
 

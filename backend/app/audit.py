@@ -13,6 +13,8 @@ Audit logs are append-only and stored in a separate SQLite DB.
 In production, these should also be shipped to a SIEM/log aggregator.
 """
 
+import hashlib
+import hmac
 import logging
 import os
 import re
@@ -26,6 +28,25 @@ log = logging.getLogger(__name__)
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PARENT_DIR = os.path.dirname(_THIS_DIR)
 DEFAULT_AUDIT_DB = os.path.join(_PARENT_DIR, "audit.db")
+
+
+def _audit_hmac_key() -> bytes:
+    """Return HMAC key for audit actor hashing; falls back to a static key."""
+    return os.environ.get("AUDIT_HMAC_KEY", "audit-actor-default-key").encode()
+
+
+def hash_actor(phone: str) -> str:
+    """Produce a deterministic, unique pseudonym for an actor.
+
+    Uses HMAC-SHA256 keyed hash so:
+    - The same phone always produces the same actor ID (searchable).
+    - The phone cannot be reversed without the key.
+    - Last-4 appended for human convenience (not relied upon for uniqueness).
+    """
+    if not phone or len(phone) < 4:
+        return "unknown"
+    digest = hmac.new(_audit_hmac_key(), phone.encode(), hashlib.sha256).hexdigest()[:16]
+    return f"actor:{digest}:{phone[-4:]}"
 
 
 def mask_phone(phone: str) -> str:
@@ -99,7 +120,7 @@ class AuditLog:
         """Record an audit event."""
         now = time.time()
         ts = datetime.utcfromtimestamp(now).isoformat() + "Z"
-        masked_actor = mask_phone(actor) if actor and actor.isdigit() else actor
+        masked_actor = hash_actor(actor) if actor and actor.isdigit() else actor
 
         conn = self._conn()
         conn.execute(
@@ -118,7 +139,7 @@ class AuditLog:
         params = []
         if actor:
             sql += " AND actor = ?"
-            params.append(mask_phone(actor) if actor.isdigit() else actor)
+            params.append(hash_actor(actor) if actor.isdigit() else actor)
         if resource:
             sql += " AND resource = ?"
             params.append(resource)

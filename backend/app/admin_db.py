@@ -147,6 +147,15 @@ def record_login_event(phone: str = "", ip_address: str = "",
         )
 
 
+def clear_failed_logins(email: str):
+    """Delete failed login records for an email (call after successful login)."""
+    with _get_conn() as conn:
+        conn.execute(
+            "DELETE FROM login_events WHERE phone = ? AND success = 0",
+            (email,),
+        )
+
+
 def count_recent_failed_logins(email: str, window_seconds: int = 900) -> int:
     """Count failed login attempts for an email within the given window."""
     cutoff = time.time() - window_seconds

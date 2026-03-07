@@ -14,7 +14,6 @@ import secrets
 import sqlite3
 import threading
 import time
-import uuid
 
 from .encryption import get_cipher
 
@@ -224,7 +223,7 @@ class PersistentStore:
     # ── Session Methods ───────────────────────────────────────────────────
 
     def create_session(self, phone: str, member_data: dict) -> str:
-        sid = uuid.uuid4().hex
+        sid = secrets.token_urlsafe(32)
         conn = self._conn()
         encrypted = self._encrypt_phi(member_data)
         conn.execute(
