@@ -482,6 +482,8 @@ async def analytics_age_groups(payload: dict = Depends(require_admin)):
 async def list_plans(search: str = "", page: int = 1, per_page: int = 50,
                      payload: dict = Depends(require_admin)):
     """List all plans with extraction status."""
+    per_page = max(1, min(per_page, 200))  # M16: cap pagination
+    page = max(1, page)
     plans = []
     if not os.path.isdir(EXTRACTED_DIR):
         return {"data": [], "total": 0, "page": page, "per_page": per_page}
@@ -678,6 +680,13 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
 
         log.info("Received %d MB tar.gz — extracting to %s",
                  total_bytes // (1024 * 1024), EXTRACTED_DIR)
+
+        # M17: Validate gzip magic bytes before extraction
+        with open(tmp.name, "rb") as f:
+            magic = f.read(2)
+        if magic != b"\x1f\x8b":
+            os.unlink(tmp.name)
+            raise HTTPException(status_code=400, detail="File is not a valid gzip archive.")
 
         # Extract — with path validation to prevent zip-slip attacks
         count = 0

@@ -136,13 +136,13 @@ export default function DigitalIDScreen() {
               {/* Member info */}
               <View style={s.memberSection}>
                 <Text style={s.fieldLabel}>Member Name</Text>
-                <Text style={s.fieldValue}>{firstName} {lastName}</Text>
+                <Text style={s.fieldValue} selectable={false}>{firstName} {lastName}</Text>
               </View>
 
               <View style={s.memberRow}>
                 <View style={s.memberCol}>
                   <Text style={s.fieldLabel}>Member ID</Text>
-                  <Text style={s.fieldValue}>{planNumber}</Text>
+                  <Text style={s.fieldValue} selectable={false}>{planNumber}</Text>
                 </View>
                 <View style={s.memberCol}>
                   <Text style={s.fieldLabel}>Effective Date</Text>
@@ -153,9 +153,9 @@ export default function DigitalIDScreen() {
               {/* Rx info strip at bottom */}
               {cardData?.rx_bin ? (
                 <View style={s.rxStrip}>
-                  <Text style={s.rxItem}>RxBIN: {cardData.rx_bin}</Text>
-                  <Text style={s.rxItem}>RxPCN: {cardData.rx_pcn}</Text>
-                  <Text style={s.rxItem}>RxGrp: {cardData.rx_group}</Text>
+                  <Text style={s.rxItem} selectable={false}>RxBIN: {cardData.rx_bin}</Text>
+                  <Text style={s.rxItem} selectable={false}>RxPCN: {cardData.rx_pcn}</Text>
+                  <Text style={s.rxItem} selectable={false}>RxGrp: {cardData.rx_group}</Text>
                 </View>
               ) : null}
             </Animated.View>

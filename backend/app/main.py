@@ -2245,8 +2245,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
                 amt = float(amt.replace("$", "").replace(",", "").strip())
             period = otc.get("period", "Monthly")
             categories.append({"category": "otc", "cap": amt, "period": period, "label": "OTC Allowance"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("OTC category parse error: %s", e)
 
     # Dental
     try:
@@ -2257,8 +2257,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
             if max_ben:
                 cap = float(str(max_ben).replace("$", "").replace(",", ""))
                 categories.append({"category": "dental", "cap": cap, "period": "Yearly", "label": "Dental"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Dental category parse error: %s", e)
 
     # Flex / SSBCI
     try:
@@ -2275,8 +2275,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
                     total += float(raw)
             if total > 0:
                 categories.append({"category": "flex", "cap": total, "period": "Yearly", "label": "Flex Card"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Flex category parse error: %s", e)
 
     # Vision
     try:
@@ -2287,8 +2287,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
                 categories.append({"category": "vision", "cap": cap, "period": "Yearly", "label": "Vision"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Vision category parse error: %s", e)
 
     # Hearing
     try:
@@ -2299,8 +2299,8 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
                 categories.append({"category": "hearing", "cap": cap, "period": "Yearly", "label": "Hearing"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Hearing category parse error: %s", e)
 
     if not categories:
         return {"summary": []}

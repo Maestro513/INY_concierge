@@ -34,12 +34,12 @@ export default function DoctorResults() {
       setProviders(data.providers || []);
       setMeta({ total: data.total, carrier: data.carrier, specialty: data.specialty });
     } catch (err) {
-      console.log('Provider search error:', err);
+      if (__DEV__) console.log('Provider search error:', err);
       if (err.name === 'AbortError') {
         setError('Search is taking too long. Check your connection and try again.');
       } else if (err.message === 'Network request failed' || err.name === 'TypeError') {
         setError("Can't connect to the server right now. Check your connection and try again.");
-      } else { setError(err.message || 'Something went wrong. Please try again.'); }
+      } else { setError('Search failed. Please try again or call us at (844) 463-2931.'); }
     } finally { setLoading(false); }
   };
 

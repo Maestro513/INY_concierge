@@ -156,9 +156,9 @@ function AddReminderModal({ visible, onClose, onSave }) {
             </TouchableOpacity>
           </View>
           <Text style={styles.fieldLabel}>Medication</Text>
-          <TextInput style={styles.modalInput} value={drugName} onChangeText={setDrugName} placeholder="e.g. Metformin" placeholderTextColor={COLORS.textTertiary} autoFocus accessibilityLabel="Medication name" />
+          <TextInput style={styles.modalInput} value={drugName} onChangeText={setDrugName} placeholder="e.g. Metformin" placeholderTextColor={COLORS.textTertiary} autoFocus maxLength={200} accessibilityLabel="Medication name" />
           <Text style={styles.fieldLabel}>Dose (optional)</Text>
-          <TextInput style={styles.modalInput} value={doseLabel} onChangeText={setDoseLabel} placeholder="e.g. 500mg" placeholderTextColor={COLORS.textTertiary} accessibilityLabel="Dose, optional" />
+          <TextInput style={styles.modalInput} value={doseLabel} onChangeText={setDoseLabel} placeholder="e.g. 500mg" placeholderTextColor={COLORS.textTertiary} maxLength={200} accessibilityLabel="Dose, optional" />
           <Text style={styles.fieldLabel}>Reminder Time</Text>
           <View style={styles.timeRow}>
             <View style={styles.timeSpinner}>

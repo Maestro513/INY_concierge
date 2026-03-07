@@ -24,7 +24,7 @@ export default function HomeScreen() {
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [benefitsError, setBenefitsError] = useState(false);
+  const [benefitsError, setBenefitsError] = useState('');
   const [sobData, setSobData] = useState(null);
   const [sobLoading, setSobLoading] = useState(false);
 
@@ -83,7 +83,7 @@ export default function HomeScreen() {
       const data = await res.json();
       setSobData(data);
     } catch (err) {
-      console.log('SOB fetch error:', err);
+      if (__DEV__) console.log('SOB fetch error:', err);
       setSobData(null);
     } finally {
       setSobLoading(false);
@@ -107,24 +107,24 @@ export default function HomeScreen() {
 
   const loadAllBenefits = async () => {
     setLoading(true);
-    setBenefitsError(false);
+    setBenefitsError('');
     try {
       const benefitsUrl = `${API_URL}/cms/benefits/${planNumber}`;
       const [benefitsResult, drugsRes] = await Promise.all([
         cachedFetch(authFetch, benefitsUrl)
           .then(r => r.data)
-          .catch((err) => { console.warn('Benefits fetch error:', err); return null; }),
+          .catch((err) => { if (__DEV__) console.warn('Benefits fetch error:', err); return null; }),
         sessionId
           ? authFetch(`${API_URL}/cms/my-drugs-session/${sessionId}`)
               .then(r => {
-                if (!r.ok) { console.warn(`Drugs fetch failed: ${r.status}`); return null; }
+                if (!r.ok) { if (__DEV__) console.warn('Drugs fetch failed'); return null; }
                 return r.json();
               })
-              .catch((err) => { console.warn('Drugs fetch error:', err); return null; })
+              .catch((err) => { if (__DEV__) console.warn('Drugs fetch error:', err); return null; })
           : Promise.resolve(null),
       ]);
       if (!benefitsResult) {
-        setBenefitsError(true);
+        setBenefitsError('server');
         setBenefits([]);
       } else {
         const cards = buildBenefitCards(benefitsResult, drugsRes);
@@ -132,8 +132,11 @@ export default function HomeScreen() {
       }
       if (drugsRes) setDrugsData(drugsRes);
     } catch (err) {
-      console.warn('Benefits load error:', err);
-      setBenefitsError(true);
+      if (__DEV__) console.warn('Benefits load error:', err);
+      const errType = (err.name === 'AbortError') ? 'timeout'
+        : (err.message === 'Network request failed' || err.name === 'TypeError') ? 'network'
+        : 'server';
+      setBenefitsError(errType);
       setBenefits([]);
     } finally {
       setLoading(false);
@@ -157,7 +160,7 @@ export default function HomeScreen() {
       // Sync local notifications
       syncAllReminders(data.reminders);
     } catch (err) {
-      console.log('Reminders fetch error:', err);
+      if (__DEV__) console.log('Reminders fetch error:', err);
     } finally {
       setRemindersLoading(false);
     }
@@ -187,7 +190,7 @@ export default function HomeScreen() {
       // Schedule the local notification
       scheduleReminder(newReminder);
     } catch (err) {
-      console.log('Create reminder error:', err);
+      if (__DEV__) console.log('Create reminder error:', err);
     }
   }, [sessionId]);
 
@@ -215,7 +218,7 @@ export default function HomeScreen() {
         body: JSON.stringify({ enabled }),
       });
     } catch (err) {
-      console.log('Toggle reminder error:', err);
+      if (__DEV__) console.log('Toggle reminder error:', err);
       loadReminders(); // Revert on error
     }
   }, [sessionId]);
@@ -234,7 +237,7 @@ export default function HomeScreen() {
         method: 'DELETE',
       });
     } catch (err) {
-      console.log('Delete reminder error:', err);
+      if (__DEV__) console.log('Delete reminder error:', err);
       loadReminders(); // Revert on error
     }
   }, [sessionId]);
@@ -253,7 +256,7 @@ export default function HomeScreen() {
       setUsageSummary(data.summary);
       cacheUsageSummary(data.summary);
     } catch (err) {
-      console.log('Usage summary fetch error:', err);
+      if (__DEV__) console.log('Usage summary fetch error:', err);
     } finally {
       setUsageLoading(false);
     }
@@ -270,7 +273,7 @@ export default function HomeScreen() {
       // Refresh summary to get updated totals
       loadUsageSummary();
     } catch (err) {
-      console.log('Log usage error:', err);
+      if (__DEV__) console.log('Log usage error:', err);
     }
   }, [sessionId]);
 
@@ -342,14 +345,14 @@ export default function HomeScreen() {
  * Row 2 (flexible 2-4): Monthly Rx, Dental, Part B Giveback, OTC, Flex
  */
 function buildBenefitCards(data, drugsData) {
-  if (!data) return [];
+  if (!data || typeof data !== 'object') return [];
   const row1 = [];
   const row2 = [];
-  const med = data.medical || {};
-  const dental = data.dental || {};
-  const otc = data.otc || {};
-  const flex = data.flex_ssbci || {};
-  const giveback = data.part_b_giveback || {};
+  const med = (data.medical && typeof data.medical === 'object') ? data.medical : {};
+  const dental = (data.dental && typeof data.dental === 'object') ? data.dental : {};
+  const otc = (data.otc && typeof data.otc === 'object') ? data.otc : {};
+  const flex = (data.flex_ssbci && typeof data.flex_ssbci === 'object') ? data.flex_ssbci : {};
+  const giveback = (data.part_b_giveback && typeof data.part_b_giveback === 'object') ? data.part_b_giveback : {};
 
   // --- Row 1: Medical copays (always 4) ---
   if (med.pcp_copay) {

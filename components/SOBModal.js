@@ -18,7 +18,17 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
   const handleDownload = async () => {
     if (!planNumber) return;
     const url = `${API_URL}/sob/pdf/${encodeURIComponent(planNumber)}`;
-    try { await Linking.openURL(url); } catch (err) { console.log('Download error:', err); Alert.alert('Error', 'Could not open the document.'); }
+    try {
+      const { authFetch } = require('../constants/api');
+      const check = await authFetch(url, { method: 'HEAD' }, 10000);
+      if (!check.ok) {
+        Alert.alert('Not Available', 'Summary of Benefits PDF is not available for this plan.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Error', 'Could not open the document. Please try again.');
+    }
   };
 
   return (
