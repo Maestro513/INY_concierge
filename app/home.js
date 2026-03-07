@@ -192,10 +192,19 @@ export default function HomeScreen() {
   }, [sessionId]);
 
   const handleToggleReminder = useCallback(async (reminderId, enabled) => {
-    // Optimistic update
+    // Optimistic update — use functional setter to avoid stale closure (H13)
     setReminders((prev) => {
       const updated = prev.map((r) => (r.id === reminderId ? { ...r, enabled: enabled ? 1 : 0 } : r));
       cacheReminders(updated);
+      // Schedule/cancel notification from the fresh state
+      const reminder = updated.find((r) => r.id === reminderId);
+      if (reminder) {
+        if (enabled) {
+          scheduleReminder(reminder);
+        } else {
+          cancelReminder(reminderId);
+        }
+      }
       return updated;
     });
 
@@ -205,20 +214,11 @@ export default function HomeScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       });
-      // Update local notification
-      const reminder = reminders.find((r) => r.id === reminderId);
-      if (reminder) {
-        if (enabled) {
-          scheduleReminder({ ...reminder, enabled: 1 });
-        } else {
-          cancelReminder(reminderId);
-        }
-      }
     } catch (err) {
       console.log('Toggle reminder error:', err);
       loadReminders(); // Revert on error
     }
-  }, [sessionId, reminders]);
+  }, [sessionId]);
 
   const handleDeleteReminder = useCallback(async (reminderId) => {
     // Optimistic update

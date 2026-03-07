@@ -31,8 +31,18 @@ DEFAULT_AUDIT_DB = os.path.join(_PARENT_DIR, "audit.db")
 
 
 def _audit_hmac_key() -> bytes:
-    """Return HMAC key for audit actor hashing; falls back to a static key."""
-    return os.environ.get("AUDIT_HMAC_KEY", "audit-actor-default-key").encode()
+    """Return HMAC key for audit actor hashing.
+    Required in production/staging — no fallback to prevent reversible pseudonyms."""
+    key = os.environ.get("AUDIT_HMAC_KEY", "")
+    if not key:
+        env = os.environ.get("APP_ENV", "production")
+        if env in ("production", "staging"):
+            raise RuntimeError(
+                "AUDIT_HMAC_KEY must be set in production/staging. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        key = "audit-actor-dev-key-not-for-production"
+    return key.encode()
 
 
 def hash_actor(phone: str) -> str:

@@ -131,7 +131,7 @@ class CreateAdminRequest(BaseModel):
 class UpdateAdminRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[str] = Field(None, pattern=r"^(super_admin|admin|viewer)$")
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
@@ -337,6 +337,9 @@ async def create_member(body: CreateMemberRequest,
         "plan_name": body.plan_name,
         "plan_number": body.plan_number,
     }
+    # Persist member data via a session so they can log in after OTP
+    _get_store().create_session(phone, member_data)
+
     log.info("Admin %s created member: ***%s",
              payload.get("sub"), phone[-4:])
     get_audit_log().record(
@@ -362,7 +365,12 @@ async def create_member(body: CreateMemberRequest,
 
     return {
         "success": True,
-        "member": member_data,
+        "member": {
+            "first_name": member_data["first_name"],
+            "last_name": member_data["last_name"],
+            "phone": f"***{phone[-4:]}",
+            "plan_number": member_data.get("plan_number", ""),
+        },
         "otp_sent": otp_sent,
         "message": f"Member created. {'Verification code sent.' if otp_sent else 'OTP send failed — member can request code from the app.'}",
     }
