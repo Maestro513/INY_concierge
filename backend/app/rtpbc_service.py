@@ -19,6 +19,7 @@ Auth: OAuth2 client credentials (same pattern as Provider Directory).
       configurable via AETNA_RTPBC_AUTH_FLOW env var.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -52,8 +53,9 @@ HEADERS = {
 }
 TIMEOUT = 30.0
 
-# Token cache
+# Token cache (with lock to prevent concurrent refresh storms)
 _token_cache: dict = {"access_token": "", "expires_at": 0}
+_token_lock = asyncio.Lock()
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -110,36 +112,42 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
 
-    client_id = os.getenv("AETNA_RTPBC_CLIENT_ID", "") or AETNA_RTPBC_CLIENT_ID
-    client_secret = os.getenv("AETNA_RTPBC_CLIENT_SECRET", "") or AETNA_RTPBC_CLIENT_SECRET
+    async with _token_lock:
+        # Double-check after acquiring lock
+        now = time.time()
+        if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["access_token"]
 
-    if not client_id or not client_secret:
-        raise ValueError("AETNA_RTPBC_CLIENT_ID and AETNA_RTPBC_CLIENT_SECRET must be set")
+        client_id = os.getenv("AETNA_RTPBC_CLIENT_ID", "") or AETNA_RTPBC_CLIENT_ID
+        client_secret = os.getenv("AETNA_RTPBC_CLIENT_SECRET", "") or AETNA_RTPBC_CLIENT_SECRET
 
-    token_url = os.getenv("AETNA_RTPBC_TOKEN_URL", "") or AETNA_RTPBC_TOKEN_URL
+        if not client_id or not client_secret:
+            raise ValueError("AETNA_RTPBC_CLIENT_ID and AETNA_RTPBC_CLIENT_SECRET must be set")
 
-    log.debug(f"[RTPBC] Fetching OAuth token from {token_url}")
+        token_url = os.getenv("AETNA_RTPBC_TOKEN_URL", "") or AETNA_RTPBC_TOKEN_URL
 
-    resp = await client.post(
-        token_url,
-        data={
-            "grant_type": "client_credentials",
-            "scope": "Public NonPII",
-        },
-        auth=(client_id, client_secret),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=15.0,
-    )
-    if resp.status_code != 200:
-        log.warning(f"[RTPBC] Token error {resp.status_code}: {resp.text[:500]}")
-    resp.raise_for_status()
-    token_data = resp.json()
+        log.debug(f"[RTPBC] Fetching OAuth token from {token_url}")
 
-    _token_cache["access_token"] = token_data["access_token"]
-    _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+        resp = await client.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "scope": "Public NonPII",
+            },
+            auth=(client_id, client_secret),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            log.warning(f"[RTPBC] Token error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+        token_data = resp.json()
 
-    log.debug(f"[RTPBC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
-    return _token_cache["access_token"]
+        _token_cache["access_token"] = token_data["access_token"]
+        _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+
+        log.debug(f"[RTPBC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+        return _token_cache["access_token"]
 
 
 # ── FHIR Resource Builders ──────────────────────────────────────────────────
@@ -729,14 +737,12 @@ async def check_drug_costs_batch(
 ) -> list[DrugCostResult]:
     """
     Check costs for multiple drugs at the same pharmacy.
+    Runs all drug checks concurrently via asyncio.gather.
 
     Each drug dict should have: ndc, rxnorm (optional), name, quantity, days_supply.
     """
-    import asyncio
-
-    results = []
-    for drug in drugs:
-        result = await check_drug_cost(
+    tasks = [
+        check_drug_cost(
             member_id=member_id,
             drug_ndc=drug.get("ndc", ""),
             drug_rxnorm=drug.get("rxnorm", ""),
@@ -754,7 +760,7 @@ async def check_drug_costs_batch(
             last_name=last_name,
             dob=dob,
         )
-        if result:
-            results.append(result)
-
-    return results
+        for drug in drugs
+    ]
+    results = await asyncio.gather(*tasks)
+    return [r for r in results if r]

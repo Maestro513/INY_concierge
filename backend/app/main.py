@@ -3,7 +3,6 @@ InsuranceNYou Backend API
 """
 
 import hashlib
-import hmac
 import json
 import logging
 import os
@@ -13,6 +12,7 @@ import uuid
 from typing import Optional
 
 import anthropic
+import jwt
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -25,12 +25,10 @@ from .audit import get_audit_log, mask_phone, mask_pii_in_string
 from .auth import create_tokens, decode_token, require_auth
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
-    ADMIN_SECRET,
     ANTHROPIC_API_KEY,
     APP_ENV,
     CORS_ORIGINS,
     EXTRACTED_DIR,
-    GDRIVE_FOLDER_ID,
     JWT_ACCESS_TTL,
     JWT_REFRESH_TTL,
     JWT_SECRET,
@@ -45,7 +43,6 @@ from .config import (
     TEST_PHONE,
 )
 from .drug_cost_engine import compute_monthly_drug_costs
-from .encryption import get_cipher
 from .persistent_store import PersistentStore
 from .providers.service import search_providers
 from .sms_provider import create_sms_provider
@@ -55,14 +52,52 @@ from .zoho_client import search_contact_by_phone
 
 # ── Sentry error monitoring ──────────────────────────────────────────────────
 
+def _scrub_pii(text: str) -> str:
+    """Remove phone numbers and Medicare numbers from a string."""
+    text = re.sub(r'\b\d{10}\b', '***PHONE***', text)
+    text = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', text)
+    return text
+
+
+def _scrub_dict(obj):
+    """Recursively scrub PII from strings in dicts/lists."""
+    if isinstance(obj, str):
+        return _scrub_pii(obj)
+    if isinstance(obj, dict):
+        return {k: _scrub_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_dict(item) for item in obj]
+    return obj
+
+
 def _sentry_before_send(event, hint):
     """Strip PII from Sentry events before sending."""
-    # Remove phone numbers and Medicare numbers from breadcrumbs/messages
+    # Scrub log messages
     if "logentry" in event and "message" in event["logentry"]:
-        msg = event["logentry"]["message"]
-        msg = re.sub(r'\b\d{10}\b', '***PHONE***', msg)
-        msg = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', msg)
-        event["logentry"]["message"] = msg
+        event["logentry"]["message"] = _scrub_pii(event["logentry"]["message"])
+
+    # Scrub exception frames (variable values in stack traces)
+    for exc_info in (event.get("exception") or {}).get("values", []):
+        for frame in (exc_info.get("stacktrace") or {}).get("frames", []):
+            if "vars" in frame:
+                frame["vars"] = _scrub_dict(frame["vars"])
+
+    # Scrub breadcrumbs
+    for crumb in (event.get("breadcrumbs") or {}).get("values", []):
+        if "message" in crumb:
+            crumb["message"] = _scrub_pii(crumb["message"])
+        if "data" in crumb:
+            crumb["data"] = _scrub_dict(crumb["data"])
+
+    # Scrub request data (URLs, query strings, body)
+    req = event.get("request")
+    if req:
+        for key in ("url", "query_string"):
+            if key in req:
+                req[key] = _scrub_pii(req[key])
+        if "data" in req:
+            req["data"] = _scrub_dict(req["data"])
+
     return event
 
 if SENTRY_DSN:
@@ -94,10 +129,12 @@ log = logging.getLogger(__name__)
 app = FastAPI(title="InsuranceNYou API", version="0.7.0")
 
 # ── JWT Secret validation ────────────────────────────────────────────────────
-if APP_ENV == "production" and not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
-if not JWT_SECRET:
-    log.warning("JWT_SECRET not set — using insecure default for development only")
+if APP_ENV == "production" and JWT_SECRET == os.getenv("JWT_SECRET", ""):
+    # In production, JWT_SECRET must be explicitly set via env var
+    if not os.getenv("JWT_SECRET"):
+        raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
+elif not os.getenv("JWT_SECRET"):
+    log.warning("JWT_SECRET not set — using random per-startup key (dev only, tokens won't survive restarts)")
 
 # ── CORS — env-based ─────────────────────────────────────────────────────────
 _default_prod_origins = [
@@ -137,6 +174,41 @@ async def security_headers(request: Request, call_next) -> Response:
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
 
+# ── PHI access audit middleware ───────────────────────────────────────────────
+# Logs every request to endpoints that touch Protected Health Information.
+_PHI_PATH_PREFIXES = (
+    "/cms/", "/sob/", "/reminders/", "/usage/", "/ask",
+    "/providers/search", "/pharmacies/search",
+)
+
+@app.middleware("http")
+async def phi_audit_middleware(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _PHI_PATH_PREFIXES):
+        actor = "anonymous"
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer ") and APP_ENV != "development":
+            try:
+                payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=["HS256"])
+                actor = payload.get("sub", "unknown")
+            except Exception:
+                actor = "invalid_token"
+        elif APP_ENV == "development":
+            actor = "dev"
+        action = "read" if request.method == "GET" else "write"
+        try:
+            get_audit_log().record(
+                actor=actor,
+                action=f"phi_{action}",
+                resource=path,
+                ip_address=request.client.host if request.client else "",
+                detail=f"{request.method} {response.status_code}",
+            )
+        except Exception:
+            pass  # Never let audit logging break request flow
+    return response
+
 # ── Admin router ─────────────────────────────────────────────────────────────
 app.include_router(admin_router)
 
@@ -157,10 +229,14 @@ if os.path.isdir(_admin_dist):
         app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
 
     # Catch-all for SPA routing — serves index.html for any /admin/* route
+    _admin_real = os.path.realpath(_admin_dist)
+
     @app.get("/admin/{full_path:path}")
     async def admin_spa(full_path: str):
         # If requesting a real file (favicon, etc.), serve it
-        file_path = os.path.join(_admin_dist, full_path)
+        file_path = os.path.realpath(os.path.join(_admin_dist, full_path))
+        if not file_path.startswith(_admin_real + os.sep) and file_path != _admin_real:
+            raise HTTPException(status_code=400, detail="Invalid path")
         if os.path.isfile(file_path):
             return FileResponse(file_path)
         # Otherwise serve index.html for client-side routing
@@ -274,14 +350,20 @@ def get_user_db() -> UserDataDB:
     return _user_db
 
 
-def _session_phone(session_id: str) -> str:
-    """Resolve session_id → phone, or raise 401."""
+def _session_phone(session_id: str, user: dict | None = None) -> str:
+    """Resolve session_id → phone, or raise 401.
+    If *user* (JWT payload) is provided, verifies the session belongs to that user.
+    """
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    phone = session["phone"]
+    # Cross-user check: JWT subject must match the session's phone
+    if user and user.get("sub") not in (None, "dev") and user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     # Touch timestamp to extend TTL on activity
     get_store().touch_session(session_id)
-    return session["phone"]
+    return phone
 
 
 # ── SMS Provider — lazy init ─────────────────────────────────────────────────
@@ -299,10 +381,18 @@ def get_sms():
 # ── JWT Auth Dependency ──────────────────────────────────────────────────────
 def get_current_user(request: Request) -> dict:
     """FastAPI dependency — validates Bearer token, returns JWT payload.
+    Also verifies the session still exists (enables logout/revocation).
     Skipped entirely in development so you don't need to auth while editing the app."""
     if APP_ENV == "development":
         return {"sub": "dev", "type": "access"}
-    return require_auth(request, jwt_secret=JWT_SECRET)
+    payload = require_auth(request, jwt_secret=JWT_SECRET)
+    # Session-based revocation: verify the user still has an active session
+    phone = payload.get("sub")
+    if phone:
+        session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+        if not session:
+            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    return payload
 
 
 # CMS Lookup — lazy init so server starts even if DB missing
@@ -582,8 +672,8 @@ def quote_marketplace(
 
 
 @app.get("/metrics")
-def metrics():
-    """Basic request metrics for monitoring."""
+def metrics(_user: dict = Depends(get_current_user)):
+    """Basic request metrics for monitoring (requires auth)."""
     total = _request_metrics["total"]
     return {
         "total_requests": total,
@@ -720,8 +810,6 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         "plan_name": member_data["plan_name"],
         "plan_number": member_data["plan_number"],
         "agent": member_data.get("agent", "") or "",
-        "medicare_number": member_data.get("medicare_number", "") or "",
-        "medications": member_data.get("medications", "") or "",
         "zip_code": member_data.get("zip_code", "") or "",
         "session_id": sid,
     }
@@ -755,6 +843,21 @@ def refresh_token_endpoint(req: RefreshRequest):
         refresh_ttl=JWT_REFRESH_TTL,
     )
     return tokens
+
+
+@app.post("/auth/logout")
+def logout(request: Request, user: dict = Depends(get_current_user)):
+    """Invalidate all sessions for this user, effectively revoking their tokens."""
+    phone = user.get("sub")
+    if phone and phone != "dev":
+        count = get_store().delete_sessions_by_phone(phone)
+        log.info(f"Logout: deleted {count} session(s) for phone ending ***{phone[-4:]}")
+        get_audit_log().record(
+            actor=phone, action="auth_logout", resource="session",
+            ip_address=request.client.host if request.client else "",
+            detail=f"deleted {count} sessions",
+        )
+    return {"success": True}
 
 
 # Per-phone rate limiter for /ask: max 10 questions per 60 seconds
@@ -1303,55 +1406,6 @@ def get_sob_pdf(plan_number: str):
     )
 
 
-# --- Admin: sync PDFs from Google Drive ---
-
-class SyncRequest(BaseModel):
-    secret: str = ""
-
-_sync_status: dict = {"running": False, "last_result": None}
-
-def _run_sync_background():
-    """Run the full sync + process pipeline in a background thread."""
-    from .gdrive_sync import sync_folder
-    from .pdf_processor import process_pdf_list
-    try:
-        _sync_status["running"] = True
-        _sync_status["last_result"] = None
-        result = sync_folder(GDRIVE_FOLDER_ID, PDFS_DIR)
-        # Only process newly downloaded PDFs, not all 3600+
-        if result["downloaded"] > 0 and result.get("new_files"):
-            process_pdf_list(result["new_files"])
-        result.pop("new_files", None)  # Don't include file paths in status
-        _sync_status["last_result"] = result
-    except Exception as exc:
-        _sync_status["last_result"] = {"error": str(exc)}
-    finally:
-        _sync_status["running"] = False
-
-@app.post("/admin/sync-pdfs")
-def sync_pdfs_from_gdrive(body: SyncRequest):
-    """Download latest PDFs from the shared Google Drive folder (background)."""
-    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if _sync_status["running"]:
-        return {"status": "already running — check /admin/sync-status"}
-    import threading
-    t = threading.Thread(target=_run_sync_background, daemon=True)
-    t.start()
-    return {"status": "sync started in background — check /admin/sync-status for progress"}
-
-@app.post("/admin/sync-status")
-def sync_status(body: SyncRequest):
-    """Check progress of a background sync."""
-    if not ADMIN_SECRET or not hmac.compare_digest(body.secret, ADMIN_SECRET):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if _sync_status["running"]:
-        return {"status": "running"}
-    if _sync_status["last_result"] is None:
-        return {"status": "no sync has been run yet"}
-    return {"status": "complete", "result": _sync_status["last_result"]}
-
-
 # --- OTC fallback from SOB extracted text ---
 
 def _otc_from_sob_text(plan_number: str) -> dict | None:
@@ -1545,27 +1599,20 @@ def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    # Cross-user check: JWT subject must match the session's phone
+    phone = session["phone"]
+    if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     return _my_drugs_impl(session["data"])
 
 
 @app.get("/cms/my-drugs/{phone}")
 def cms_my_drugs(phone: str, _user: dict = Depends(get_current_user)):
-    """
-    Pull member's medications from Zoho, look up each in CMS formulary.
-    SOB (Summary of Benefits) governs over CMS for tier copays.
-    Returns individual drug costs + estimated monthly total.
-    """
-    # 1. Look up member in Zoho
-    try:
-        member = search_contact_by_phone(phone)
-    except Exception as e:
-        log.error(f"Zoho lookup failed in my-drugs: {e}")
-        raise HTTPException(status_code=500, detail="Unable to look up your account right now.")
-
-    if not member:
-        raise HTTPException(status_code=404, detail="Member not found")
-
-    return _my_drugs_impl(member)
+    """Deprecated — use /cms/my-drugs-session/{session_id} instead."""
+    raise HTTPException(
+        status_code=410,
+        detail="This endpoint is deprecated. Use /cms/my-drugs-session/{session_id} instead.",
+    )
 
 
 def _my_drugs_impl(member: dict):
@@ -1906,7 +1953,7 @@ def _compute_ic_monthly_cost(
 @app.get("/reminders/{session_id}")
 def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
     """List all medication reminders for this member."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     return {"reminders": db.get_reminders(phone)}
 
@@ -1914,7 +1961,7 @@ def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
 @app.post("/reminders/{session_id}")
 def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(get_current_user)):
     """Create a single medication reminder."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     if not 0 <= req.time_hour <= 23:
         raise HTTPException(status_code=400, detail="time_hour must be 0-23")
     if not 0 <= req.time_minute <= 59:
@@ -1936,7 +1983,7 @@ def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(
 @app.post("/reminders/{session_id}/bulk")
 def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict = Depends(get_current_user)):
     """Create multiple reminders at once (agent onboarding)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     reminders = db.create_reminders_bulk(
         phone=phone,
@@ -1949,7 +1996,7 @@ def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict 
 @app.put("/reminders/{session_id}/{reminder_id}")
 def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _user: dict = Depends(get_current_user)):
     """Update a reminder (toggle, reschedule, etc.)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     reminder = db.update_reminder(phone, reminder_id, **req.model_dump(exclude_none=True))
     if not reminder:
@@ -1960,7 +2007,7 @@ def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _use
 @app.delete("/reminders/{session_id}/{reminder_id}")
 def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get_current_user)):
     """Delete a medication reminder."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     deleted = db.delete_reminder(phone, reminder_id)
     if not deleted:
@@ -1978,7 +2025,7 @@ VALID_USAGE_CATEGORIES = {"otc", "dental", "flex", "vision", "hearing"}
 @app.post("/usage/{session_id}")
 def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_current_user)):
     """Log a benefits usage entry (e.g. OTC purchase, dental visit)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     cat = req.category.lower()
     if cat not in VALID_USAGE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(VALID_USAGE_CATEGORIES)}")
@@ -1999,7 +2046,7 @@ def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_curre
 @app.get("/usage/{session_id}")
 def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Depends(get_current_user)):
     """Get all usage entries for this member, optionally filtered by category."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     entries = db.get_usage(phone, category)
     return {"usage": entries}
@@ -2008,7 +2055,7 @@ def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Dep
 @app.delete("/usage/{session_id}/{usage_id}")
 def delete_usage(session_id: str, usage_id: int, _user: dict = Depends(get_current_user)):
     """Delete a usage entry (undo mistake)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     deleted = db.delete_usage(phone, usage_id)
     if not deleted:
@@ -2025,9 +2072,12 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    phone = session["phone"]
+    # Cross-user check: JWT subject must match the session's phone
+    if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     get_store().touch_session(session_id)
 
-    phone = session["phone"]
     plan_number = session["data"].get("plan_number", "")
     if not plan_number:
         return {"summary": []}
@@ -2040,7 +2090,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # OTC
     try:
-        otc = cms.get_otc_allowance(*_split_plan(plan_number))
+        otc = cms.get_otc_allowance(plan_number)
         if otc and otc.get("has_otc") and otc.get("amount"):
             amt = otc["amount"]
             # amount may be string with $ — normalize to float
@@ -2053,7 +2103,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Dental
     try:
-        dental = cms.get_dental_benefits(*_split_plan(plan_number))
+        dental = cms.get_dental_benefits(plan_number)
         if dental and dental.get("has_preventive"):
             prev = dental.get("preventive", {})
             max_ben = prev.get("max_benefit")
@@ -2065,9 +2115,17 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Flex / SSBCI
     try:
-        flex = cms.get_flex_ssbci(*_split_plan(plan_number))
+        flex = cms.get_flex_ssbci(plan_number)
         if flex and flex.get("has_ssbci") and flex.get("benefits"):
-            total = sum(b.get("max_amount", 0) for b in flex["benefits"] if b.get("max_amount"))
+            total = 0
+            for b in flex["benefits"]:
+                raw = b.get("amount", "0")
+                if isinstance(raw, str):
+                    raw = raw.replace("$", "").replace(",", "").strip()
+                    if raw and raw != "Included":
+                        total += float(raw)
+                elif isinstance(raw, (int, float)):
+                    total += float(raw)
             if total > 0:
                 categories.append({"category": "flex", "cap": total, "period": "Yearly", "label": "Flex Card"})
     except Exception:
@@ -2075,9 +2133,9 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Vision
     try:
-        vision = cms.get_vision_benefits(*_split_plan(plan_number))
-        if vision and vision.get("has_exams"):
-            exams = vision.get("exams", {})
+        vision = cms.get_vision_benefits(plan_number)
+        if vision and vision.get("has_eye_exam"):
+            exams = vision.get("eye_exam", {})
             max_amt = exams.get("max_benefit")
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
@@ -2087,9 +2145,9 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # Hearing
     try:
-        hearing = cms.get_hearing_benefits(*_split_plan(plan_number))
-        if hearing and hearing.get("has_aids"):
-            aids = hearing.get("aids", {})
+        hearing = cms.get_hearing_benefits(plan_number)
+        if hearing and hearing.get("has_hearing_aids"):
+            aids = hearing.get("hearing_aids", {})
             max_amt = aids.get("max_benefit")
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
@@ -2122,14 +2180,6 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     return {"summary": summary}
 
-
-def _split_plan(plan_number: str) -> tuple[str, str]:
-    """Split 'H1234-567' or 'H1234-567-000' into (contract_id, plan_id)."""
-    pid = normalize_plan_id(plan_number)
-    parts = pid.split("-")
-    if len(parts) >= 2:
-        return parts[0], parts[1]
-    return pid, ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

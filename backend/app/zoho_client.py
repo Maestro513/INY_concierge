@@ -2,6 +2,9 @@
 Zoho CRM client for looking up members by phone number.
 """
 
+import threading
+import time
+
 import requests
 
 from .config import (
@@ -13,27 +16,38 @@ from .config import (
 TOKEN_URL = "https://accounts.zoho.com/oauth/v2/token"
 API_BASE = "https://www.zohoapis.com/crm/v2"
 
-# Cache access token in memory
-_access_token = None
+# Cache access token in memory with expiry tracking and thread safety
+_token_cache = {"access_token": "", "expires_at": 0}
+_token_lock = threading.Lock()
 
 
 def get_access_token() -> str:
-    """Get a fresh access token using the refresh token."""
-    global _access_token
+    """Get an access token using the refresh token. Caches until near expiry."""
+    now = time.time()
+    if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+        return _token_cache["access_token"]
 
-    resp = requests.post(TOKEN_URL, data={
-        "grant_type": "refresh_token",
-        "client_id": ZOHO_CLIENT_ID,
-        "client_secret": ZOHO_CLIENT_SECRET,
-        "refresh_token": ZOHO_REFRESH_TOKEN,
-    }, timeout=15)
-    data = resp.json()
+    with _token_lock:
+        # Double-check after acquiring lock
+        now = time.time()
+        if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["access_token"]
 
-    if "access_token" not in data:
-        raise Exception(f"Zoho token error: {data}")
+        resp = requests.post(TOKEN_URL, data={
+            "grant_type": "refresh_token",
+            "client_id": ZOHO_CLIENT_ID,
+            "client_secret": ZOHO_CLIENT_SECRET,
+            "refresh_token": ZOHO_REFRESH_TOKEN,
+        }, timeout=15)
+        data = resp.json()
 
-    _access_token = data["access_token"]
-    return _access_token
+        if "access_token" not in data:
+            raise Exception(f"Zoho token error: {data}")
+
+        _token_cache["access_token"] = data["access_token"]
+        # Zoho tokens typically expire in 3600s
+        _token_cache["expires_at"] = now + data.get("expires_in", 3600)
+        return _token_cache["access_token"]
 
 
 def _extract_contact(contact: dict) -> dict:
@@ -66,6 +80,10 @@ def search_contact_by_phone(phone: str) -> dict | None:
     # Remove leading 1 if 11 digits
     if len(clean) == 11 and clean.startswith("1"):
         clean = clean[1:]
+
+    # Prevent COQL injection — phone must be digits only
+    if not clean.isdigit() or len(clean) != 10:
+        return None
 
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
 

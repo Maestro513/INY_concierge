@@ -16,6 +16,7 @@ Base: https://flex.optum.com/fhirpublic/R4
 Token: https://flex.optum.com/authz/{payer}/oauth/token
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -37,8 +38,9 @@ UHC_TOKEN_URL = f"https://flex.optum.com/authz/{UHC_PAYER_ID}/oauth/token"
 HEADERS = {"Accept": "application/fhir+json"}
 TIMEOUT = 30.0
 
-# Cache the OAuth token in memory
+# Cache the OAuth token in memory (with lock to prevent concurrent refresh storms)
 _token_cache = {"access_token": "", "expires_at": 0}
+_token_lock = asyncio.Lock()
 
 
 async def _get_access_token(client: httpx.AsyncClient) -> str:
@@ -47,40 +49,45 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
 
-    if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
-        raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
+    async with _token_lock:
+        # Double-check after acquiring lock
+        now = time.time()
+        if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["access_token"]
 
-    logger.debug(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
-    logger.debug(f"[UHC] client_id length={len(UHC_CLIENT_ID)}, secret length={len(UHC_CLIENT_SECRET)}")
-    scope = os.getenv(
-        "UHC_SCOPE",
-        "public/HealthcareService.read public/InsurancePlan.read "
-        "public/Location.read public/Organization.read "
-        "public/OrganizationAffiliation.read public/Practitioner.read "
-        "public/PractitionerRole.read public/Network.read "
-        "public/Endpoint.read",
-    )
-    resp = await client.post(
-        UHC_TOKEN_URL,
-        data={
-            "grant_type": "client_credentials",
-            "client_id": UHC_CLIENT_ID,
-            "client_secret": UHC_CLIENT_SECRET,
-            "scope": scope,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=15.0,
-    )
-    if resp.status_code != 200:
-        logger.warning(f"[UHC] Token error {resp.status_code}: {resp.text[:500]}")
-    resp.raise_for_status()
-    token_data = resp.json()
+        if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
+            raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
 
-    _token_cache["access_token"] = token_data["access_token"]
-    _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+        logger.debug(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
+        scope = os.getenv(
+            "UHC_SCOPE",
+            "public/HealthcareService.read public/InsurancePlan.read "
+            "public/Location.read public/Organization.read "
+            "public/OrganizationAffiliation.read public/Practitioner.read "
+            "public/PractitionerRole.read public/Network.read "
+            "public/Endpoint.read",
+        )
+        resp = await client.post(
+            UHC_TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": UHC_CLIENT_ID,
+                "client_secret": UHC_CLIENT_SECRET,
+                "scope": scope,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[UHC] Token error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+        token_data = resp.json()
 
-    logger.debug(f"[UHC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
-    return _token_cache["access_token"]
+        _token_cache["access_token"] = token_data["access_token"]
+        _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+
+        logger.debug(f"[UHC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+        return _token_cache["access_token"]
 
 
 class UHCAdapter(BaseAdapter):

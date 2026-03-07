@@ -27,13 +27,22 @@ from .admin_auth import (
     require_admin,
     require_role,
 )
-from .auth import generate_otp
 from .config import ADMIN_SECRET, EXTRACTED_DIR, PDFS_DIR
+from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+# Lazy singleton — shares the same SQLite DB as the mobile OTP store
+_store = None
+
+def _get_store() -> PersistentStore:
+    global _store
+    if _store is None:
+        _store = PersistentStore()
+    return _store
 
 
 # ── Request / Response models ────────────────────────────────────────────────
@@ -81,11 +90,32 @@ class SendOTPRequest(BaseModel):
 
 @router.post("/auth/login")
 async def admin_login(body: LoginRequest, request: Request):
-    """Admin email + password login."""
-    result = authenticate_admin(body.email, body.password)
+    """Admin email + password login with brute-force protection."""
+    ip = request.client.host if request.client else ""
+    ua = request.headers.get("user-agent", "")
+
+    # H10: Check for too many recent failed attempts (lockout)
+    failed_count = admin_db.count_recent_failed_logins(body.email)
+    if failed_count >= 5:
+        admin_db.record_login_event(
+            phone=body.email, ip_address=ip, user_agent=ua, success=False,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Please try again in 15 minutes.",
+        )
+
+    # H11: Record failed attempts, not just successes
+    try:
+        result = authenticate_admin(body.email, body.password)
+    except HTTPException:
+        admin_db.record_login_event(
+            phone=body.email, ip_address=ip, user_agent=ua, success=False,
+        )
+        raise
+
     admin_db.record_login_event(
-        phone=body.email, ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", ""), success=True,
+        phone=body.email, ip_address=ip, user_agent=ua, success=True,
     )
     return result
 
@@ -213,7 +243,7 @@ async def create_member(body: CreateMemberRequest,
     otp_sent = False
     if body.send_verification:
         try:
-            code = generate_otp(phone)
+            code = _get_store().generate_otp(phone)
             if code:
                 sms = create_sms_provider()
                 otp_sent = sms.send_otp(phone, code)
@@ -238,7 +268,7 @@ async def admin_send_otp(body: SendOTPRequest,
         raise HTTPException(status_code=400, detail="Invalid phone number.")
 
     try:
-        code = generate_otp(phone)
+        code = _get_store().generate_otp(phone)
         if not code:
             raise HTTPException(status_code=429, detail="Too many OTP requests. Try again later.")
         sms = create_sms_provider()
@@ -517,15 +547,25 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
         log.info("Received %d MB tar.gz — extracting to %s",
                  total_bytes // (1024 * 1024), EXTRACTED_DIR)
 
-        # Extract
+        # Extract — with path validation to prevent zip-slip attacks
         count = 0
+        extract_real = os.path.realpath(EXTRACTED_DIR)
         with tarfile.open(tmp.name, "r:gz") as tar:
             for member in tar.getmembers():
-                if member.isfile() and member.name.endswith(".json"):
-                    # Flatten — strip any directory prefix
-                    member.name = os.path.basename(member.name)
-                    tar.extract(member, EXTRACTED_DIR)
-                    count += 1
+                if not member.isfile() or not member.name.endswith(".json"):
+                    continue
+                # Flatten — strip any directory prefix
+                member.name = os.path.basename(member.name)
+                # Reject symlinks and verify resolved path stays within target dir
+                if member.issym() or member.islnk():
+                    log.warning("Skipping symlink in tar: %s", member.name)
+                    continue
+                dest = os.path.realpath(os.path.join(EXTRACTED_DIR, member.name))
+                if not dest.startswith(extract_real + os.sep):
+                    log.warning("Skipping tar member outside target dir: %s", member.name)
+                    continue
+                tar.extract(member, EXTRACTED_DIR)
+                count += 1
 
         log.info("Extracted %d JSON files to %s", count, EXTRACTED_DIR)
 

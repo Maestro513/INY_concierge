@@ -259,7 +259,7 @@ async def search_pharmacies(
                 in_network = True
                 is_preferred = network_zips[pharm_zip].get("preferred", False)
             else:
-                in_network = True  # all pharmacies shown are in-network
+                in_network = None  # no CMS data for this zip — unknown
 
         enriched.append({
             "name": pharm["name"],

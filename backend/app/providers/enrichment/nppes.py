@@ -4,6 +4,7 @@ Free, no auth required. Used to supplement carriers that don't provide
 NUCC specialty codes or accepting patients data.
 """
 
+import asyncio
 import logging
 
 import httpx
@@ -47,27 +48,37 @@ async def lookup_npi(npi: str) -> dict | None:
 
 async def bulk_lookup_npis(npis: list[str]) -> dict[str, dict]:
     """
-    Look up multiple NPIs. Returns dict keyed by NPI.
-    NPPES doesn't support bulk queries, so we batch them.
+    Look up multiple NPIs concurrently in batches of 10.
+    Returns dict keyed by NPI.
     """
     results = {}
+    valid_npis = [n for n in npis if n]
+
+    async def _lookup(client: httpx.AsyncClient, npi: str):
+        try:
+            resp = await client.get(
+                NPPES_URL,
+                params={"number": npi, "version": "2.1"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            api_results = data.get("results", [])
+            if api_results:
+                return npi, _parse_nppes_result(api_results[0])
+        except Exception as e:
+            logger.warning(f"NPPES lookup failed for {npi}: {e}")
+        return npi, None
+
+    BATCH_SIZE = 10
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        for npi in npis:
-            if not npi:
-                continue
-            try:
-                resp = await client.get(
-                    NPPES_URL,
-                    params={"number": npi, "version": "2.1"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                api_results = data.get("results", [])
-                if api_results:
-                    results[npi] = _parse_nppes_result(api_results[0])
-            except Exception as e:
-                logger.warning(f"NPPES lookup failed for {npi}: {e}")
-                continue
+        for i in range(0, len(valid_npis), BATCH_SIZE):
+            batch = valid_npis[i:i + BATCH_SIZE]
+            batch_results = await asyncio.gather(
+                *[_lookup(client, npi) for npi in batch]
+            )
+            for npi, data in batch_results:
+                if data:
+                    results[npi] = data
 
     return results
 

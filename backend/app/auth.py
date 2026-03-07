@@ -106,21 +106,18 @@ def verify_otp(phone: str, code: str, *, max_attempts: int = 5, lockout_seconds:
 
 # ── JWT Token Management ─────────────────────────────────────────────────────
 
-def create_tokens(phone: str, member_data: dict, *, jwt_secret: str, access_ttl: int = 7200, refresh_ttl: int = 2592000) -> dict:
+def create_tokens(phone: str, member_data: dict = None, *, jwt_secret: str, access_ttl: int = 7200, refresh_ttl: int = 2592000) -> dict:
     """
     Create access + refresh JWT tokens.
 
-    Access token: short-lived (default 2 hours), carries member data.
+    Access token: short-lived (default 2 hours), contains only phone + type.
     Refresh token: long-lived (default 30 days), only carries phone.
+    No PHI is embedded in tokens — member data is served from the session.
     """
     now = time.time()
 
     access_payload = {
         "sub": phone,
-        "first_name": member_data.get("first_name", ""),
-        "last_name": member_data.get("last_name", ""),
-        "plan_name": member_data.get("plan_name", ""),
-        "plan_number": member_data.get("plan_number", ""),
         "type": "access",
         "iat": now,
         "exp": now + access_ttl,

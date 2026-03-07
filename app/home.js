@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 import { cachedFetch } from '../utils/offlineCache';
+import { getMemberSession } from '../constants/session';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
@@ -18,7 +19,8 @@ import {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { firstName, lastName, planName, planNumber, agent, medicareNumber, sessionId, zipCode } = useLocalSearchParams();
+  const { member: _mem, sessionId } = getMemberSession();
+  const { firstName, lastName, planName, planNumber, agent, medicareNumber, zipCode } = _mem || {};
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -94,17 +96,11 @@ export default function HomeScreen() {
   }, [loadSOBData]);
 
   const handleViewIDCard = () => {
-    router.push({
-      pathname: '/digital-id',
-      params: { firstName, lastName, planName, planNumber, medicareNumber: medicareNumber || '' },
-    });
+    router.push('/digital-id');
   };
 
   const handleFindPharmacy = () => {
-    router.push({
-      pathname: '/pharmacy-results',
-      params: { zipCode: zipCode || '', planNumber: planNumber || '', planName: planName || '' },
-    });
+    router.push('/pharmacy-results');
   };
 
   // ── Benefits ────────────────────────────────────────────────────

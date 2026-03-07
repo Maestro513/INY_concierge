@@ -557,7 +557,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       speakResponse(`Searching for a ${specialty} near you.`);
       setIsSpeaking(true); setMode('idle');
       setTimeout(() => {
-        router.push({ pathname: '/doctor-results', params: { specialty, zipCode: zipCode || '', planName: planName || '' } });
+        router.push({ pathname: '/doctor-results', params: { specialty } });
       }, 800);
       return;
     }
