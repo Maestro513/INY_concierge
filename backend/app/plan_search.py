@@ -14,8 +14,20 @@ import threading
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
+
+# Retry-capable session for transient network errors
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+)
+_http = requests.Session()
+_http.mount("https://", HTTPAdapter(max_retries=_retry_strategy))
 
 # Reuse the same DB path logic from cms_lookup
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,8 +43,30 @@ for _candidate in [
 if DEFAULT_DB is None:
     DEFAULT_DB = os.path.join(_PARENT_DIR, "cms_benefits.db")
 
+# Concurrency limiter for external CMS API calls (prevents thundering herd)
+_CMS_API_SEMAPHORE = threading.Semaphore(int(os.environ.get("CMS_API_CONCURRENCY", "10")))
+
 CMS_MARKETPLACE_API = "https://marketplace.api.healthcare.gov/api/v1"
 CMS_MARKETPLACE_API_KEY = os.environ.get("CMS_MARKETPLACE_API_KEY", "")
+
+# ── Geocoding cache (zip → county) — bounded LRU ─────────────────────────────
+import time as _time
+
+_geo_cache: dict[str, dict] = {}  # {zip: {"data": [...], "ts": float}}
+_GEO_CACHE_TTL = 86400   # 24 hours — counties don't change often
+_GEO_CACHE_MAX = 1000
+_geo_lock = threading.Lock()
+
+
+def _evict_geo_cache() -> None:
+    """Evict expired entries, then oldest if still over max."""
+    now = _time.time()
+    expired = [k for k, v in _geo_cache.items() if now - v["ts"] > _GEO_CACHE_TTL]
+    for k in expired:
+        del _geo_cache[k]
+    while len(_geo_cache) >= _GEO_CACHE_MAX:
+        oldest = min(_geo_cache, key=lambda k: _geo_cache[k]["ts"])
+        del _geo_cache[oldest]
 
 
 # ── Zip-to-County via CMS Marketplace API ────────────────────────────────────
@@ -41,23 +75,30 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
     """
     Get counties for a zip code using the CMS Marketplace API.
     Returns list of {fips, name, state} dicts.
-    Works for both Medicare and U65 flows.
+    Results are cached for 24 hours to avoid redundant geocoding calls.
     """
+    # Check cache first
+    with _geo_lock:
+        cached = _geo_cache.get(zipcode)
+        if cached and (_time.time() - cached["ts"]) < _GEO_CACHE_TTL:
+            return cached["data"]
+
     try:
         params = {}
         headers = {"Accept": "application/json"}
         if CMS_MARKETPLACE_API_KEY:
             params["apikey"] = CMS_MARKETPLACE_API_KEY
-        resp = requests.get(
-            f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
-            headers=headers,
-            params=params,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        with _CMS_API_SEMAPHORE:
+            resp = _http.get(
+                f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
+                headers=headers,
+                params=params,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
         counties = data.get("counties", [])
-        return [
+        result = [
             {
                 "fips": c.get("fips"),
                 "name": c.get("name"),
@@ -65,6 +106,11 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
             }
             for c in counties
         ]
+        # Cache the result
+        with _geo_lock:
+            _evict_geo_cache()
+            _geo_cache[zipcode] = {"data": result, "ts": _time.time()}
+        return result
     except Exception as e:
         log.warning("County lookup failed for zip %s: %s", zipcode, type(e).__name__)
         return []
@@ -356,29 +402,17 @@ def search_marketplace_plans(
         "sort": "premium",
     }
 
-    try:
-        url = f"{CMS_MARKETPLACE_API}/plans/search"
-        _mkt_params = {"apikey": CMS_MARKETPLACE_API_KEY} if CMS_MARKETPLACE_API_KEY else {}
-        _mkt_headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        resp = requests.post(
-            url,
-            json=search_body,
-            params=_mkt_params,
-            headers=_mkt_headers,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.HTTPError as e:
-        log.warning("Marketplace API error for zip %s: %s", zipcode, type(e).__name__)
-        # Try with year 2025 if 2026 fails
-        search_body["year"] = 2025
+    url = f"{CMS_MARKETPLACE_API}/plans/search"
+    _mkt_params = {"apikey": CMS_MARKETPLACE_API_KEY} if CMS_MARKETPLACE_API_KEY else {}
+    _mkt_headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    with _CMS_API_SEMAPHORE:
         try:
-            resp = requests.post(
-                f"{CMS_MARKETPLACE_API}/plans/search",
+            resp = _http.post(
+                url,
                 json=search_body,
                 params=_mkt_params,
                 headers=_mkt_headers,
@@ -386,12 +420,26 @@ def search_marketplace_plans(
             )
             resp.raise_for_status()
             data = resp.json()
-        except Exception as e2:
-            log.error("Marketplace API fallback failed: %s", type(e2).__name__)
+        except requests.exceptions.HTTPError as e:
+            log.warning("Marketplace API error for zip %s: %s", zipcode, type(e).__name__)
+            # Try with year 2025 if 2026 fails
+            search_body["year"] = 2025
+            try:
+                resp = _http.post(
+                    f"{CMS_MARKETPLACE_API}/plans/search",
+                    json=search_body,
+                    params=_mkt_params,
+                    headers=_mkt_headers,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e2:
+                log.error("Marketplace API fallback failed: %s", type(e2).__name__)
+                return {"error": "Unable to search marketplace plans", "plans": []}
+        except Exception as e:
+            log.error("Marketplace API request failed: %s", type(e).__name__)
             return {"error": "Unable to search marketplace plans", "plans": []}
-    except Exception as e:
-        log.error("Marketplace API request failed: %s", type(e).__name__)
-        return {"error": "Unable to search marketplace plans", "plans": []}
 
     # Step 3: Transform response into plan cards
     raw_plans = data.get("plans", [])

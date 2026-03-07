@@ -31,6 +31,8 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "")  # e.g. "https://staging.insurancen
 
 # Secret for admin endpoints (set in Render env vars)
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
+if APP_ENV in ("production", "staging") and not ADMIN_SECRET:
+    raise RuntimeError("ADMIN_SECRET must be set in production/staging.")
 
 # JWT Authentication
 JWT_SECRET = os.getenv("JWT_SECRET", "")  # MUST be set in production

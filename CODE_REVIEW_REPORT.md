@@ -248,7 +248,7 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - **M9.** API key leaked in URL and missing from retry in `plan_search.py:360,377-386`
 - **M10.** Circular import risk: `extract_benefits.py` imports from `main.py`
 - **M11.** `_repair_json` in `extract_benefits.py` can produce semantically corrupt JSON
-- **M12.** `zoho_client.py` uses synchronous `requests`, blocking the async event loop
+- **M12.** `zoho_client.py` uses synchronous `requests` — note: all sync endpoints are `def` (not `async def`) so FastAPI runs them in a threadpool automatically; the event loop is NOT blocked
 - **M13.** Anthropic client created per request instead of reusing singleton
 - **M14.** HealthSpring adapter has no geographic filtering - fetches 100 results nationwide
 
@@ -267,12 +267,12 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 
 ### Infrastructure
 
-- **M25.** Thread-unsafe global metrics `_request_metrics` - non-atomic `+=` from async middleware
-- **M26.** Unbounded `_ask_rate` dict - memory leak over months of production
+- **M25.** ~~FIXED~~ `_request_metrics` now protected by `_metrics_lock` — thread-safe reads and writes
+- **M26.** ~~FIXED~~ `_ask_rate` dict replaced by persistent-store rate limiting (bounded, auto-cleaned)
 - **M27.** `touch_session` overwrites `created_at` - sessions can be kept alive indefinitely
 - **M28.** ~~FIXED~~ `start.sh` now runs `--workers $WEB_CONCURRENCY` (default 4)
 - **M29.** Auth never tested in production mode - conftest.py forces `APP_ENV=development`
-- **M30.** No Content-Security-Policy header on admin panel
+- **M30.** ~~FIXED~~ CSP header now set on ALL responses via security headers middleware: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'`
 - **M31.** Inconsistent paths between import scripts (`pdfs/CMS` vs `Pdfs/CMS`)
 - **M32.** `persistent_store.db` and `cms_benefits.db` missing from `.gitignore`
 - **M33.** `start.sh` does not run `alembic upgrade head` before starting
@@ -282,6 +282,16 @@ The codebase has **strong visual design**, **excellent accessibility**, and **th
 - **M37.** ~~FIXED~~ CMS error messages leaked internal details in HTTP responses — replaced with generic messages
 - **M38.** ~~FIXED~~ Admin CSRF error echoed request `Origin` header — removed from response
 - **M39.** ~~FIXED~~ False "SOC 2" compliance claim in admin login page — removed
+- **M40.** ~~FIXED~~ `httpx` used in 9+ files (providers, pharmacy) but missing from `requirements.txt` — added `httpx==0.28.1`
+- **M41.** ~~FIXED~~ Zoho API calls had no retry logic — added `requests.Session` with `Retry(total=3, backoff_factor=1)` for transient errors
+- **M42.** ~~FIXED~~ `ADMIN_SECRET` defaulted to empty string without production guard — now raises `RuntimeError` in production/staging
+- **M43.** ~~FIXED~~ No graceful shutdown handler — added lifespan event to clean up SQLite stores; `--timeout-graceful-shutdown 30` in `start.sh`
+- **M44.** ~~FIXED~~ FastAPI `/docs`, `/redoc`, `/openapi.json` exposed in all environments — now only enabled in development
+- **M45.** ~~FIXED~~ CMS Marketplace API and RxNorm API calls had no retry logic — added `requests.Session` with `Retry(total=3, backoff_factor=1)` to `plan_search.py` and `cms_lookup.py`
+- **M46.** ~~FIXED~~ Repeated zip-to-county geocoding lookups hit CMS API every time — added bounded LRU cache (24h TTL, 1000 max entries) with thread-safe locking
+- **M47.** ~~FIXED~~ No concurrency limits on external CMS API calls — added `threading.Semaphore(10)` to prevent thundering herd under load
+- **M48.** ~~FIXED~~ `_sob_cache` and `_sob_tier_cache` had no thread safety — added `threading.Lock` protecting all reads/writes across multi-worker deployments
+- **M49.** ~~FIXED~~ No tests for infrastructure code (retries, caching, concurrency) — added 11 tests in `test_infra.py`
 
 ---
 
