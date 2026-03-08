@@ -278,7 +278,7 @@ app.include_router(admin_router)
 
 # ── Admin SPA static files ───────────────────────────────────────────────────
 # Serves the Vite-built admin portal at /admin/*
-_admin_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), "admin", "dist")
+_admin_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "admin", "dist")
 # On Render, admin dist may be at /opt/render/project/src/admin/dist
 if not os.path.isdir(_admin_dist):
     _admin_dist = "/opt/render/project/src/admin/dist"

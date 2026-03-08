@@ -2,7 +2,7 @@ services:
   - type: web
     name: iny-concierge
     runtime: python
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: pip install -r backend/requirements.txt && cd admin && npm ci && npm run build
     startCommand: cd backend && bash start.sh
     envVars:
       - key: APP_ENV
