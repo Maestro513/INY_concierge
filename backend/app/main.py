@@ -349,6 +349,46 @@ import threading as _threading
 _metrics_lock = _threading.Lock()
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
 
+# Cross-worker metrics: each worker flushes its local counters to a shared
+# SQLite table periodically, and /metrics reads the aggregate.
+_METRICS_FLUSH_INTERVAL = 10  # seconds
+_metrics_last_flush = 0.0
+_WORKER_PID = os.getpid()
+
+
+def _flush_metrics_to_db() -> None:
+    """Flush local in-memory metrics to the shared persistent store."""
+    global _metrics_last_flush
+    now = time.time()
+    if now - _metrics_last_flush < _METRICS_FLUSH_INTERVAL:
+        return
+    _metrics_last_flush = now
+    try:
+        store = get_store()
+        with _metrics_lock:
+            total = _request_metrics["total"]
+            errors = _request_metrics["errors"]
+            latency_sum = _request_metrics["latency_sum"]
+        store.upsert_worker_metrics(str(os.getpid()), total, errors, latency_sum)
+    except Exception:
+        pass  # metrics are best-effort
+
+
+def _read_aggregate_metrics() -> dict:
+    """Read aggregated metrics across all workers from the persistent store."""
+    try:
+        store = get_store()
+        return store.read_aggregate_metrics()
+    except Exception:
+        # Fall back to local-only metrics
+        with _metrics_lock:
+            return {
+                "total": _request_metrics["total"],
+                "errors": _request_metrics["errors"],
+                "latency_sum": _request_metrics["latency_sum"],
+            }
+
+
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     start = time.time()
@@ -364,6 +404,8 @@ async def metrics_middleware(request: Request, call_next):
         _request_metrics["latency_sum"] += elapsed
         if response.status_code >= 500:
             _request_metrics["errors"] += 1
+    # Periodically flush to shared DB for cross-worker visibility
+    _flush_metrics_to_db()
     # Mask PII from URL paths before logging (e.g. /cms/my-drugs/5551234567)
     path = mask_pii_in_string(str(request.url.path))
     req_id = getattr(request.state, "request_id", "")
@@ -397,6 +439,11 @@ _sob_cache: dict[str, dict] = {}
 _sob_cache_lock = _threading.Lock()
 SOB_CACHE_TTL = 3600  # 1 hour
 SOB_CACHE_MAX = 500   # max entries — evict oldest when full
+
+# Per-plan locks to prevent cache stampede (multiple concurrent requests for the
+# same plan all missing cache and all calling Claude API simultaneously)
+_sob_inflight: dict[str, _threading.Lock] = {}
+_sob_inflight_lock = _threading.Lock()
 
 # User Data DB — lazy init
 _user_db = None
@@ -679,7 +726,43 @@ def _check_ip_rate(request: Request, *, max_hits: int, window: int, label: str =
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Deep health check — verifies DB connectivity, CMS data, and critical config."""
+    checks = {}
+
+    # 1. Persistent store DB writable
+    try:
+        store = get_store()
+        store.count_active_sessions(ttl=SESSION_TTL)
+        checks["persistent_store"] = "ok"
+    except Exception as e:
+        checks["persistent_store"] = f"error: {type(e).__name__}"
+
+    # 2. CMS benefits DB loaded
+    try:
+        cms = get_cms()
+        checks["cms_db"] = "ok" if cms is not None else "not loaded"
+    except Exception as e:
+        checks["cms_db"] = f"error: {type(e).__name__}"
+
+    # 3. Extracted plan data present
+    try:
+        json_count = len([f for f in os.listdir(EXTRACTED_DIR) if f.endswith(".json")]) if os.path.isdir(EXTRACTED_DIR) else 0
+        checks["extracted_plans"] = json_count
+    except Exception as e:
+        checks["extracted_plans"] = f"error: {type(e).__name__}"
+
+    # 4. Critical API keys configured
+    checks["anthropic_key"] = "configured" if ANTHROPIC_API_KEY else "missing"
+
+    healthy = all(
+        v == "ok" or v == "configured" or (isinstance(v, int) and v > 0)
+        for v in checks.values()
+    )
+
+    return JSONResponse(
+        content={"status": "ok" if healthy else "degraded", "checks": checks},
+        status_code=200 if healthy else 503,
+    )
 
 
 # --- Public Quote/Plan Search Endpoints (no auth — for Webflow widget) ---
@@ -772,11 +855,13 @@ def quote_marketplace(
 
 @app.get("/metrics")
 def metrics(_user: dict = Depends(get_current_user)):
-    """Basic request metrics for monitoring (requires auth)."""
-    with _metrics_lock:
-        total = _request_metrics["total"]
-        errors = _request_metrics["errors"]
-        latency_sum = _request_metrics["latency_sum"]
+    """Aggregated request metrics across all workers (requires auth)."""
+    # Flush current worker's metrics before reading aggregate
+    _flush_metrics_to_db()
+    agg = _read_aggregate_metrics()
+    total = agg["total"]
+    errors = agg["errors"]
+    latency_sum = agg["latency_sum"]
     return {
         "total_requests": total,
         "total_errors": errors,
@@ -1373,6 +1458,22 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
             return cached["data"]
 
+    # Per-plan lock prevents cache stampede: only one request does the
+    # extraction while others wait and then read from cache.
+    with _sob_inflight_lock:
+        plan_lock = _sob_inflight.setdefault(plan_id, _threading.Lock())
+    with plan_lock:
+        # Re-check cache — another thread may have populated it while we waited
+        with _sob_cache_lock:
+            cached = _sob_cache.get(plan_id)
+            if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
+                return cached["data"]
+
+        return _extract_sob_benefits(plan_id, req.plan_number)
+
+
+def _extract_sob_benefits(plan_id: str, plan_number: str) -> dict:
+    """Extract SOB benefits (pre-extracted file or Claude API), cache the result."""
     # --- Try pre-extracted benefits first (instant, no API cost) ---
     pre = _load_pre_extracted_benefits(plan_id)
     if pre is not None:
@@ -1391,7 +1492,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         }
         # Enrich with CMS authoritative data
         try:
-            result = _enrich_sob_with_cms(result, req.plan_number)
+            result = _enrich_sob_with_cms(result, plan_number)
         except Exception as e:
             log.warning("CMS enrichment failed (non-fatal): %s", type(e).__name__)
         with _sob_cache_lock:
@@ -1410,19 +1511,22 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
 
     context = _chunks_to_context(chunks)
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+    from .circuit_breaker import anthropic_breaker
 
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=3000,
-        system=SOB_EXTRACTION_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Plan: {plan_id}\n\nFull document text:\n\n{context}",
-            }
-        ],
-    )
+    with anthropic_breaker:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=3000,
+            system=SOB_EXTRACTION_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Plan: {plan_id}\n\nFull document text:\n\n{context}",
+                }
+            ],
+        )
 
     # Parse Claude's response
     try:
@@ -1458,7 +1562,7 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
 
     # Enrich with CMS authoritative data
     try:
-        result = _enrich_sob_with_cms(result, req.plan_number)
+        result = _enrich_sob_with_cms(result, plan_number)
     except Exception as e:
         log.warning(f"CMS enrichment failed (non-fatal): {e}")
 

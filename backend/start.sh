@@ -25,4 +25,4 @@ fi
 echo "Starting uvicorn ..."
 WORKERS="${WEB_CONCURRENCY:-4}"
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers "$WORKERS" \
-     --timeout-graceful-shutdown 30
+     --timeout-graceful-shutdown 30 --timeout-keep-alive 75

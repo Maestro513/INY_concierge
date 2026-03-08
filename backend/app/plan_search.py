@@ -84,11 +84,13 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
             return cached["data"]
 
     try:
+        from .circuit_breaker import cms_breaker
+
         params = {}
         headers = {"Accept": "application/json"}
         if CMS_MARKETPLACE_API_KEY:
             params["apikey"] = CMS_MARKETPLACE_API_KEY
-        with _CMS_API_SEMAPHORE:
+        with cms_breaker, _CMS_API_SEMAPHORE:
             resp = _http.get(
                 f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
                 headers=headers,

@@ -27,7 +27,8 @@ log = logging.getLogger(__name__)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PARENT_DIR = os.path.dirname(_THIS_DIR)
-DEFAULT_AUDIT_DB = os.path.join(_PARENT_DIR, "audit.db")
+_PERSISTENT_DIR = "/data" if os.path.isdir("/data") else _PARENT_DIR
+DEFAULT_AUDIT_DB = os.path.join(_PERSISTENT_DIR, "audit.db")
 
 
 def _audit_hmac_key() -> bytes:
