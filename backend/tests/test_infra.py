@@ -94,14 +94,14 @@ class TestRetrySession:
         """plan_search module should have a retry-capable requests.Session."""
         from app.plan_search import _http, _retry_strategy
         assert _retry_strategy.total == 3
-        assert 429 in _retry_strategy.status_forcelist
+        assert 429 not in _retry_strategy.status_forcelist  # PR16: no retry on rate limit
         assert 503 in _retry_strategy.status_forcelist
 
     def test_cms_lookup_has_retry_session(self):
         """cms_lookup module should have a retry-capable requests.Session."""
         from app.cms_lookup import _http, _retry_strategy
         assert _retry_strategy.total == 3
-        assert 429 in _retry_strategy.status_forcelist
+        assert 429 not in _retry_strategy.status_forcelist  # PR16: no retry on rate limit
 
     def test_zoho_has_retry_session(self):
         """zoho_client module should have a retry-capable requests.Session."""

@@ -263,9 +263,12 @@ def ask_claude(question: str, plan_number: str) -> dict:
     safe_question = _scrub_phi(question)
     context = find_relevant_chunks(chunks, question)  # Use original for relevance matching
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+    from .circuit_breaker import anthropic_breaker
 
-    message = client.messages.create(
+    with anthropic_breaker:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+
+        message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=300,
         system=SYSTEM_PROMPT,

@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 _retry_strategy = Retry(
     total=3,
     backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
+    status_forcelist=[500, 502, 503, 504],  # PR16: exclude 429 to avoid retry storms
     allowed_methods=["GET", "POST"],
 )
 _http = requests.Session()
@@ -84,11 +84,13 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
             return cached["data"]
 
     try:
+        from .circuit_breaker import cms_breaker
+
         params = {}
         headers = {"Accept": "application/json"}
         if CMS_MARKETPLACE_API_KEY:
             params["apikey"] = CMS_MARKETPLACE_API_KEY
-        with _CMS_API_SEMAPHORE:
+        with cms_breaker, _CMS_API_SEMAPHORE:
             resp = _http.get(
                 f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
                 headers=headers,

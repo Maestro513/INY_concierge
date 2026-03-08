@@ -14,8 +14,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Database file lives alongside the mobile SQLite DB
-_DB_DIR = os.getenv("DATA_DIR", str(Path(__file__).resolve().parent.parent))
+# Database file lives on persistent disk in production, local dir in dev
+_DEFAULT_DB_DIR = "/data" if os.path.isdir("/data") else str(Path(__file__).resolve().parent.parent)
+_DB_DIR = os.getenv("DATA_DIR", _DEFAULT_DB_DIR)
 DB_PATH = os.path.join(_DB_DIR, "admin.db")
 
 SCHEMA = """
@@ -66,6 +67,7 @@ def _get_conn():
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")  # PR11: wait up to 5s on lock
     except sqlite3.OperationalError:
         pass
     conn.execute("PRAGMA foreign_keys=ON")

@@ -35,7 +35,7 @@ EXTERNAL_API_TIMEOUT = int(os.environ.get("EXTERNAL_API_TIMEOUT", "10"))
 _retry_strategy = Retry(
     total=3,
     backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
+    status_forcelist=[500, 502, 503, 504],  # PR16: exclude 429 to avoid retry storms
     allowed_methods=["GET"],
 )
 _http = requests.Session()

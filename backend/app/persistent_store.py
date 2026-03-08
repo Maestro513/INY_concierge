@@ -24,7 +24,9 @@ _PHI_FIELDS = ("medicare_number", "medications", "phone")
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PARENT_DIR = os.path.dirname(_THIS_DIR)
-DEFAULT_STORE_DB = os.path.join(_PARENT_DIR, "persistent_store.db")
+# Prefer persistent disk mount (/data) on Render; fall back to local dir for dev
+_PERSISTENT_DIR = "/data" if os.path.isdir("/data") else _PARENT_DIR
+DEFAULT_STORE_DB = os.path.join(_PERSISTENT_DIR, "persistent_store.db")
 
 
 class PersistentStore:
@@ -42,6 +44,7 @@ class PersistentStore:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")  # PR11: wait up to 5s on lock
             except sqlite3.OperationalError:
                 pass
             self._local.conn = conn
@@ -89,6 +92,14 @@ class PersistentStore:
             );
             CREATE INDEX IF NOT EXISTS idx_rate_limit_key
                 ON rate_limit_hits(key, hit_at);
+
+            CREATE TABLE IF NOT EXISTS worker_metrics (
+                worker_id       TEXT PRIMARY KEY,
+                total           INTEGER NOT NULL DEFAULT 0,
+                errors          INTEGER NOT NULL DEFAULT 0,
+                latency_sum     REAL NOT NULL DEFAULT 0.0,
+                updated_at      REAL NOT NULL
+            );
         """)
         conn.commit()
         log.info(f"Persistent store ready at {self.db_path}")
@@ -132,9 +143,8 @@ class PersistentStore:
                    locked_until = 0""",
             (phone, self._hash_code(code), now, otp_ttl),
         )
-        conn.commit()
 
-        # Prune old send log entries (older than window)
+        # PR11: Batch prune + commit in single transaction to reduce write contention
         conn.execute("DELETE FROM otp_send_log WHERE sent_at < ?", (cutoff,))
         conn.commit()
 
@@ -361,6 +371,33 @@ class PersistentStore:
         conn = self._conn()
         conn.execute("DELETE FROM rate_limit_hits WHERE hit_at < ?", (cutoff,))
         conn.commit()
+
+    # ── Worker Metrics (cross-process aggregation) ─────────────────────────
+
+    def upsert_worker_metrics(self, worker_id: str, total: int, errors: int, latency_sum: float) -> None:
+        """Upsert this worker's cumulative metrics into the shared table."""
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO worker_metrics (worker_id, total, errors, latency_sum, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(worker_id) DO UPDATE SET
+                 total=excluded.total, errors=excluded.errors,
+                 latency_sum=excluded.latency_sum, updated_at=excluded.updated_at""",
+            (worker_id, total, errors, latency_sum, time.time()),
+        )
+        conn.commit()
+
+    def read_aggregate_metrics(self) -> dict:
+        """Read summed metrics across all workers (prune stale workers > 5 min)."""
+        conn = self._conn()
+        cutoff = time.time() - 300  # ignore workers not seen in 5 minutes
+        row = conn.execute(
+            """SELECT COALESCE(SUM(total),0), COALESCE(SUM(errors),0),
+                      COALESCE(SUM(latency_sum),0.0)
+               FROM worker_metrics WHERE updated_at > ?""",
+            (cutoff,),
+        ).fetchone()
+        return {"total": row[0], "errors": row[1], "latency_sum": row[2]}
 
     def cleanup_all(self):
         """Remove all expired entries. Call periodically or on startup."""

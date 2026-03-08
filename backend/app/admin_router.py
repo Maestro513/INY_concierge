@@ -688,7 +688,6 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
         with open(tmp.name, "rb") as f:
             magic = f.read(2)
         if magic != b"\x1f\x8b":
-            os.unlink(tmp.name)
             raise HTTPException(status_code=400, detail="File is not a valid gzip archive.")
 
         # Extract — with path validation to prevent zip-slip attacks
@@ -731,4 +730,5 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
             "upload_size_mb": round(total_bytes / (1024 * 1024), 1),
         }
     finally:
-        os.unlink(tmp.name)
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)

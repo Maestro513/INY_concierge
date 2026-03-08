@@ -29,7 +29,7 @@ _token_lock = threading.Lock()
 _retry_strategy = Retry(
     total=3,
     backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
+    status_forcelist=[500, 502, 503, 504],  # PR16: exclude 429 to avoid retry storms
     allowed_methods=["GET", "POST"],
 )
 _http = requests.Session()
@@ -87,6 +87,13 @@ def search_contact_by_phone(phone: str) -> dict | None:
     Search Zoho Contacts module for a member by phone number.
     Returns member data dict or None if not found.
     """
+    from .circuit_breaker import zoho_breaker
+
+    with zoho_breaker:
+        return _search_contact_impl(phone)
+
+
+def _search_contact_impl(phone: str) -> dict | None:
     token = get_access_token()
 
     # Clean phone number — remove spaces, dashes, parens, +1 prefix

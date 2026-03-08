@@ -27,7 +27,8 @@ log = logging.getLogger(__name__)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PARENT_DIR = os.path.dirname(_THIS_DIR)
-DEFAULT_AUDIT_DB = os.path.join(_PARENT_DIR, "audit.db")
+_PERSISTENT_DIR = "/data" if os.path.isdir("/data") else _PARENT_DIR
+DEFAULT_AUDIT_DB = os.path.join(_PERSISTENT_DIR, "audit.db")
 
 
 def _audit_hmac_key() -> bytes:
@@ -95,8 +96,9 @@ class AuditLog:
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10)
             conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")  # PR11: wait up to 5s on lock
             self._local.conn = conn
         return conn
 
