@@ -9,14 +9,12 @@ import io
 import json
 import os
 import tarfile
-import tempfile
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import jwt
 import pytest
 from fastapi.testclient import TestClient
-
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
