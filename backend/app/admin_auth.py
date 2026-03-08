@@ -14,6 +14,7 @@ import time
 import bcrypt
 import jwt
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from . import admin_db
 from .config import APP_ENV
@@ -101,12 +102,49 @@ def decode_admin_token(token: str, expected_type: str = "admin_access") -> dict:
 
 # ── Auth dependencies ────────────────────────────────────────────────────────
 
+_COOKIE_SECURE = APP_ENV in ("production", "staging")
+_COOKIE_SAMESITE = "lax"
+_COOKIE_PATH = "/api/admin"
+
+
+def set_auth_cookies(response: JSONResponse, access_token: str, refresh_token: str) -> None:
+    """Set HttpOnly auth cookies on a response."""
+    response.set_cookie(
+        key="admin_token",
+        value=access_token,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
+        path=_COOKIE_PATH,
+        max_age=ADMIN_ACCESS_TTL,
+    )
+    response.set_cookie(
+        key="admin_refresh",
+        value=refresh_token,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
+        path=_COOKIE_PATH,
+        max_age=ADMIN_REFRESH_TTL,
+    )
+
+
+def clear_auth_cookies(response: JSONResponse) -> None:
+    """Clear auth cookies on a response."""
+    response.delete_cookie(key="admin_token", path=_COOKIE_PATH)
+    response.delete_cookie(key="admin_refresh", path=_COOKIE_PATH)
+
+
 def require_admin(request: Request) -> dict:
-    """FastAPI dependency — verify admin Bearer token. Returns decoded payload."""
+    """FastAPI dependency — verify admin Bearer token (header or cookie)."""
+    # Try Authorization header first, then fall back to cookie
     auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        token = request.cookies.get("admin_token", "")
+    if not token:
         raise HTTPException(status_code=401, detail="Missing admin authentication.")
-    token = auth_header[7:]
     return decode_admin_token(token)
 
 

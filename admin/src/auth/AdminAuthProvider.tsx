@@ -5,7 +5,6 @@ import type { AdminUser } from '@/types';
 
 interface AuthState {
   user: AdminUser | null;
-  token: string | null;
   loading: boolean;
 }
 
@@ -17,41 +16,32 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>(() => {
-    const token = sessionStorage.getItem('admin_token');
-    return { user: null, token, loading: !!token };
-  });
+  const [state, setState] = useState<AuthState>({ user: null, loading: true });
 
-  // Fetch the current user profile on mount (if token exists)
+  // Validate session on mount via /me (cookie sent automatically)
   useEffect(() => {
-    const token = sessionStorage.getItem('admin_token');
-    if (!token) return;
-
     client
       .get(ENDPOINTS.ME)
       .then((res) => {
-        setState({ user: res.data, token, loading: false });
+        setState({ user: res.data, loading: false });
       })
       .catch(() => {
-        // Token invalid / expired
-        sessionStorage.removeItem('admin_token');
-        sessionStorage.removeItem('admin_refresh');
-        setState({ user: null, token: null, loading: false });
+        setState({ user: null, loading: false });
       });
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await client.post(ENDPOINTS.LOGIN, { email, password });
-    const { access_token, refresh_token, user } = res.data;
-    sessionStorage.setItem('admin_token', access_token);
-    if (refresh_token) sessionStorage.setItem('admin_refresh', refresh_token);
-    setState({ user, token: access_token, loading: false });
+    setState({ user: res.data.user, loading: false });
   }, []);
 
-  const logout = useCallback(() => {
-    sessionStorage.removeItem('admin_token');
-    sessionStorage.removeItem('admin_refresh');
-    setState({ user: null, token: null, loading: false });
+  const logout = useCallback(async () => {
+    try {
+      await client.post(ENDPOINTS.LOGOUT);
+    } catch {
+      // Clear state even if logout request fails
+    }
+    setState({ user: null, loading: false });
   }, []);
 
   return (

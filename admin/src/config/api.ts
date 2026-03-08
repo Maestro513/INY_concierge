@@ -4,6 +4,7 @@ export const ENDPOINTS = {
   // Admin auth
   LOGIN: '/api/admin/auth/login',
   REFRESH: '/api/admin/auth/refresh',
+  LOGOUT: '/api/admin/auth/logout',
   ME: '/api/admin/auth/me',
 
   // Members

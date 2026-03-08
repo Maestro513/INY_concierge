@@ -200,7 +200,7 @@ if APP_ENV == "production":
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_origins,
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
@@ -209,7 +209,7 @@ else:
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
@@ -225,7 +225,7 @@ async def security_headers(request: Request, call_next) -> Response:
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
+        "style-src 'self'; "
         "img-src 'self' data:; "
         "font-src 'self'; "
         "connect-src 'self'; "
@@ -278,7 +278,7 @@ app.include_router(admin_router)
 
 # ── Admin SPA static files ───────────────────────────────────────────────────
 # Serves the Vite-built admin portal at /admin/*
-_admin_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), "admin", "dist")
+_admin_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "admin", "dist")
 # On Render, admin dist may be at /opt/render/project/src/admin/dist
 if not os.path.isdir(_admin_dist):
     _admin_dist = "/opt/render/project/src/admin/dist"
