@@ -67,6 +67,7 @@ def _get_conn():
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")  # PR11: wait up to 5s on lock
     except sqlite3.OperationalError:
         pass
     conn.execute("PRAGMA foreign_keys=ON")

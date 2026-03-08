@@ -118,11 +118,34 @@ if SENTRY_DSN:
         send_default_pii=False,
     )
 
-# ── Structured logging ───────────────────────────────────────────────────────
+# ── Structured logging (PR15) ────────────────────────────────────────────────
+
+class _JSONFormatter(logging.Formatter):
+    """JSON log formatter — one JSON object per line for log aggregators."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            entry["exc"] = self.formatException(record.exc_info)
+        return json.dumps(entry, default=str)
+
+
+_handler = logging.StreamHandler()
+if APP_ENV in ("production", "staging"):
+    _handler.setFormatter(_JSONFormatter())
+else:
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[_handler],
 )
 log = logging.getLogger(__name__)
 
@@ -247,7 +270,7 @@ async def phi_audit_middleware(request: Request, call_next) -> Response:
                 detail=f"{request.method} {response.status_code}",
             )
         except Exception as exc:
-            log.debug("PHI audit write failed: %s", exc)  # L1: log but don't break request
+            log.warning("PHI audit write failed: %s", exc)  # PR12: visible in prod logs
     return response
 
 # ── Admin router ─────────────────────────────────────────────────────────────

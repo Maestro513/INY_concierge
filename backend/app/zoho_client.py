@@ -29,7 +29,7 @@ _token_lock = threading.Lock()
 _retry_strategy = Retry(
     total=3,
     backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
+    status_forcelist=[500, 502, 503, 504],  # PR16: exclude 429 to avoid retry storms
     allowed_methods=["GET", "POST"],
 )
 _http = requests.Session()

@@ -44,6 +44,7 @@ class PersistentStore:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")  # PR11: wait up to 5s on lock
             except sqlite3.OperationalError:
                 pass
             self._local.conn = conn
@@ -142,9 +143,8 @@ class PersistentStore:
                    locked_until = 0""",
             (phone, self._hash_code(code), now, otp_ttl),
         )
-        conn.commit()
 
-        # Prune old send log entries (older than window)
+        # PR11: Batch prune + commit in single transaction to reduce write contention
         conn.execute("DELETE FROM otp_send_log WHERE sent_at < ?", (cutoff,))
         conn.commit()
 
