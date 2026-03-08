@@ -17,6 +17,8 @@ services:
         generateValue: true
       - key: AUDIT_HMAC_KEY
         generateValue: true
+      - key: ADMIN_JWT_SECRET
+        generateValue: true
     disk:
       name: iny-data
       mountPath: /data
