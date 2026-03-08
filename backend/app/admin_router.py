@@ -16,17 +16,20 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from . import admin_db
 from .admin_auth import (
     authenticate_admin,
     bootstrap_super_admin,
+    clear_auth_cookies,
     create_admin_tokens,
     decode_admin_token,
     hash_password,
     require_admin,
     require_role,
+    set_auth_cookies,
 )
 from .audit import get_audit_log
 from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
@@ -193,16 +196,21 @@ async def admin_login(body: LoginRequest, request: Request):
         phone=body.email, ip_address=ip, user_agent=ua, success=True,
     )
     admin_db.clear_failed_logins(body.email)
-    return result
+    response = JSONResponse(content={"user": result["user"]})
+    set_auth_cookies(response, result["access_token"], result["refresh_token"])
+    return response
 
 
 @router.post("/auth/refresh")
 async def admin_refresh(request: Request):
     """Refresh admin access token using refresh token (with rotation)."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing refresh token.")
-    token = auth_header[7:]
+    # Read refresh token from cookie first, fall back to Authorization header
+    token = request.cookies.get("admin_refresh", "")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing refresh token.")
+        token = auth_header[7:]
     payload = decode_admin_token(token, expected_type="admin_refresh")
 
     # Refresh token rotation — each token can only be used once
@@ -214,7 +222,10 @@ async def admin_refresh(request: Request):
     user = admin_db.get_admin_user_by_id(int(payload["sub"]))
     if not user or not user["is_active"]:
         raise HTTPException(status_code=401, detail="Account not found or deactivated.")
-    return create_admin_tokens(user)
+    result = create_admin_tokens(user)
+    response = JSONResponse(content={"user": result["user"]})
+    set_auth_cookies(response, result["access_token"], result["refresh_token"])
+    return response
 
 
 @router.get("/auth/me")
@@ -231,6 +242,14 @@ async def admin_me(payload: dict = Depends(require_admin)):
         "role": user["role"],
         "is_active": bool(user["is_active"]),
     }
+
+
+@router.post("/auth/logout")
+async def admin_logout():
+    """Clear auth cookies."""
+    response = JSONResponse(content={"success": True})
+    clear_auth_cookies(response)
+    return response
 
 
 # ════════════════════════════════════════════════════════════════════════════
