@@ -52,7 +52,7 @@ TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 OTP_TTL = int(os.getenv("OTP_TTL", "180"))                  # 3 minutes
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "4"))   # lockout after 4 wrong guesses
 OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "4"))         # max 4 sends per window
-OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
+OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "300"))   # 5 minute window
 
 # Test account — only enabled in development/staging (never in production)
 TEST_PHONE = os.getenv("TEST_PHONE", "") if APP_ENV != "production" else ""
