@@ -51,6 +51,7 @@ body{font-family:'Source Sans 3',sans-serif;background:#0F172A;min-height:100vh;
 .v1 .ctl{font-size:13px;color:#64748B;font-weight:500;margin-bottom:1px}
 .v1 .cv{font-family:'Lexend';font-size:20px;font-weight:700;color:#0F172A}
 .v1 .bdg{background:#059669}
+.v1 .bdg2{font-size:9px;font-weight:600;color:#7B3FBF;background:#F3E8FF;border-radius:5px;padding:2px 7px;display:inline-block;margin-top:3px}
 .v1 .as{display:flex;gap:12px;margin-bottom:20px;overflow-x:auto;padding-bottom:4px}
 .v1 .ac{background:#fff;border-radius:16px;overflow:hidden;min-width:140px;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.04);border:1px solid #F1F5F9}
 .v1 .abar{height:4px;background:#7B3FBF}
@@ -62,7 +63,7 @@ body{font-family:'Source Sans 3',sans-serif;background:#0F172A;min-height:100vh;
 .v1 .vs::before{content:'';position:absolute;top:-40px;right:-40px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.08)}
 .v1 .vcenter{display:flex;flex-direction:column;align-items:center;position:relative;z-index:1}
 .v1 .mb{width:66px;height:66px;min-width:66px;border-radius:50%;background:#fff;border:none;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(0,0,0,.2);margin-bottom:12px}
-.v1 .vts{font-size:12px;color:rgba(255,255,255,.75);text-align:center;line-height:1.5;max-width:260px;margin-bottom:14px}
+.v1 .vts{font-size:13px;color:rgba(255,255,255,.75);text-align:center;line-height:1.5;max-width:260px;margin-bottom:14px}
 .v1 .vbot{display:flex;gap:10px;align-items:center;width:100%;position:relative;z-index:1}
 .v1 .vi{flex:1;background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.25);border-radius:16px;padding:12px 16px;font-size:14px;color:rgba(255,255,255,.5);font-family:'Source Sans 3'}
 .v1 .vright{display:flex;flex-direction:column;align-items:center;gap:4px}
@@ -189,15 +190,15 @@ function show(v){
 <div class="sl">Your Copays</div>
 <div class="cg">
 <div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div><div class="ctl">PCP Visit</div><div class="cv">$0</div><span class="bdg">No Cost</span></div></div>
-<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div><div class="ctl">Specialist</div><div class="cv">$20</div></div></div>
-<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div><div class="ctl">Urgent Care</div><div class="cv">$15</div></div></div>
-<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div><div><div class="ctl">Emergency Room</div><div class="cv">$150</div></div></div>
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div><div class="ctl">Specialist</div><div class="cv">$20</div><span class="bdg2">Low Copay</span></div></div>
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div><div class="ctl">Urgent Care</div><div class="cv">$15</div><span class="bdg2">Below Avg</span></div></div>
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div><div><div class="ctl">Emergency Room</div><div class="cv">$150</div><span class="bdg2">You're Covered</span></div></div>
 </div>
 <div class="sl">Your Allowances</div>
 <div class="as">
-<div class="ac"><div class="abar"></div><div class="abd"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg><div class="av">$984</div><div class="al">Est. Annual Rx</div><div class="ap">Per year</div></div></div>
-<div class="ac"><div class="abar"></div><div class="abd"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg><div class="av">$3,000</div><div class="al">Dental Max</div><div class="ap">Per year</div></div></div>
-<div class="ac"><div class="abar"></div><div class="abd"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><div class="av">$50</div><div class="al">OTC Allowance</div><div class="ap">Per quarter</div></div></div>
+<div class="ac"><div class="abar"></div><div class="abd"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg><div class="av">$984</div><div class="al">Est. Annual Rx</div><div class="bdg2">Top Tier</div></div></div>
+<div class="ac"><div class="abar"></div><div class="abd"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg><div class="av">$3,000</div><div class="al">Dental Max</div><div class="bdg2">Highest in Area</div></div></div>
+<div class="ac"><div class="abar"></div><div class="abd"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><div class="av">$50</div><div class="al">OTC Allowance</div><div class="bdg2">Use Quarterly</div></div></div>
 </div>
 <div class="vs"><div class="vcenter"><button class="mb"><svg width="30" height="30" viewBox="0 0 24 24" fill="#7B3FBF"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23" stroke="#7B3FBF" stroke-width="2"/><line x1="8" y1="23" x2="16" y2="23" stroke="#7B3FBF" stroke-width="2"/></svg></button><div class="vts">Tap the mic to ask about plan benefits, find doctors, book transportation and set reminders</div></div><div class="vbot"><input class="vi" placeholder="Type your question..." readonly><div class="vright"><div class="nh">Need help?</div><button class="cb"><svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg> Call Us</button></div></div></div>
 </div></div>
