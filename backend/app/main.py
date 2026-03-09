@@ -1650,6 +1650,16 @@ def get_sob_pdf(plan_number: ValidPlanNumber, _user: dict = Depends(get_current_
     )
 
 
+@app.get("/sob/raw/{plan_number}")
+def get_sob_raw(plan_number: str):
+    """Return the raw extracted JSON (chunks + carrier) for a plan."""
+    path = _find_extracted_file(normalize_plan_id(plan_number))
+    if not path:
+        raise HTTPException(status_code=404, detail=f"No extracted data for {plan_number}")
+    with open(path, "r") as f:
+        return json.load(f)
+
+
 # --- OTC fallback from SOB extracted text ---
 
 def _otc_from_sob_text(plan_number: str) -> dict | None:
