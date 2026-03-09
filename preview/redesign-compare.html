@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INY Concierge - 3 Design Iterations</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Figtree:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Source Sans 3',sans-serif;background:#0F172A;min-height:100vh;padding:32px 16px}
+.title{text-align:center;margin-bottom:12px}
+.title h1{font-family:'Lexend';font-size:24px;font-weight:700;color:#F1F5F9}
+.title p{color:#64748B;font-size:14px;margin-top:4px}
+.tabs{display:flex;gap:8px;margin-bottom:28px;flex-wrap:wrap;justify-content:center}
+.tab{font-family:'Lexend';font-size:13px;font-weight:600;padding:10px 24px;border-radius:12px;border:2px solid #334155;color:#94A3B8;cursor:pointer;background:transparent;transition:all .2s}
+.tab:hover{border-color:#7B3FBF;color:#C4B5FD}
+.tab.on{background:#7B3FBF;border-color:#7B3FBF;color:#fff}
+.wrap{display:flex;gap:36px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+.col{display:flex;flex-direction:column;align-items:center}
+.col.hide{display:none}
+.lbl{font-family:'Lexend';color:#64748B;font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.lbl b{color:#22C55E}
+.tag{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:6px;margin-left:6px;vertical-align:middle;letter-spacing:.5px}
+.tag.t1{background:#DBEAFE;color:#1E40AF}.tag.t2{background:#FEF3C7;color:#92400E}.tag.t3{background:#DCFCE7;color:#166534}
+.subdesc{font-size:12px;color:#64748B;text-align:center;max-width:340px;margin-bottom:12px;line-height:1.5}
+.phone{width:375px;border-radius:40px;overflow:hidden;box-shadow:0 25px 80px rgba(0,0,0,.5);border:3px solid #1E293B}
+.s{padding:52px 20px 24px}
+/* header */
+.hd{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px}
+.cr{border-radius:14px;padding:10px 16px;text-align:center}
+.sl{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:10px;margin-top:4px}
+.ag{font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:6px;font-weight:500}
+/* shared badge */
+.bdg{font-size:10px;font-weight:600;color:#fff;border-radius:6px;padding:2px 8px;display:inline-block;margin-top:3px}
+
+/* ============ V1 ============ */
+.v1{background:#F8FAFC}
+.v1 .gr{font-family:'Lexend';color:#64748B;font-size:15px}
+.v1 .nm{font-family:'Lexend';font-size:26px;font-weight:700;color:#0F172A;margin-top:2px}
+.v1 .cr{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid #E2E8F0}
+.v1 .cl{font-family:'Lexend';font-weight:700;font-size:17px;color:#16A34A}
+.v1 .cp{font-size:11px;color:#64748B;margin-top:3px;font-weight:500}
+.v1 .ag{color:#64748B}
+.v1 .sl{font-family:'Lexend';color:#94A3B8}
+.v1 .qa{display:flex;gap:10px;margin-bottom:20px}
+.v1 .pl{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #E2E8F0;border-radius:14px;padding:12px 14px;flex:1;justify-content:center}
+.v1 .pt{font-family:'Lexend';font-size:13px;font-weight:600;color:#334155}
+.v1 .cg{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px}
+.v1 .cc{background:#fff;border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,.04);border:1px solid #F1F5F9}
+.v1 .ci{width:44px;height:44px;min-width:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#EDE7F6}
+.v1 .ctl{font-size:13px;color:#64748B;font-weight:500;margin-bottom:1px}
+.v1 .cv{font-family:'Lexend';font-size:20px;font-weight:700;color:#0F172A}
+.v1 .bdg{background:#059669}
+.v1 .as{display:flex;gap:12px;margin-bottom:20px;overflow-x:auto;padding-bottom:4px}
+.v1 .ac{background:#fff;border-radius:16px;padding:16px;min-width:140px;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.04);border:1px solid #F1F5F9}
+.v1 .av{font-family:'Lexend';font-size:18px;font-weight:700;color:#0F172A;margin-top:10px}
+.v1 .al{font-size:12px;color:#64748B;font-weight:500;margin-top:2px}
+.v1 .ap{font-size:11px;color:#94A3B8;font-weight:500;margin-top:6px;background:#F8FAFC;border-radius:6px;padding:3px 8px;display:inline-block}
+.v1 .vs{background:linear-gradient(135deg,#7B3FBF,#9B6BD4 50%,#7B3FBF);border-radius:24px;padding:22px;position:relative;overflow:hidden}
+.v1 .vs::before{content:'';position:absolute;top:-40px;right:-40px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.08)}
+.v1 .vt{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;position:relative;z-index:1}
+.v1 .vtt{font-family:'Lexend';font-size:20px;font-weight:700;color:#fff}
+.v1 .vts{font-size:13px;color:rgba(255,255,255,.7);margin-top:2px}
+.v1 .cb{background:rgba(255,255,255,.2);color:#fff;border:1.5px solid rgba(255,255,255,.3);border-radius:14px;padding:10px 18px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+.v1 .vr{display:flex;gap:12px;align-items:center;position:relative;z-index:1}
+.v1 .vi{flex:1;background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.25);border-radius:16px;padding:14px 18px;font-size:15px;color:rgba(255,255,255,.5);font-family:'Source Sans 3'}
+.v1 .mb{width:52px;height:52px;min-width:52px;border-radius:50%;background:#fff;border:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+
+/* ============ V2 ============ */
+.v2{background:#F5F3FF}
+.v2 .gr{font-family:'Figtree';color:#6B7280;font-size:15px}
+.v2 .nm{font-family:'Figtree';font-size:26px;font-weight:700;color:#1F2937;margin-top:2px}
+.v2 .cr{background:#fff;box-shadow:0 2px 8px rgba(123,63,191,.08);border:1.5px solid #E9D5FF}
+.v2 .cl{font-family:'Figtree';font-weight:700;font-size:17px;color:#16A34A}
+.v2 .cp{font-size:11px;color:#6B7280;margin-top:3px;font-weight:500}
+.v2 .ag{color:#6B7280}
+.v2 .sl{font-family:'Figtree';color:#9CA3AF}
+.v2 .qa{display:flex;gap:8px;margin-bottom:20px}
+.v2 .ch{display:flex;align-items:center;gap:8px;background:#fff;border-radius:12px;padding:10px 14px;flex:1;justify-content:center;border-left:3px solid #7B3FBF;box-shadow:0 2px 8px rgba(123,63,191,.06)}
+.v2 .cht{font-family:'Figtree';font-size:13px;font-weight:600;color:#374151}
+.v2 .cl2{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
+.v2 .cc{background:#fff;border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 8px rgba(123,63,191,.06);border:1px solid #F3E8FF}
+.v2 .ci{width:48px;height:48px;min-width:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:#EDE7F6}
+.v2 .cinf{flex:1}
+.v2 .ctl{font-size:14px;color:#6B7280;font-weight:500}
+.v2 .cv{font-family:'Figtree';font-size:22px;font-weight:700;color:#1F2937}
+.v2 .bdg{background:#7B3FBF}
+.v2 .arr{color:#C4B5FD;font-size:20px;font-weight:300}
+.v2 .al2{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
+.v2 .ac{background:#fff;border-radius:14px;padding:14px 16px;box-shadow:0 2px 8px rgba(123,63,191,.06);border:1px solid #F3E8FF}
+.v2 .atop{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.v2 .al{font-size:13px;color:#6B7280;font-weight:500}
+.v2 .av{font-family:'Figtree';font-size:17px;font-weight:700;color:#1F2937}
+.v2 .aper{font-size:11px;color:#9CA3AF;font-weight:500;margin-left:4px}
+.v2 .pb{height:6px;background:#F3E8FF;border-radius:3px;overflow:hidden}
+.v2 .pf{height:100%;border-radius:3px;background:linear-gradient(90deg,#7B3FBF,#A78BFA)}
+.v2 .vs{background:#7B3FBF;border-radius:20px;padding:18px;display:flex;align-items:center;gap:14px}
+.v2 .mb{width:50px;height:50px;min-width:50px;border-radius:50%;background:#fff;border:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.v2 .vmid{flex:1}
+.v2 .vtt{font-family:'Figtree';font-size:16px;font-weight:700;color:#fff}
+.v2 .vts{font-size:12px;color:rgba(255,255,255,.6)}
+.v2 .cb{background:rgba(255,255,255,.2);color:#fff;border:1.5px solid rgba(255,255,255,.3);border-radius:12px;padding:8px 14px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap}
+
+/* ============ V3 ============ */
+.v3{background:#FAFAF9}
+.v3 .gr{font-family:'Noto Sans';color:#78716C;font-size:15px}
+.v3 .nm{font-family:'Noto Sans';font-size:26px;font-weight:700;color:#1C1917;margin-top:2px}
+.v3 .cr{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.05);border:1px solid #E7E5E4;border-radius:16px}
+.v3 .cl{font-family:'Noto Sans';font-weight:700;font-size:17px;color:#16A34A}
+.v3 .cp{font-size:11px;color:#78716C;margin-top:3px;font-weight:500}
+.v3 .ag{color:#78716C}
+.v3 .sl{font-family:'Noto Sans';color:#A8A29E}
+.v3 .qa{display:flex;gap:10px;margin-bottom:20px}
+.v3 .qb{display:flex;align-items:center;gap:8px;background:#FAF5FF;border:1.5px solid #E9D5FF;border-radius:24px;padding:10px 16px;flex:1;justify-content:center}
+.v3 .qbt{font-family:'Noto Sans';font-size:13px;font-weight:600;color:#581C87}
+.v3 .cg{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px}
+.v3 .cc{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.04);border:1px solid #F5F5F4}
+.v3 .cbar{height:4px;background:#7B3FBF}
+.v3 .cbd{padding:14px;display:flex;align-items:center;gap:12px}
+.v3 .ci{width:44px;height:44px;min-width:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#FAF5FF}
+.v3 .ctl{font-size:13px;color:#78716C;font-weight:500;margin-bottom:1px}
+.v3 .cv{font-family:'Noto Sans';font-size:20px;font-weight:700;color:#1C1917}
+.v3 .bdg{background:#7B3FBF}
+.v3 .as{display:flex;gap:12px;margin-bottom:20px;overflow-x:auto;padding-bottom:4px}
+.v3 .ac{background:#fff;border-radius:16px;padding:16px;min-width:145px;flex-shrink:0;border:1px solid #F5F5F4;box-shadow:0 1px 6px rgba(0,0,0,.04)}
+.v3 .av{font-family:'Noto Sans';font-size:18px;font-weight:700;color:#1C1917;margin-top:10px}
+.v3 .al{font-size:12px;color:#78716C;font-weight:500;margin-top:2px}
+.v3 .ap{font-size:11px;color:#A8A29E;font-weight:500;margin-top:6px;background:#FAFAF9;border-radius:6px;padding:3px 8px;display:inline-block}
+.v3 .vs{background:linear-gradient(135deg,#581C87,#7B3FBF 60%,#A855F7);border-radius:24px;padding:22px;position:relative;overflow:hidden}
+.v3 .vs::before{content:'';position:absolute;top:-30px;right:-30px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.06)}
+.v3 .vt{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;position:relative;z-index:1}
+.v3 .vtt{font-family:'Noto Sans';font-size:18px;font-weight:700;color:#fff}
+.v3 .vts{font-size:13px;color:rgba(255,255,255,.65);margin-top:3px;line-height:1.4}
+.v3 .cb{background:rgba(255,255,255,.15);color:#fff;border:1.5px solid rgba(255,255,255,.25);border-radius:14px;padding:10px 16px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.v3 .vr{display:flex;gap:10px;align-items:center;position:relative;z-index:1}
+.v3 .mb{width:52px;height:52px;min-width:52px;border-radius:16px;background:#fff;border:none;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+.v3 .vi{flex:1;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.2);border-radius:16px;padding:14px 16px;font-size:15px;color:rgba(255,255,255,.5);font-family:'Noto Sans'}
+
+/* notes */
+.np{width:300px;align-self:flex-start}
+.nc{background:#1E293B;border-radius:16px;padding:20px;margin-bottom:16px}
+.nc h4{font-family:'Lexend';font-size:14px;font-weight:700;color:#E2E8F0;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.nc .d{width:8px;height:8px;border-radius:50%}
+.nc ul{list-style:none;padding:0}
+.nc li{font-size:12px;color:#94A3B8;line-height:1.6;padding-left:14px;position:relative;margin-bottom:4px}
+.nc li::before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:#475569}
+.nc .hl{color:#C4B5FD;font-weight:600}
+
+/* SVG icons reused */
+svg{vertical-align:middle}
+
+@media(max-width:1400px){.wrap{flex-direction:column;align-items:center}.np{width:375px}}
+</style>
+<script>
+function show(v){
+  document.querySelectorAll('.col').forEach(e=>e.classList.add('hide'));
+  document.querySelectorAll('.tab').forEach(e=>e.classList.remove('on'));
+  if(v==='all'){document.querySelectorAll('.col').forEach(e=>e.classList.remove('hide'));}
+  else{document.getElementById(v).classList.remove('hide');}
+  event.target.classList.add('on');
+}
+</script>
+</head>
+<body>
+<div class="title"><h1>INY Concierge - 3 Iterations</h1><p>All copay icons purple. Pick your favorite or mix-and-match.</p></div>
+<div class="tabs">
+<button class="tab on" onclick="show('all')">Show All</button>
+<button class="tab" onclick="show('d1')">V1 - Clean Minimal</button>
+<button class="tab" onclick="show('d2')">V2 - Bold List</button>
+<button class="tab" onclick="show('d3')">V3 - Warm Healthcare</button>
+</div>
+<div class="wrap">
+
+<!-- ===== V1 ===== -->
+<div class="col" id="d1">
+<div class="lbl"><b>V1</b> CLEAN MINIMAL <span class="tag t1">Recommended</span></div>
+<div class="subdesc">2x2 copay grid, scrollable allowances, gradient voice hero. Closest to current but refined.</div>
+<div class="phone"><div class="s v1">
+<div class="hd"><div><div class="gr">Good morning,</div><div class="nm">Frank Dimola</div></div><div class="cr"><div class="cl">Humana</div><div class="cp">H7617-107</div></div></div>
+<div class="qa">
+<div class="pl"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span class="pt">ID Card</span></div>
+<div class="pl"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="pt">Reminders</span></div>
+<div class="pl"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="pt">Benefits</span></div>
+</div>
+<div class="ag"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Your Agent: Frank D</div>
+<div class="sl">Your Copays</div>
+<div class="cg">
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div><div class="ctl">PCP Visit</div><div class="cv">$0</div><span class="bdg">No Cost</span></div></div>
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div><div class="ctl">Specialist</div><div class="cv">$20</div></div></div>
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div><div class="ctl">Urgent Care</div><div class="cv">$15</div></div></div>
+<div class="cc"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div><div><div class="ctl">Emergency Room</div><div class="cv">$150</div></div></div>
+</div>
+<div class="sl">Your Allowances</div>
+<div class="as">
+<div class="ac"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg><div class="av">$984</div><div class="al">Est. Annual Rx</div><div class="ap">Per year</div></div>
+<div class="ac"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg><div class="av">$3,000</div><div class="al">Dental Max</div><div class="ap">Per year</div></div>
+<div class="ac"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><div class="av">$50</div><div class="al">OTC Allowance</div><div class="ap">Per quarter</div></div>
+</div>
+<div class="vs"><div class="vt"><div><div class="vtt">Ask anything</div><div class="vts">Voice or text - we're here to help</div></div><button class="cb"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg> Call Us</button></div><div class="vr"><input class="vi" placeholder="Type your question..." readonly><button class="mb"><svg width="24" height="24" viewBox="0 0 24 24" fill="#7B3FBF"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23" stroke="#7B3FBF" stroke-width="2"/><line x1="8" y1="23" x2="16" y2="23" stroke="#7B3FBF" stroke-width="2"/></svg></button></div></div>
+</div></div>
+</div>
+
+<!-- ===== V2 ===== -->
+<div class="col" id="d2">
+<div class="lbl"><b>V2</b> BOLD LIST <span class="tag t2">Data-Dense</span></div>
+<div class="subdesc">Full-width list cards, progress bars on allowances, compact voice bar. Maximum readability.</div>
+<div class="phone"><div class="s v2">
+<div class="hd"><div><div class="gr">Good morning,</div><div class="nm">Frank Dimola</div></div><div class="cr"><div class="cl">Humana</div><div class="cp">H7617-107</div></div></div>
+<div class="qa">
+<div class="ch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span class="cht">ID Card</span></div>
+<div class="ch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="cht">Reminders</span></div>
+<div class="ch"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="cht">Benefits</span></div>
+</div>
+<div class="ag"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Your Agent: Frank D</div>
+<div class="sl">Your Copays</div>
+<div class="cl2">
+<div class="cc"><div class="ci"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div class="cinf"><div class="ctl">PCP Visit</div><div class="cv">$0</div></div><span class="bdg">FREE</span></div>
+<div class="cc"><div class="ci"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="cinf"><div class="ctl">Specialist</div><div class="cv">$20</div></div><span class="arr">&rsaquo;</span></div>
+<div class="cc"><div class="ci"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div class="cinf"><div class="ctl">Urgent Care</div><div class="cv">$15</div></div><span class="arr">&rsaquo;</span></div>
+<div class="cc"><div class="ci"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div><div class="cinf"><div class="ctl">Emergency Room</div><div class="cv">$150</div></div><span class="arr">&rsaquo;</span></div>
+</div>
+<div class="sl">Your Allowances</div>
+<div class="al2">
+<div class="ac"><div class="atop"><div><div class="al">Est. Annual Rx</div><div class="av">$984 <span class="aper">/ year</span></div></div></div><div class="pb"><div class="pf" style="width:35%"></div></div></div>
+<div class="ac"><div class="atop"><div><div class="al">Dental Maximum</div><div class="av">$3,000 <span class="aper">/ year</span></div></div></div><div class="pb"><div class="pf" style="width:15%"></div></div></div>
+<div class="ac"><div class="atop"><div><div class="al">OTC Allowance</div><div class="av">$50 <span class="aper">/ quarter</span></div></div></div><div class="pb"><div class="pf" style="width:60%"></div></div></div>
+</div>
+<div class="vs"><button class="mb"><svg width="22" height="22" viewBox="0 0 24 24" fill="#7B3FBF"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23" stroke="#7B3FBF" stroke-width="2"/><line x1="8" y1="23" x2="16" y2="23" stroke="#7B3FBF" stroke-width="2"/></svg></button><div class="vmid"><div class="vtt">Ask anything</div><div class="vts">Tap mic or type a question</div></div><button class="cb"><svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg> Call</button></div>
+</div></div>
+</div>
+
+<!-- ===== V3 ===== -->
+<div class="col" id="d3">
+<div class="lbl"><b>V3</b> WARM HEALTHCARE <span class="tag t3">Senior-First</span></div>
+<div class="subdesc">Warm stone tones, purple accent bars, rounded buttons. Personal & less clinical. Noto Sans font.</div>
+<div class="phone"><div class="s v3">
+<div class="hd"><div><div class="gr">Good morning,</div><div class="nm">Frank Dimola</div></div><div class="cr"><div class="cl">Humana</div><div class="cp">H7617-107</div></div></div>
+<div class="qa">
+<div class="qb"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span class="qbt">ID Card</span></div>
+<div class="qb"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="qbt">Reminders</span></div>
+<div class="qb"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="qbt">Benefits</span></div>
+</div>
+<div class="ag"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716C" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Your Agent: Frank D</div>
+<div class="sl">Your Copays</div>
+<div class="cg">
+<div class="cc"><div class="cbar"></div><div class="cbd"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div><div><div class="ctl">PCP Visit</div><div class="cv">$0</div><span class="bdg">No Cost</span></div></div></div>
+<div class="cc"><div class="cbar"></div><div class="cbd"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div><div class="ctl">Specialist</div><div class="cv">$20</div></div></div></div>
+<div class="cc"><div class="cbar"></div><div class="cbd"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><div><div class="ctl">Urgent Care</div><div class="cv">$15</div></div></div></div>
+<div class="cc"><div class="cbar"></div><div class="cbd"><div class="ci"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div><div><div class="ctl">Emergency Room</div><div class="cv">$150</div></div></div></div>
+</div>
+<div class="sl">Your Allowances</div>
+<div class="as">
+<div class="ac"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg><div class="av">$984</div><div class="al">Est. Annual Rx</div><div class="ap">Per year</div></div>
+<div class="ac"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg><div class="av">$3,000</div><div class="al">Dental Max</div><div class="ap">Per year</div></div>
+<div class="ac"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7B3FBF" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg><div class="av">$50</div><div class="al">OTC Allowance</div><div class="ap">Per quarter</div></div>
+</div>
+<div class="vs"><div class="vt"><div><div class="vtt">Need help?</div><div class="vts">Ask about your plan,<br>find doctors, or call us</div></div><button class="cb"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg> Call Us</button></div><div class="vr"><button class="mb"><svg width="24" height="24" viewBox="0 0 24 24" fill="#7B3FBF"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23" stroke="#7B3FBF" stroke-width="2"/><line x1="8" y1="23" x2="16" y2="23" stroke="#7B3FBF" stroke-width="2"/></svg></button><input class="vi" placeholder="Type your question..." readonly></div></div>
+</div></div>
+</div>
+
+<!-- ===== NOTES ===== -->
+<div class="np">
+<div class="nc"><h4><div class="d" style="background:#3B82F6"></div>V1 - Clean Minimal</h4><ul><li>Closest to current design</li><li><span class="hl">Lexend + Source Sans 3</span></li><li>2x2 copay grid, scrollable allowances</li><li>Gradient voice hero card</li><li>Neutral #F8FAFC background</li></ul></div>
+<div class="nc"><h4><div class="d" style="background:#F59E0B"></div>V2 - Bold List</h4><ul><li>Full-width list = max readability</li><li><span class="hl">Figtree</span> font (modern)</li><li>Purple left-border action chips</li><li><span class="hl">Progress bars</span> on allowances</li><li>Compact voice bar at bottom</li><li>Purple-tinted #F5F3FF background</li></ul></div>
+<div class="nc"><h4><div class="d" style="background:#22C55E"></div>V3 - Warm Healthcare</h4><ul><li>Warm stone tones, less clinical</li><li><span class="hl">Noto Sans</span> (excellent readability)</li><li>Purple <span class="hl">accent bars</span> on cards</li><li>Rounded pill action buttons</li><li>Deeper purple gradient voice</li><li>Warm #FAFAF9 background</li></ul></div>
+<div class="nc"><h4><div class="d" style="background:#A855F7"></div>All 3 Share</h4><ul><li>All copay icons <span class="hl">purple</span></li><li>No text truncation</li><li>WCAG AA contrast</li><li>44px+ touch targets</li><li>"No Cost" badge on $0 PCP</li><li>Copays vs Allowances split</li></ul></div>
+</div>
+
+</div>
+</body>
+</html>
