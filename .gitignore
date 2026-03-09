@@ -58,5 +58,6 @@ backend/extracted/
 # Vercel
 .vercel/
 
-# Claude Code
-.claude/
+# Claude Code - keep .claude/skills/ tracked for portable skills
+.claude/*
+!.claude/skills/
