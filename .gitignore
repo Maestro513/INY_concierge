@@ -61,3 +61,6 @@ backend/extracted/
 # Claude Code - keep .claude/skills/ tracked for portable skills
 .claude/*
 !.claude/skills/
+
+# MCP config (contains API keys)
+.mcp.json
