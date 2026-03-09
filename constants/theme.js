@@ -43,6 +43,19 @@ export const COLORS = {
   micRing2: 'rgba(123, 63, 191, 0.08)',
   micRing3: 'rgba(123, 63, 191, 0.04)',
 
+  // Badges
+  badgeFree: '#059669',
+  badgeFreeBg: '#ECFDF5',
+  badgeHighlight: '#7B3FBF',
+  badgeHighlightBg: '#F3E8FF',
+
+  // Quick action pills
+  quickPillBg: '#FAF5FF',
+  quickPillBorder: '#E9D5FF',
+
+  // Allowance bar
+  allowanceBar: '#7B3FBF',
+
   // Status
   success: '#2E7D32',
   successBg: 'rgba(46, 125, 50, 0.08)',
