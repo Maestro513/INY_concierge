@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, Image, StyleSheet, ActivityIndicator,
-  Animated, Switch, TextInput, Modal,
+  Animated, Switch, TextInput, Modal, ScrollView,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION, BENEFIT_ICON_MAP, DEFAULT_ICON } from '../constants/theme';
@@ -367,7 +367,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
           {row2.length > 0 ? (
             <>
               <Text style={styles.sectionLabel}>Your Allowances</Text>
-              <View style={styles.allowanceScroll}>
+              <ScrollView horizontal showsHorizontalScrollIndicator style={styles.allowanceScroll} contentContainerStyle={styles.allowanceScrollContent}>
                 {row2.map((b, i) => {
                   const isRx = b.label.toLowerCase().includes('rx');
                   const cardInner = (
@@ -377,6 +377,9 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
                         <BenefitIcon label={b.label} size={22} />
                         <Text style={styles.allowanceValue}>{b.in_network || ''}</Text>
                         <Text style={styles.allowanceLabel} numberOfLines={1}>{b.label}</Text>
+                        {b._period ? (
+                          <Text style={styles.allowancePeriod}>{b._period}</Text>
+                        ) : null}
                         {b._highlight ? (
                           <View style={styles.badgeHighlight}><Text style={styles.badgeHighlightText}>{b._highlight}</Text></View>
                         ) : null}
@@ -393,7 +396,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
                     </AnimatedCard>
                   );
                 })}
-              </View>
+              </ScrollView>
             </>
           ) : null}
         </>
@@ -520,7 +523,10 @@ const styles = StyleSheet.create({
 
   // Allowance cards — horizontal scroll
   allowanceScroll: {
-    flexDirection: 'row', gap: 12, marginBottom: 18,
+    marginBottom: 18,
+  },
+  allowanceScrollContent: {
+    flexDirection: 'row', gap: 12, paddingRight: 4,
   },
   allowanceCard: {
     width: 140, backgroundColor: COLORS.white, borderRadius: 16,
@@ -531,6 +537,7 @@ const styles = StyleSheet.create({
   allowanceBody: { padding: 16, alignItems: 'flex-start', gap: 4 },
   allowanceValue: { ...TYPE.cardValue, color: COLORS.text, marginTop: 6 },
   allowanceLabel: { fontSize: 12, fontWeight: '500', color: COLORS.textSecondary },
+  allowancePeriod: { fontSize: 11, fontWeight: '400', color: COLORS.textTertiary, fontStyle: 'italic', marginTop: 2 },
 
   // Icon circle
   iconCircle: {
