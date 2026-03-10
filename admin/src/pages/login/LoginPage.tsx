@@ -71,7 +71,7 @@ export default function LoginPage() {
         <div className="relative z-10 flex items-center gap-2">
           <div className="h-1 w-12 rounded-full bg-sidebar-primary" />
           <span className="text-[11px] font-medium text-sidebar-foreground/40">
-            Encrypted &bull; HIPAA Compliant &bull; SOC 2
+            Encrypted &bull; HIPAA Compliant
           </span>
         </div>
       </div>

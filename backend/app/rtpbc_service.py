@@ -19,6 +19,7 @@ Auth: OAuth2 client credentials (same pattern as Provider Directory).
       configurable via AETNA_RTPBC_AUTH_FLOW env var.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -28,7 +29,7 @@ from typing import Optional
 
 import httpx
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # ── Config from env ──────────────────────────────────────────────────────────
 
@@ -52,8 +53,9 @@ HEADERS = {
 }
 TIMEOUT = 30.0
 
-# Token cache
+# Token cache (with lock to prevent concurrent refresh storms)
 _token_cache: dict = {"access_token": "", "expires_at": 0}
+_token_lock = asyncio.Lock()
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -110,36 +112,42 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
 
-    client_id = os.getenv("AETNA_RTPBC_CLIENT_ID", "") or AETNA_RTPBC_CLIENT_ID
-    client_secret = os.getenv("AETNA_RTPBC_CLIENT_SECRET", "") or AETNA_RTPBC_CLIENT_SECRET
+    async with _token_lock:
+        # Double-check after acquiring lock
+        now = time.time()
+        if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["access_token"]
 
-    if not client_id or not client_secret:
-        raise ValueError("AETNA_RTPBC_CLIENT_ID and AETNA_RTPBC_CLIENT_SECRET must be set")
+        client_id = os.getenv("AETNA_RTPBC_CLIENT_ID", "") or AETNA_RTPBC_CLIENT_ID
+        client_secret = os.getenv("AETNA_RTPBC_CLIENT_SECRET", "") or AETNA_RTPBC_CLIENT_SECRET
 
-    token_url = os.getenv("AETNA_RTPBC_TOKEN_URL", "") or AETNA_RTPBC_TOKEN_URL
+        if not client_id or not client_secret:
+            raise ValueError("AETNA_RTPBC_CLIENT_ID and AETNA_RTPBC_CLIENT_SECRET must be set")
 
-    print(f"[RTPBC] Fetching OAuth token from {token_url}")
+        token_url = os.getenv("AETNA_RTPBC_TOKEN_URL", "") or AETNA_RTPBC_TOKEN_URL
 
-    resp = await client.post(
-        token_url,
-        data={
-            "grant_type": "client_credentials",
-            "scope": "Public NonPII",
-        },
-        auth=(client_id, client_secret),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=15.0,
-    )
-    if resp.status_code != 200:
-        print(f"[RTPBC] Token error {resp.status_code}: {resp.text[:500]}")
-    resp.raise_for_status()
-    token_data = resp.json()
+        log.debug(f"[RTPBC] Fetching OAuth token from {token_url}")
 
-    _token_cache["access_token"] = token_data["access_token"]
-    _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+        resp = await client.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "scope": "Public NonPII",
+            },
+            auth=(client_id, client_secret),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            log.warning(f"[RTPBC] Token error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+        token_data = resp.json()
 
-    print(f"[RTPBC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
-    return _token_cache["access_token"]
+        _token_cache["access_token"] = token_data["access_token"]
+        _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+
+        log.debug(f"[RTPBC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+        return _token_cache["access_token"]
 
 
 # ── FHIR Resource Builders ──────────────────────────────────────────────────
@@ -595,7 +603,7 @@ async def check_drug_cost(
         DrugCostResult with pricing and coverage info, or None on failure.
     """
     if not drug_ndc and not drug_rxnorm:
-        logger.error("Either drug_ndc or drug_rxnorm is required")
+        log.error("Either drug_ndc or drug_rxnorm is required")
         return None
 
     claim = _build_rtpbc_claim(
@@ -621,7 +629,7 @@ async def check_drug_cost(
 
     base_url = os.getenv("AETNA_RTPBC_BASE_URL", "") or AETNA_RTPBC_BASE
 
-    print(f"[RTPBC] Checking cost: drug={drug_name or drug_ndc}, pharmacy={pharmacy_name or pharmacy_ncpdp}")
+    log.debug(f"[RTPBC] Checking cost: drug={drug_name or drug_ndc}, pharmacy={pharmacy_name or pharmacy_ncpdp}")
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
@@ -634,7 +642,7 @@ async def check_drug_cost(
             # POST Claim to $submit or /Claim endpoint
             # Try $submit first (CARIN IG standard), fall back to /Claim
             submit_url = f"{base_url}/Claim/$submit"
-            print(f"[RTPBC] POST {submit_url}")
+            log.debug(f"[RTPBC] POST {submit_url}")
 
             resp = await client.post(
                 submit_url,
@@ -645,7 +653,7 @@ async def check_drug_cost(
             if resp.status_code == 404:
                 # Fallback: POST to /Claim directly
                 fallback_url = f"{base_url}/Claim"
-                print(f"[RTPBC] $submit not found, trying {fallback_url}")
+                log.debug(f"[RTPBC] $submit not found, trying {fallback_url}")
                 resp = await client.post(
                     fallback_url,
                     json=claim,
@@ -653,20 +661,20 @@ async def check_drug_cost(
                 )
 
             if resp.status_code != 200:
-                print(f"[RTPBC] Error {resp.status_code}: {resp.text[:500]}")
+                log.warning(f"[RTPBC] Error {resp.status_code}: {resp.text[:500]}")
                 resp.raise_for_status()
 
             response_data = resp.json()
             resource_type = response_data.get("resourceType", "")
 
-            print(f"[RTPBC] Response: {resource_type}")
+            log.debug(f"[RTPBC] Response: {resource_type}")
 
             if resource_type == "ClaimResponse":
                 result = _parse_claim_response(response_data, drug_name)
                 result.ndc = drug_ndc
                 result.rxnorm = drug_rxnorm
                 result.pharmacy_name = pharmacy_name
-                print(
+                log.debug(
                     f"[RTPBC] Result: patient_pay=${result.patient_pay}, "
                     f"formulary={result.formulary_status}, "
                     f"prior_auth={result.prior_auth_required}"
@@ -689,10 +697,10 @@ async def check_drug_cost(
                 for issue in issues:
                     severity = issue.get("severity", "")
                     details = issue.get("diagnostics", issue.get("details", {}).get("text", ""))
-                    print(f"[RTPBC] OperationOutcome: {severity} — {details}")
+                    log.warning(f"[RTPBC] OperationOutcome: {severity} — {details}")
                 return None
 
-            print(f"[RTPBC] Unexpected response type: {resource_type}")
+            log.warning(f"[RTPBC] Unexpected response type: {resource_type}")
             return None
 
     except httpx.HTTPStatusError as e:
@@ -701,15 +709,15 @@ async def check_drug_cost(
             error_body = e.response.json()
             if error_body.get("resourceType") == "OperationOutcome":
                 for issue in error_body.get("issue", []):
-                    print(f"[RTPBC] Error: {issue.get('diagnostics', issue.get('details', {}).get('text', ''))}")
+                    log.warning(f"[RTPBC] Error: {issue.get('diagnostics', issue.get('details', {}).get('text', ''))}")
         except Exception:
             pass
-        logger.error(f"RTPBC request failed: {e}")
-        print(f"[RTPBC] HTTP error: {e}")
+        log.error(f"RTPBC request failed: {e}")
+        log.warning(f"[RTPBC] HTTP error: {e}")
         return None
     except Exception as e:
-        logger.error(f"RTPBC request failed: {e}")
-        print(f"[RTPBC] Error: {e}")
+        log.error(f"RTPBC request failed: {e}")
+        log.warning(f"[RTPBC] Error: {e}")
         return None
 
 
@@ -729,14 +737,12 @@ async def check_drug_costs_batch(
 ) -> list[DrugCostResult]:
     """
     Check costs for multiple drugs at the same pharmacy.
+    Runs all drug checks concurrently via asyncio.gather.
 
     Each drug dict should have: ndc, rxnorm (optional), name, quantity, days_supply.
     """
-    import asyncio
-
-    results = []
-    for drug in drugs:
-        result = await check_drug_cost(
+    tasks = [
+        check_drug_cost(
             member_id=member_id,
             drug_ndc=drug.get("ndc", ""),
             drug_rxnorm=drug.get("rxnorm", ""),
@@ -754,7 +760,7 @@ async def check_drug_costs_batch(
             last_name=last_name,
             dob=dob,
         )
-        if result:
-            results.append(result)
-
-    return results
+        for drug in drugs
+    ]
+    results = await asyncio.gather(*tasks)
+    return [r for r in results if r]

@@ -1,10 +1,20 @@
 import { Platform } from 'react-native';
 
-let AsyncStorage = null;
+// Prefer expo-secure-store (encrypted keychain/keystore) for token storage.
+// Falls back to encrypted AsyncStorage via secureCache on web or if SecureStore is unavailable.
+let SecureStore = null;
+let _secureCache = null;
 try {
-  AsyncStorage = require('@react-native-async-storage/async-storage').default;
+  SecureStore = require('expo-secure-store');
 } catch (e) {
-  console.log('[API] AsyncStorage native module not available. Token persistence disabled.');
+  // SecureStore not available (web or missing native module)
+}
+if (!SecureStore) {
+  try {
+    _secureCache = require('../utils/secureCache');
+  } catch (e) {
+    if (__DEV__) console.log('[API] No secure storage available. Token persistence disabled.');
+  }
 }
 
 // ── API Configuration ──────────────────────────────────────────
@@ -29,18 +39,27 @@ let _refreshToken = null;
 export async function setTokens(access, refresh) {
   _accessToken = access;
   _refreshToken = refresh;
-  if (AsyncStorage) {
-    await AsyncStorage.multiSet([
-      [TOKEN_KEY, access],
-      [REFRESH_KEY, refresh],
-    ]);
+  if (SecureStore) {
+    await SecureStore.setItemAsync(TOKEN_KEY, access);
+    await SecureStore.setItemAsync(REFRESH_KEY, refresh);
+  } else if (_secureCache) {
+    await _secureCache.secureSet(TOKEN_KEY, access);
+    await _secureCache.secureSet(REFRESH_KEY, refresh);
   }
 }
 
 export async function loadTokens() {
-  if (!AsyncStorage) return { access: null, refresh: null };
   try {
-    const [[, access], [, refresh]] = await AsyncStorage.multiGet([TOKEN_KEY, REFRESH_KEY]);
+    let access, refresh;
+    if (SecureStore) {
+      access = await SecureStore.getItemAsync(TOKEN_KEY);
+      refresh = await SecureStore.getItemAsync(REFRESH_KEY);
+    } else if (_secureCache) {
+      access = await _secureCache.secureGet(TOKEN_KEY);
+      refresh = await _secureCache.secureGet(REFRESH_KEY);
+    } else {
+      return { access: null, refresh: null };
+    }
     _accessToken = access;
     _refreshToken = refresh;
     return { access, refresh };
@@ -52,8 +71,12 @@ export async function loadTokens() {
 export async function clearTokens() {
   _accessToken = null;
   _refreshToken = null;
-  if (AsyncStorage) {
-    await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_KEY]);
+  if (SecureStore) {
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await SecureStore.deleteItemAsync(REFRESH_KEY);
+  } else if (_secureCache) {
+    await _secureCache.secureRemove(TOKEN_KEY);
+    await _secureCache.secureRemove(REFRESH_KEY);
   }
 }
 
@@ -61,8 +84,15 @@ export function getAccessToken() {
   return _accessToken;
 }
 
+// ── Request ID generator ─────────────────────────────────────
+function _generateRequestId() {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${ts}-${rand}`;
+}
+
 // ── Authenticated Fetch ───────────────────────────────────────
-// Wraps fetch with: timeout, Bearer token, auto-refresh on 401
+// Wraps fetch with: timeout, Bearer token, auto-refresh on 401, X-Request-ID
 export async function authFetch(url, options = {}, timeoutMs = 15000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -70,6 +100,9 @@ export async function authFetch(url, options = {}, timeoutMs = 15000) {
   const headers = { ...options.headers };
   if (_accessToken) {
     headers['Authorization'] = `Bearer ${_accessToken}`;
+  }
+  if (!headers['X-Request-ID']) {
+    headers['X-Request-ID'] = _generateRequestId();
   }
 
   try {

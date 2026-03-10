@@ -4,6 +4,7 @@ Detects carrier from plan name, routes to the correct adapter,
 enriches results with NPPES/Google data, calculates distances.
 """
 
+import asyncio
 import logging
 
 from .adapters.aetna import AetnaAdapter
@@ -15,7 +16,7 @@ from .enrichment.geocoding import geocode_address, geocode_zip, haversine_miles
 from .enrichment.google_places import enrich_providers
 from .enrichment.nppes import bulk_lookup_npis
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 # Carrier detection keywords → adapter class
 CARRIER_MAP = {
@@ -54,9 +55,9 @@ async def search_providers(
     specialty: str,
     zip_code: str,
     radius_miles: float = 25.0,
-    limit: int = 200,
+    limit: int = 25,
     enrich_google: bool = True,
-    max_google_enrich: int = 15,
+    max_google_enrich: int = 25,
 ) -> dict:
     """
     Main provider search function.
@@ -110,10 +111,10 @@ async def search_providers(
 
     member_lat, member_lon = member_coords
 
-    print(f"[SERVICE] Carrier: {carrier_key}, Specialty: {specialty}, Zip: {zip_code} -> ({member_lat}, {member_lon})")
+    log.debug(f"[SERVICE] Carrier: {carrier_key}, Specialty: {specialty}, Zip: {zip_code} -> ({member_lat}, {member_lon})")
 
     # Step 4: Query carrier FHIR API
-    logger.info(
+    log.info(
         f"Searching {adapter.carrier_name} for {specialty} near {zip_code}"
     )
     providers = await adapter.search_providers(
@@ -123,7 +124,7 @@ async def search_providers(
         limit=limit,
     )
 
-    print(f"[SERVICE] Raw results from adapter: {len(providers)}")
+    log.debug(f"[SERVICE] Raw results from adapter: {len(providers)}")
 
     if not providers:
         return {
@@ -137,6 +138,7 @@ async def search_providers(
         }
 
     # Step 5: Calculate distances & geocode providers without coordinates
+    needs_geocode = []
     for provider in providers:
         if provider.latitude and provider.longitude:
             provider.distance_miles = haversine_miles(
@@ -144,14 +146,23 @@ async def search_providers(
                 provider.latitude, provider.longitude,
             )
         elif provider.zip_code:
-            # Geocode from provider's zip (cheaper than full address)
-            coords = await geocode_zip(provider.zip_code[:5])
+            needs_geocode.append(provider)
+
+    # Geocode missing coordinates concurrently in batches of 10
+    if needs_geocode:
+        async def _geocode_provider(p):
+            coords = await geocode_zip(p.zip_code[:5])
             if coords:
-                provider.latitude, provider.longitude = coords
-                provider.distance_miles = haversine_miles(
-                    member_lat, member_lon,
-                    coords[0], coords[1],
+                p.latitude, p.longitude = coords
+                p.distance_miles = haversine_miles(
+                    member_lat, member_lon, coords[0], coords[1],
                 )
+
+        BATCH = 10
+        for i in range(0, len(needs_geocode), BATCH):
+            await asyncio.gather(*[
+                _geocode_provider(p) for p in needs_geocode[i:i + BATCH]
+            ])
 
     # Step 6: Filter by radius and sort by distance
     providers = [
@@ -160,7 +171,7 @@ async def search_providers(
     ]
     providers.sort(key=lambda p: p.distance_miles or 999)
 
-    print(f"[SERVICE] After distance filter ({radius_miles}mi): {len(providers)}")
+    log.debug(f"[SERVICE] After distance filter ({radius_miles}mi): {len(providers)}")
 
     # Step 7: NPPES enrichment (for carriers that need it)
     npis_needing_enrichment = [
@@ -178,15 +189,12 @@ async def search_providers(
                     # NPPES doesn't have this directly, but specialty is the main gap
                     pass
 
-    # Step 8: Google Places enrichment (top N closest)
+    # Step 8: Google Places enrichment (concurrent via asyncio.gather)
     if enrich_google and providers:
         providers = await enrich_providers(
-            providers[:max_google_enrich],
+            providers,
             max_enrich=max_google_enrich,
         )
-        # Add back remaining un-enriched providers
-        if len(providers) < limit:
-            pass  # Already sliced above
 
     # Step 9: Build response
     return {

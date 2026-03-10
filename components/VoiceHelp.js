@@ -133,13 +133,16 @@ function extractDrugName(question) {
 }
 
 function formatDrugResponse(data) {
+  if (!data || !data.drug_name || data.tier == null) {
+    return "I found some information but couldn't read it properly. Please call us at (844) 463-2931.";
+  }
   const parts = [];
-  parts.push(`${data.drug_name} is on Tier ${data.tier}, ${data.tier_label}.`);
+  parts.push(`${String(data.drug_name)} is on Tier ${data.tier}, ${data.tier_label || 'unknown tier'}.`);
   if (data.copay_30day_preferred !== null && data.copay_30day_preferred !== undefined) {
     if (typeof data.copay_30day_preferred === 'number') {
       parts.push(`Your copay is $${data.copay_30day_preferred} for a 30-day supply at a preferred pharmacy.`);
     } else {
-      parts.push(`Your cost is ${data.copay_30day_preferred} for a 30-day supply at a preferred pharmacy.`);
+      parts.push(`Your cost is ${String(data.copay_30day_preferred)} for a 30-day supply at a preferred pharmacy.`);
     }
   }
   if (data.deductible_applies) parts.push('Your deductible applies to this drug.');
@@ -147,7 +150,7 @@ function formatDrugResponse(data) {
   if (data.prior_auth) restrictions.push('prior authorization');
   if (data.step_therapy) restrictions.push('step therapy');
   if (data.quantity_limit) {
-    restrictions.push(`quantity limit of ${data.quantity_limit_amount} per ${data.quantity_limit_days} days`);
+    restrictions.push(`quantity limit of ${data.quantity_limit_amount || '?'} per ${data.quantity_limit_days || '?'} days`);
   }
   if (restrictions.length > 0) parts.push(`Restrictions: ${restrictions.join(', ')}.`);
   return parts.join(' ');
@@ -161,7 +164,7 @@ async function lookupDrug(planNumber, drugName) {
     if (data.error) return null;
     return formatDrugResponse(data);
   } catch (err) {
-    console.log('Drug lookup error:', err);
+    if (__DEV__) console.log('Drug lookup error:', err);
     return null;
   }
 }
@@ -232,7 +235,7 @@ async function lookupBenefit(planNumber, config) {
     const res = await authFetch(`${API_URL}/cms/benefits/${encodeURIComponent(planNumber)}/${config.endpoint}`);
     if (!res.ok) return null;
     return config.format(await res.json());
-  } catch (err) { console.log('Benefit lookup error:', err); return null; }
+  } catch (err) { if (__DEV__) console.log('Benefit lookup error:', err); return null; }
 }
 
 
@@ -370,8 +373,9 @@ async function askBackend(question, planId) {
     const data = await res.json();
     return data.answer;
   } catch (err) {
-    console.log('API error:', err);
+    if (__DEV__) console.log('API error:', err);
     if (err.name === 'AbortError') return "That's taking longer than usual. Please try again or call us at (844) 463-2931.";
+    if (err.message === 'Network request failed') return "No internet connection. Please check your WiFi and try again.";
     return "I'm having trouble connecting right now. Please try again or call us at (844) 463-2931.";
   }
 }
@@ -413,7 +417,7 @@ async function handleReminderVoice(intent, sessionId, onCreated) {
     const displayMin = String(time_minute || 0).padStart(2, '0');
     return `Done! I'll remind you to take your ${drug_name} every day at ${displayHour}:${displayMin} ${ampm}.`;
   } catch (err) {
-    console.log('Reminder voice error:', err);
+    if (__DEV__) console.log('Reminder voice error:', err);
     return "I had trouble saving that reminder. Please try again.";
   }
 }
@@ -448,7 +452,7 @@ async function handleUsageVoice(intent, sessionId, onLogged) {
 
     return `Got it! I logged $${amount.toFixed(0)} for ${categoryLabels[category] || category}. You can see your updated balance on the home screen.`;
   } catch (err) {
-    console.log('Usage voice error:', err);
+    if (__DEV__) console.log('Usage voice error:', err);
     return "I had trouble logging that. Please try again.";
   }
 }
@@ -504,7 +508,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
   });
 
   useSpeechRecognitionEvent('error', (event) => {
-    console.log('Speech error:', event.error, event.message);
+    if (__DEV__) console.log('Speech error:', event.error, event.message);
     if (event.error === 'aborted') return;
     if (mode === 'listening') { setMode('idle'); setLiveText(''); }
   });
@@ -546,7 +550,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       speakResponse('Searching for pharmacies near you.');
       setIsSpeaking(true); setMode('idle');
       setTimeout(() => {
-        router.push({ pathname: '/pharmacy-results', params: { zipCode: zipCode || '33434', planNumber: planNumber || '', planName: planName || '' } });
+        router.push({ pathname: '/pharmacy-results', params: { zipCode: zipCode || '', planNumber: planNumber || '', planName: planName || '' } });
       }, 800);
       return;
     }
@@ -557,7 +561,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       speakResponse(`Searching for a ${specialty} near you.`);
       setIsSpeaking(true); setMode('idle');
       setTimeout(() => {
-        router.push({ pathname: '/doctor-results', params: { specialty, zipCode: zipCode || '33434', planName: planName || '' } });
+        router.push({ pathname: '/doctor-results', params: { specialty } });
       }, 800);
       return;
     }

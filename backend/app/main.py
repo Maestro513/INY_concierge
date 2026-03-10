@@ -2,33 +2,33 @@
 InsuranceNYou Backend API
 """
 
+import hashlib
 import json
 import logging
 import os
 import re
 import time
 import uuid
-from typing import Optional
+from typing import Annotated, Optional
 
 import anthropic
-from fastapi import Depends, FastAPI, HTTPException
+import jwt
+from fastapi import Depends, FastAPI, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from .admin_router import router as admin_router
 from .audit import get_audit_log, mask_phone, mask_pii_in_string
-from .auth import create_tokens, decode_token, generate_otp, require_auth, verify_otp
+from .auth import create_tokens, decode_token, require_auth
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
-    ADMIN_SECRET,
     ANTHROPIC_API_KEY,
     APP_ENV,
     CORS_ORIGINS,
     EXTRACTED_DIR,
-    GDRIVE_FOLDER_ID,
     JWT_ACCESS_TTL,
     JWT_REFRESH_TTL,
     JWT_SECRET,
@@ -43,7 +43,7 @@ from .config import (
     TEST_PHONE,
 )
 from .drug_cost_engine import compute_monthly_drug_costs
-from .encryption import get_cipher
+from .persistent_store import PersistentStore
 from .providers.service import search_providers
 from .sms_provider import create_sms_provider
 from .sob_parser import extract_tier_copays, load_plan_text
@@ -52,14 +52,52 @@ from .zoho_client import search_contact_by_phone
 
 # ── Sentry error monitoring ──────────────────────────────────────────────────
 
+def _scrub_pii(text: str) -> str:
+    """Remove phone numbers and Medicare numbers from a string."""
+    text = re.sub(r'\b\d{10}\b', '***PHONE***', text)
+    text = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', text)
+    return text
+
+
+def _scrub_dict(obj):
+    """Recursively scrub PII from strings in dicts/lists."""
+    if isinstance(obj, str):
+        return _scrub_pii(obj)
+    if isinstance(obj, dict):
+        return {k: _scrub_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_dict(item) for item in obj]
+    return obj
+
+
 def _sentry_before_send(event, hint):
     """Strip PII from Sentry events before sending."""
-    # Remove phone numbers and Medicare numbers from breadcrumbs/messages
+    # Scrub log messages
     if "logentry" in event and "message" in event["logentry"]:
-        msg = event["logentry"]["message"]
-        msg = re.sub(r'\b\d{10}\b', '***PHONE***', msg)
-        msg = re.sub(r'\b\d[A-Z0-9]{2}\d-[A-Z0-9]{3}-[A-Z0-9]{4}\b', '***MEDICARE***', msg)
-        event["logentry"]["message"] = msg
+        event["logentry"]["message"] = _scrub_pii(event["logentry"]["message"])
+
+    # Scrub exception frames (variable values in stack traces)
+    for exc_info in (event.get("exception") or {}).get("values", []):
+        for frame in (exc_info.get("stacktrace") or {}).get("frames", []):
+            if "vars" in frame:
+                frame["vars"] = _scrub_dict(frame["vars"])
+
+    # Scrub breadcrumbs
+    for crumb in (event.get("breadcrumbs") or {}).get("values", []):
+        if "message" in crumb:
+            crumb["message"] = _scrub_pii(crumb["message"])
+        if "data" in crumb:
+            crumb["data"] = _scrub_dict(crumb["data"])
+
+    # Scrub request data (URLs, query strings, body)
+    req = event.get("request")
+    if req:
+        for key in ("url", "query_string"):
+            if key in req:
+                req[key] = _scrub_pii(req[key])
+        if "data" in req:
+            req["data"] = _scrub_dict(req["data"])
+
     return event
 
 if SENTRY_DSN:
@@ -80,21 +118,75 @@ if SENTRY_DSN:
         send_default_pii=False,
     )
 
-# ── Structured logging ───────────────────────────────────────────────────────
+# ── Structured logging (PR15) ────────────────────────────────────────────────
+
+class _JSONFormatter(logging.Formatter):
+    """JSON log formatter — one JSON object per line for log aggregators."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            entry["exc"] = self.formatException(record.exc_info)
+        return json.dumps(entry, default=str)
+
+
+_handler = logging.StreamHandler()
+if APP_ENV in ("production", "staging"):
+    _handler.setFormatter(_JSONFormatter())
+else:
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[_handler],
 )
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="InsuranceNYou API", version="0.7.0")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(application):
+    # Startup — nothing extra needed
+    yield
+    # Shutdown — clean up resources
+    log.info("Shutting down — cleaning up resources...")
+    try:
+        store = get_store()
+        store.cleanup_all()
+    except Exception:
+        pass
+    log.info("Shutdown complete.")
+
+app = FastAPI(
+    title="InsuranceNYou API",
+    version="0.7.0",
+    docs_url="/docs" if APP_ENV == "development" else None,
+    redoc_url="/redoc" if APP_ENV == "development" else None,
+    openapi_url="/openapi.json" if APP_ENV == "development" else None,
+    lifespan=_lifespan,
+)
 
 # ── JWT Secret validation ────────────────────────────────────────────────────
-if APP_ENV == "production" and not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET must be set in production. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
-if not JWT_SECRET:
-    log.warning("JWT_SECRET not set — using insecure default for development only")
+if APP_ENV in ("production", "staging"):
+    if not os.getenv("JWT_SECRET"):
+        raise RuntimeError("JWT_SECRET must be set in production/staging. Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\"")
+elif not os.getenv("JWT_SECRET"):
+    log.warning("JWT_SECRET not set — using random per-startup key (dev only, tokens won't survive restarts)")
+
+# ── PHI encryption validation ────────────────────────────────────────────────
+if APP_ENV in ("production", "staging") and not os.getenv("FIELD_ENCRYPTION_KEY"):
+    raise RuntimeError(
+        "FIELD_ENCRYPTION_KEY must be set in production/staging to encrypt PHI at rest. "
+        "Generate one with: python -c \"from app.encryption import generate_key; print(generate_key())\""
+    )
 
 # ── CORS — env-based ─────────────────────────────────────────────────────────
 _default_prod_origins = [
@@ -118,16 +210,75 @@ else:
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
+
+# ── Security headers middleware ──────────────────────────────────────────────
+@app.middleware("http")
+async def security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    )
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
+    if APP_ENV == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
+
+# ── PHI access audit middleware ───────────────────────────────────────────────
+# Logs every request to endpoints that touch Protected Health Information.
+_PHI_PATH_PREFIXES = (
+    "/cms/", "/sob/", "/reminders/", "/usage/", "/ask",
+    "/providers/search", "/pharmacies/search",
+)
+
+@app.middleware("http")
+async def phi_audit_middleware(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    path = request.url.path
+    if any(path.startswith(p) for p in _PHI_PATH_PREFIXES):
+        actor = "anonymous"
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer ") and APP_ENV != "development":
+            try:
+                payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=["HS256"])
+                actor = payload.get("sub", "unknown")
+            except Exception:
+                actor = "invalid_token"
+        elif APP_ENV == "development":
+            actor = "dev"
+        action = "read" if request.method == "GET" else "write"
+        try:
+            get_audit_log().record(
+                actor=actor,
+                action=f"phi_{action}",
+                resource=path,
+                ip_address=request.client.host if request.client else "",
+                detail=f"{request.method} {response.status_code}",
+            )
+        except Exception as exc:
+            log.warning("PHI audit write failed: %s", exc)  # PR12: visible in prod logs
+    return response
 
 # ── Admin router ─────────────────────────────────────────────────────────────
 app.include_router(admin_router)
 
 # ── Admin SPA static files ───────────────────────────────────────────────────
 # Serves the Vite-built admin portal at /admin/*
-_admin_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), "admin", "dist")
+_admin_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "admin", "dist")
 # On Render, admin dist may be at /opt/render/project/src/admin/dist
 if not os.path.isdir(_admin_dist):
     _admin_dist = "/opt/render/project/src/admin/dist"
@@ -142,10 +293,14 @@ if os.path.isdir(_admin_dist):
         app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
 
     # Catch-all for SPA routing — serves index.html for any /admin/* route
+    _admin_real = os.path.realpath(_admin_dist)
+
     @app.get("/admin/{full_path:path}")
     async def admin_spa(full_path: str):
         # If requesting a real file (favicon, etc.), serve it
-        file_path = os.path.join(_admin_dist, full_path)
+        file_path = os.path.realpath(os.path.join(_admin_dist, full_path))
+        if not file_path.startswith(_admin_real + os.sep) and file_path != _admin_real:
+            raise HTTPException(status_code=400, detail="Invalid path")
         if os.path.isfile(file_path):
             return FileResponse(file_path)
         # Otherwise serve index.html for client-side routing
@@ -155,9 +310,9 @@ if os.path.isdir(_admin_dist):
     async def admin_root():
         return FileResponse(os.path.join(_admin_dist, "index.html"))
 
-    log.info(f"Admin portal mounted at /admin/ from {_admin_dist}")
+    log.info("Admin portal mounted at /admin/")
 else:
-    log.warning(f"Admin dist not found at {_admin_dist} — /admin/ routes will 404")
+    log.warning("Admin dist not found — /admin/ routes will 404")
 
 # ── Static widget files ─────────────────────────────────────────────────────
 _static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
@@ -165,20 +320,33 @@ if not os.path.isdir(_static_dir):
     _static_dir = "/opt/render/project/src/static"
 if not os.path.isdir(_static_dir):
     _static_dir = "/opt/render/project/src/backend/static"
-log.info(f"Static dir resolved to: {_static_dir} (exists={os.path.isdir(_static_dir)})")
+log.info("Static dir resolved (exists=%s)", os.path.isdir(_static_dir))
 
 # Serve widget JS with CORS headers (StaticFiles mount doesn't inherit CORS middleware)
 _widget_js_path = os.path.join(_static_dir, "quote-widget.js")
 
 @app.get("/static/quote-widget.js")
-async def serve_widget_js():
-    """Serve widget JS with permissive CORS for cross-origin embedding."""
+async def serve_widget_js(request: Request):
+    """Serve widget JS with scoped CORS for cross-origin embedding."""
     from starlette.responses import FileResponse as _FR
     if not os.path.isfile(_widget_js_path):
-        log.error(f"Widget JS not found at {_widget_js_path}")
+        log.error("Widget JS not found")
         return JSONResponse({"error": "widget not found"}, status_code=404)
     resp = _FR(_widget_js_path, media_type="application/javascript")
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+    # Restrict CORS to known embedding domains in production
+    origin = request.headers.get("origin", "")
+    _WIDGET_ALLOWED_ORIGINS = {
+        "https://insurancenyou.com",
+        "https://www.insurancenyou.com",
+        "https://webflow.insurancenyou.com",
+    }
+    if APP_ENV == "production" and origin:
+        if origin in _WIDGET_ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+        # else: no CORS header → browser blocks cross-origin use
+    else:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
@@ -186,10 +354,63 @@ async def serve_widget_js():
 if os.path.isdir(_static_dir):
     from starlette.staticfiles import StaticFiles as _SF2
     app.mount("/static", _SF2(directory=_static_dir), name="static-files")
-    log.info(f"Static files mounted at /static/ from {_static_dir}")
+    log.info("Static files mounted at /static/")
+
+# ── Request ID correlation middleware ─────────────────────────────────────────
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Attach a unique X-Request-ID to every request/response for log correlation."""
+    req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+    request.state.request_id = req_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
 
 # ── Request timing + metrics middleware ──────────────────────────────────────
+import threading as _threading
+
+_metrics_lock = _threading.Lock()
 _request_metrics: dict = {"total": 0, "errors": 0, "latency_sum": 0.0}
+
+# Cross-worker metrics: each worker flushes its local counters to a shared
+# SQLite table periodically, and /metrics reads the aggregate.
+_METRICS_FLUSH_INTERVAL = 10  # seconds
+_metrics_last_flush = 0.0
+_WORKER_PID = os.getpid()
+
+
+def _flush_metrics_to_db() -> None:
+    """Flush local in-memory metrics to the shared persistent store."""
+    global _metrics_last_flush
+    now = time.time()
+    if now - _metrics_last_flush < _METRICS_FLUSH_INTERVAL:
+        return
+    _metrics_last_flush = now
+    try:
+        store = get_store()
+        with _metrics_lock:
+            total = _request_metrics["total"]
+            errors = _request_metrics["errors"]
+            latency_sum = _request_metrics["latency_sum"]
+        store.upsert_worker_metrics(str(os.getpid()), total, errors, latency_sum)
+    except Exception:
+        pass  # metrics are best-effort
+
+
+def _read_aggregate_metrics() -> dict:
+    """Read aggregated metrics across all workers from the persistent store."""
+    try:
+        store = get_store()
+        return store.read_aggregate_metrics()
+    except Exception:
+        # Fall back to local-only metrics
+        with _metrics_lock:
+            return {
+                "total": _request_metrics["total"],
+                "errors": _request_metrics["errors"],
+                "latency_sum": _request_metrics["latency_sum"],
+            }
+
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -197,49 +418,55 @@ async def metrics_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        _request_metrics["errors"] += 1
+        with _metrics_lock:
+            _request_metrics["errors"] += 1
         raise
     elapsed = time.time() - start
-    _request_metrics["total"] += 1
-    _request_metrics["latency_sum"] += elapsed
-    if response.status_code >= 500:
-        _request_metrics["errors"] += 1
+    with _metrics_lock:
+        _request_metrics["total"] += 1
+        _request_metrics["latency_sum"] += elapsed
+        if response.status_code >= 500:
+            _request_metrics["errors"] += 1
+    # Periodically flush to shared DB for cross-worker visibility
+    _flush_metrics_to_db()
     # Mask PII from URL paths before logging (e.g. /cms/my-drugs/5551234567)
     path = mask_pii_in_string(str(request.url.path))
-    log.info(f"{request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
+    req_id = getattr(request.state, "request_id", "")
+    log.info(f"[{req_id}] {request.method} {path} → {response.status_code} ({elapsed:.3f}s)")
     return response
 
-# ── Session store (in-memory with TTL) ───────────────────────────────────────
-_sessions: dict[str, dict] = {}
+# ── Persistent store (OTP + sessions in SQLite) ─────────────────────────────
+_store = None
 SESSION_TTL = 7200  # 2 hours
+
+
+def get_store() -> PersistentStore:
+    global _store
+    if _store is None:
+        _store = PersistentStore()
+        _store.cleanup_all()
+        log.info("Persistent store loaded")
+    return _store
+
 
 def create_session(phone: str, member_data: dict) -> str:
     """Create a session and return the session ID."""
-    sid = uuid.uuid4().hex
-    _sessions[sid] = {"phone": phone, "data": member_data, "ts": time.time()}
-    _cleanup_sessions()
-    return sid
+    return get_store().create_session(phone, member_data)
 
 def get_session(sid: str) -> dict | None:
     """Get session data, or None if expired/missing."""
-    entry = _sessions.get(sid)
-    if not entry:
-        return None
-    if time.time() - entry["ts"] > SESSION_TTL:
-        _sessions.pop(sid, None)
-        return None
-    return entry
-
-def _cleanup_sessions():
-    """Remove expired sessions (called lazily)."""
-    now = time.time()
-    expired = [k for k, v in _sessions.items() if now - v["ts"] > SESSION_TTL]
-    for k in expired:
-        _sessions.pop(k, None)
+    return get_store().get_session(sid, ttl=SESSION_TTL)
 
 # In-memory cache for parsed SOB summaries: {plan_id: {"data": {...}, "ts": float}}
 _sob_cache: dict[str, dict] = {}
+_sob_cache_lock = _threading.Lock()
 SOB_CACHE_TTL = 3600  # 1 hour
+SOB_CACHE_MAX = 500   # max entries — evict oldest when full
+
+# Per-plan locks to prevent cache stampede (multiple concurrent requests for the
+# same plan all missing cache and all calling Claude API simultaneously)
+_sob_inflight: dict[str, _threading.Lock] = {}
+_sob_inflight_lock = _threading.Lock()
 
 # User Data DB — lazy init
 _user_db = None
@@ -253,14 +480,20 @@ def get_user_db() -> UserDataDB:
     return _user_db
 
 
-def _session_phone(session_id: str) -> str:
-    """Resolve session_id → phone, or raise 401."""
+def _session_phone(session_id: str, user: dict | None = None) -> str:
+    """Resolve session_id → phone, or raise 401.
+    If *user* (JWT payload) is provided, verifies the session belongs to that user.
+    """
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    phone = session["phone"]
+    # Cross-user check: JWT subject must match the session's phone
+    if user and user.get("sub") not in (None, "dev") and user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     # Touch timestamp to extend TTL on activity
-    session["ts"] = time.time()
-    return session["phone"]
+    get_store().touch_session(session_id)
+    return phone
 
 
 # ── SMS Provider — lazy init ─────────────────────────────────────────────────
@@ -278,10 +511,36 @@ def get_sms():
 # ── JWT Auth Dependency ──────────────────────────────────────────────────────
 def get_current_user(request: Request) -> dict:
     """FastAPI dependency — validates Bearer token, returns JWT payload.
+    Also verifies the session still exists (enables logout/revocation).
     Skipped entirely in development so you don't need to auth while editing the app."""
     if APP_ENV == "development":
         return {"sub": "dev", "type": "access"}
-    return require_auth(request, jwt_secret=JWT_SECRET)
+    payload = require_auth(request, jwt_secret=JWT_SECRET)
+    # Session-based revocation: verify the user still has an active session
+    phone = payload.get("sub")
+    if phone:
+        session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+        if not session:
+            raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    return payload
+
+
+def _authorize_plan(user: dict, plan_number: str) -> None:
+    """Verify the authenticated user owns the requested plan_number (IDOR prevention).
+    Raises 403 if the user's session plan doesn't match."""
+    if APP_ENV == "development":
+        return  # Skip in dev mode
+    phone = user.get("sub")
+    if not phone or phone == "dev":
+        return
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    user_plan = normalize_plan_id(session["data"].get("plan_number", ""))
+    requested = normalize_plan_id(plan_number)
+    if user_plan and requested and user_plan != requested:
+        log.warning("IDOR attempt: user plan %s tried to access %s", user_plan[:5], requested[:5])
+        raise HTTPException(status_code=403, detail="Not authorized for this plan.")
 
 
 # CMS Lookup — lazy init so server starts even if DB missing
@@ -296,13 +555,24 @@ def get_cms():
             _cms = CMSLookup()
             log.info("CMS database loaded")
         except Exception as e:
-            log.warning(f"CMS database not available: {e}")
+            log.warning("CMS database not available: %s", type(e).__name__)
             raise HTTPException(status_code=503, detail="CMS database not loaded")
     return _cms
 
 
+def _evict_oldest(cache: dict, max_size: int) -> None:
+    """Evict expired entries, then oldest if still over max_size."""
+    now = time.time()
+    expired = [k for k, v in cache.items() if now - v.get("ts", 0) > SOB_CACHE_TTL]
+    for k in expired:
+        del cache[k]
+    if len(cache) >= max_size:
+        oldest = min(cache, key=lambda k: cache[k].get("ts", 0))
+        del cache[oldest]
+
 # SOB tier copays cache: {plan_id: {"data": dict, "ts": float}}
 _sob_tier_cache: dict[str, dict] = {}
+_sob_tier_cache_lock = _threading.Lock()
 SOB_TIER_CACHE_TTL = 3600  # 1 hour
 
 
@@ -314,9 +584,10 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
     Cached in memory for 1 hour.
     """
     pid = normalize_plan_id(plan_id)
-    cached = _sob_tier_cache.get(pid)
-    if cached and (time.time() - cached["ts"]) < SOB_TIER_CACHE_TTL:
-        return cached["data"]
+    with _sob_tier_cache_lock:
+        cached = _sob_tier_cache.get(pid)
+        if cached and (time.time() - cached["ts"]) < SOB_TIER_CACHE_TTL:
+            return cached["data"]
 
     text = load_plan_text(pid)
     if text is None:
@@ -324,11 +595,13 @@ def get_sob_tier_copays(plan_id: str) -> dict | None:
 
     try:
         tier_copays = extract_tier_copays(text)
-        _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
+        with _sob_tier_cache_lock:
+            _evict_oldest(_sob_tier_cache, SOB_CACHE_MAX)
+            _sob_tier_cache[pid] = {"data": tier_copays, "ts": time.time()}
         log.info(f"SOB tier copays loaded for {pid}: tiers={[k for k in tier_copays if isinstance(k, int)]}")
         return tier_copays
     except Exception as e:
-        log.warning(f"SOB tier copay extraction failed for {pid}: {e}")
+        log.warning("SOB tier copay extraction failed for %s: %s", pid, type(e).__name__)
         return None
 
 
@@ -380,8 +653,8 @@ def parse_medications(raw: str) -> list[dict]:
 # --- Models ---
 
 class AskRequest(BaseModel):
-    question: str
-    plan_number: str
+    question: str = Field(..., min_length=1, max_length=2000)
+    plan_number: str = Field(..., pattern=r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$")
 
 class AskResponse(BaseModel):
     answer: str
@@ -389,48 +662,39 @@ class AskResponse(BaseModel):
     has_context: bool
 
 class LookupRequest(BaseModel):
-    phone: str
+    phone: str = Field(..., pattern=r"^\d{10}$")
 
 class LookupResponse(BaseModel):
     found: bool
     first_name: str = ""
-    last_name: str = ""
-    plan_name: str = ""
-    plan_number: str = ""
-    agent: str = ""
-    medicare_number: str = ""
-    phone: str = ""
-    medications: str = ""
-    zip_code: str = ""
-    session_id: str = ""
 
 class ProviderSearchRequest(BaseModel):
-    plan_name: str
-    specialty: str
-    zip_code: str
-    radius_miles: float = 25.0
-    limit: int = 200
+    plan_name: str = Field(..., min_length=1, max_length=200)
+    specialty: str = Field(..., min_length=1, max_length=200)
+    zip_code: str = Field(..., pattern=r"^\d{5}$")
+    radius_miles: float = Field(25.0, ge=1, le=100)
+    limit: int = Field(200, ge=1, le=500)
     enrich_google: bool = True
 
 class PharmacySearchRequest(BaseModel):
-    plan_number: str = ""
-    zip_code: str
-    radius_miles: int = 10
-    limit: int = 30
+    plan_number: str = Field("", max_length=20)
+    zip_code: str = Field(..., pattern=r"^\d{5}$")
+    radius_miles: int = Field(10, ge=1, le=100)
+    limit: int = Field(30, ge=1, le=200)
 
 class SOBRequest(BaseModel):
-    plan_number: str
+    plan_number: str = Field(..., pattern=r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$")
 
 class DrugLookupRequest(BaseModel):
-    plan_number: str
-    drug_name: str
+    plan_number: str = Field(..., pattern=r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$")
+    drug_name: str = Field(..., min_length=1, max_length=200)
 
 
 # --- OTP / Auth Models ---
 
 class OTPVerifyRequest(BaseModel):
-    phone: str
-    code: str
+    phone: str = Field(..., pattern=r"^\d{10}$")
+    code: str = Field(..., pattern=r"^\d{4,8}$")
 
 class RefreshRequest(BaseModel):
     refresh_token: str
@@ -439,39 +703,89 @@ class RefreshRequest(BaseModel):
 # --- Reminder / Usage Models ---
 
 class ReminderCreate(BaseModel):
-    drug_name: str
-    dose_label: str = ""
-    time_hour: int          # 0-23
-    time_minute: int = 0
-    days_supply: int = 30
+    drug_name: str = Field(..., min_length=1, max_length=200)
+    dose_label: str = Field("", max_length=200)
+    time_hour: int = Field(..., ge=0, le=23)
+    time_minute: int = Field(0, ge=0, le=59)
+    days_supply: int = Field(30, ge=1, le=365)
     refill_reminder: bool = False
-    last_refill_date: Optional[str] = None
+    last_refill_date: Optional[str] = Field(None, max_length=20)
 
 class ReminderUpdate(BaseModel):
     enabled: Optional[bool] = None
-    time_hour: Optional[int] = None
-    time_minute: Optional[int] = None
+    time_hour: Optional[int] = Field(None, ge=0, le=23)
+    time_minute: Optional[int] = Field(None, ge=0, le=59)
     refill_reminder: Optional[bool] = None
-    last_refill_date: Optional[str] = None
-    dose_label: Optional[str] = None
+    last_refill_date: Optional[str] = Field(None, max_length=20)
+    dose_label: Optional[str] = Field(None, max_length=200)
 
 class BulkReminderCreate(BaseModel):
-    reminders: list[ReminderCreate]
-    created_by: str = "member"
+    reminders: list[ReminderCreate] = Field(..., max_length=50)
+    created_by: str = Field("member", pattern=r"^(member|agent|admin)$")
 
 class UsageCreate(BaseModel):
-    category: str           # otc, dental, flex, vision, hearing
-    amount: float
-    description: str = ""
-    usage_date: Optional[str] = None  # defaults to today
-    benefit_period: str = "Monthly"   # Monthly, Quarterly, Yearly
+    category: str = Field(..., max_length=50)
+    amount: float = Field(..., gt=0, le=100000)
+    description: str = Field("", max_length=500)
+    usage_date: Optional[str] = Field(None, max_length=20)
+    benefit_period: str = Field("Monthly", pattern=r"^(Monthly|Quarterly|Yearly)$")
+
+
+# Validated plan_number path parameter for GET endpoints (H3: prevent injection)
+_PLAN_NUMBER_PATTERN = r"^[A-Za-z]\d{4}-\d{3}(-\d{3})?$"
+ValidPlanNumber = Annotated[str, Path(pattern=_PLAN_NUMBER_PATTERN)]
+
+
+# --- IP-based rate limiter for public endpoints (persistent) ─────────────────
+def _check_ip_rate(request: Request, *, max_hits: int, window: int, label: str = "endpoint") -> None:
+    """Raise 429 if the client IP exceeds max_hits within window seconds."""
+    ip = request.client.host if request.client else "unknown"
+    key = f"{label}:{ip}"
+    if not get_store().check_rate_limit(key, max_hits, window):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait before trying again.")
 
 
 # --- Endpoints ---
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Deep health check — verifies DB connectivity, CMS data, and critical config."""
+    checks = {}
+
+    # 1. Persistent store DB writable
+    try:
+        store = get_store()
+        store.count_active_sessions(ttl=SESSION_TTL)
+        checks["persistent_store"] = "ok"
+    except Exception as e:
+        checks["persistent_store"] = f"error: {type(e).__name__}"
+
+    # 2. CMS benefits DB loaded
+    try:
+        cms = get_cms()
+        checks["cms_db"] = "ok" if cms is not None else "not loaded"
+    except Exception as e:
+        checks["cms_db"] = f"error: {type(e).__name__}"
+
+    # 3. Extracted plan data present
+    try:
+        json_count = len([f for f in os.listdir(EXTRACTED_DIR) if f.endswith(".json")]) if os.path.isdir(EXTRACTED_DIR) else 0
+        checks["extracted_plans"] = json_count
+    except Exception as e:
+        checks["extracted_plans"] = f"error: {type(e).__name__}"
+
+    # 4. Critical API keys configured
+    checks["anthropic_key"] = "configured" if ANTHROPIC_API_KEY else "missing"
+
+    healthy = all(
+        v == "ok" or v == "configured" or (isinstance(v, int) and v > 0)
+        for v in checks.values()
+    )
+
+    return JSONResponse(
+        content={"status": "ok" if healthy else "degraded", "checks": checks},
+        status_code=200 if healthy else 503,
+    )
 
 
 # --- Public Quote/Plan Search Endpoints (no auth — for Webflow widget) ---
@@ -489,8 +803,11 @@ def get_medicare_search() -> MedicarePlanSearch:
 
 
 @app.get("/quote/counties/{zipcode}")
-def quote_counties(zipcode: str):
+def quote_counties(zipcode: str, request: Request):
     """Get counties for a zip code (public, no auth)."""
+    _check_ip_rate(request, max_hits=30, window=60, label="quote")
+    if not re.fullmatch(r"\d{5}", zipcode):
+        raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     counties = get_counties_by_zip(zipcode)
     if not counties:
         raise HTTPException(status_code=404, detail="No counties found for this zip code")
@@ -499,6 +816,7 @@ def quote_counties(zipcode: str):
 
 @app.get("/quote/medicare")
 def quote_medicare(
+    request: Request,
     zip: str = None,
     state: str = None,
     county: str = None,
@@ -509,8 +827,11 @@ def quote_medicare(
     Search Medicare Advantage plans (public, no auth).
     Either provide zip (auto-resolves to state/county) or state + county code.
     """
+    _check_ip_rate(request, max_hits=20, window=60, label="quote")
     search = get_medicare_search()
     if zip:
+        if not re.fullmatch(r"\d{5}", zip):
+            raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
         result = search.search_by_zip(zip, limit=limit)
     elif state:
         result = {
@@ -519,13 +840,15 @@ def quote_medicare(
     else:
         raise HTTPException(status_code=400, detail="Provide zip or state parameter")
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        log.warning("Medicare plan search error: %s", result["error"])
+        raise HTTPException(status_code=404, detail="No plans found for the given criteria.")
     return result
 
 
 @app.get("/quote/marketplace")
 def quote_marketplace(
-    zip: str,
+    request: Request,
+    zip: str = "",
     fips: str = None,
     age: int = 30,
     income: int = None,
@@ -536,6 +859,9 @@ def quote_marketplace(
     Search ACA Marketplace plans for under-65 (public, no auth).
     Proxies to CMS Marketplace API (marketplace.api.healthcare.gov).
     """
+    _check_ip_rate(request, max_hits=20, window=60, label="quote")
+    if not re.fullmatch(r"\d{5}", zip):
+        raise HTTPException(status_code=400, detail="Zip code must be exactly 5 digits.")
     result = search_marketplace_plans(
         zipcode=zip,
         fips=fips,
@@ -545,19 +871,25 @@ def quote_marketplace(
         limit=limit,
     )
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        log.warning("Marketplace plan search error: %s", result["error"])
+        raise HTTPException(status_code=404, detail="No plans found for the given criteria.")
     return result
 
 
 @app.get("/metrics")
-def metrics():
-    """Basic request metrics for monitoring."""
-    total = _request_metrics["total"]
+def metrics(_user: dict = Depends(get_current_user)):
+    """Aggregated request metrics across all workers (requires auth)."""
+    # Flush current worker's metrics before reading aggregate
+    _flush_metrics_to_db()
+    agg = _read_aggregate_metrics()
+    total = agg["total"]
+    errors = agg["errors"]
+    latency_sum = agg["latency_sum"]
     return {
         "total_requests": total,
-        "total_errors": _request_metrics["errors"],
-        "avg_latency_ms": round((_request_metrics["latency_sum"] / total) * 1000, 1) if total > 0 else 0,
-        "active_sessions": len(_sessions),
+        "total_errors": errors,
+        "avg_latency_ms": round((latency_sum / total) * 1000, 1) if total > 0 else 0,
+        "active_sessions": get_store().count_active_sessions(ttl=SESSION_TTL),
         "sob_cache_size": len(_sob_cache),
     }
 
@@ -568,13 +900,15 @@ def lookup_member(req: LookupRequest, request: Request):
     Step 1: Look up member by phone, send OTP.
     Returns only {found, first_name} — no sensitive data until OTP verified.
     """
+    _check_ip_rate(request, max_hits=5, window=60, label="auth_lookup")
+
     # Test account — still fetch real data from Zoho, just skip SMS
     is_test = TEST_PHONE and req.phone == TEST_PHONE
 
     try:
         member = search_contact_by_phone(req.phone)
     except Exception as e:
-        log.error(f"Zoho lookup failed: {e}")
+        log.error("Zoho lookup failed: %s", type(e).__name__)
         if is_test:
             # Fallback for test account if Zoho is unreachable
             member = {
@@ -598,12 +932,12 @@ def lookup_member(req: LookupRequest, request: Request):
         )
         return {"found": False}
 
-    # Store member data in a pending session (will be promoted after OTP verify)
-    create_session(req.phone, member)
+    # H1: Session creation deferred to /auth/verify-otp — no PHI materialized pre-auth.
+    # The verify-otp endpoint will re-fetch from Zoho if needed.
 
     if not is_test:
         # Generate + send OTP (skipped for test account — uses TEST_OTP instead)
-        code = generate_otp(
+        code = get_store().generate_otp(
             req.phone,
             otp_ttl=OTP_TTL,
             max_sends=OTP_MAX_SENDS,
@@ -634,9 +968,11 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
     """
     Step 2: Verify OTP → return JWT tokens + full member data.
     """
+    _check_ip_rate(request, max_hits=10, window=60, label="auth_verify")
+
     # Test account — accept TEST_OTP without going through the OTP store
     is_test = TEST_PHONE and TEST_OTP and req.phone == TEST_PHONE
-    otp_valid = (is_test and req.code == TEST_OTP) or verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
+    otp_valid = (is_test and req.code == TEST_OTP) or get_store().verify_otp(req.phone, req.code, max_attempts=OTP_MAX_ATTEMPTS)
 
     if not otp_valid:
         get_audit_log().record(
@@ -648,23 +984,25 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
 
     # Find the pending session with this phone's member data
     member_data = None
-    for sid, entry in _sessions.items():
-        if entry["phone"] == req.phone:
-            member_data = entry["data"]
-            break
+    pending = get_store().find_session_by_phone(req.phone, ttl=SESSION_TTL)
+    if pending:
+        member_data = pending["data"]
 
     if not member_data:
         # Session expired between lookup and verify — re-fetch from Zoho
         try:
             member_data = search_contact_by_phone(req.phone)
         except Exception as e:
-            log.error(f"Zoho re-fetch failed after OTP verify: {e}")
+            log.error("Zoho re-fetch failed after OTP verify: %s", type(e).__name__)
             raise HTTPException(status_code=500, detail="Verification succeeded but couldn't load your account. Please try again.")
         if not member_data:
             raise HTTPException(status_code=404, detail="Account not found.")
 
-    # Create a real session for session-based endpoints
-    sid = create_session(req.phone, member_data)
+    # Create a real session — store only needed fields (H4: minimize PHI)
+    _SESSION_FIELDS = ("first_name", "last_name", "plan_name", "plan_number",
+                       "agent", "medications", "zip_code")
+    session_member = {k: member_data.get(k, "") for k in _SESSION_FIELDS}
+    sid = create_session(req.phone, session_member)
 
     # Generate JWT tokens
     tokens = create_tokens(
@@ -689,25 +1027,29 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         "plan_name": member_data["plan_name"],
         "plan_number": member_data["plan_number"],
         "agent": member_data.get("agent", "") or "",
-        "medicare_number": member_data.get("medicare_number", "") or "",
-        "medications": member_data.get("medications", "") or "",
         "zip_code": member_data.get("zip_code", "") or "",
         "session_id": sid,
     }
 
 
 @app.post("/auth/refresh")
-def refresh_token_endpoint(req: RefreshRequest):
+def refresh_token_endpoint(req: RefreshRequest, request: Request):
     """Exchange a refresh token for a new access token."""
+    _check_ip_rate(request, max_hits=10, window=60, label="auth_refresh")
     payload = decode_token(req.refresh_token, jwt_secret=JWT_SECRET, expected_type="refresh")
     phone = payload["sub"]
 
+    # Refresh token rotation — each token can only be used once
+    jti = payload.get("jti")
+    if jti and not get_store().consume_refresh_jti(jti, phone):
+        log.warning("Refresh token replay detected for phone ending ***%s", phone[-4:])
+        raise HTTPException(status_code=401, detail="Token already used. Please log in again.")
+
     # Find member data from an active session
     member_data = None
-    for entry in _sessions.values():
-        if entry["phone"] == phone:
-            member_data = entry["data"]
-            break
+    active = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if active:
+        member_data = active["data"]
 
     if not member_data:
         # Session gone — re-fetch from Zoho
@@ -727,9 +1069,33 @@ def refresh_token_endpoint(req: RefreshRequest):
     return tokens
 
 
+@app.post("/auth/logout")
+def logout(request: Request, user: dict = Depends(get_current_user)):
+    """Invalidate all sessions for this user, effectively revoking their tokens."""
+    phone = user.get("sub")
+    if phone and phone != "dev":
+        count = get_store().delete_sessions_by_phone(phone)
+        log.info(f"Logout: deleted {count} session(s) for phone ending ***{phone[-4:]}")
+        get_audit_log().record(
+            actor=phone, action="auth_logout", resource="session",
+            ip_address=request.client.host if request.client else "",
+            detail=f"deleted {count} sessions",
+        )
+    return {"success": True}
+
+
+# Per-phone rate limiter for /ask
+_ASK_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
+_ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask_question(req: AskRequest, _user: dict = Depends(get_current_user)):
     """Ask a question about a member's plan benefits."""
+    phone = _user.get("sub", "anon")
+    if not get_store().check_rate_limit(f"ask:{phone}", _ASK_MAX, _ASK_WINDOW):
+        raise HTTPException(status_code=429, detail="Too many questions. Please wait a minute.")
+
     plan_id = normalize_plan_id(req.plan_number)
     result = ask_claude(question=req.question, plan_number=plan_id)
     return AskResponse(**result)
@@ -751,7 +1117,8 @@ async def provider_search(req: ProviderSearchRequest, _user: dict = Depends(get_
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
+        log.warning("Provider search error: %s", result.get("error", "unknown"))
+        raise HTTPException(status_code=400, detail="Provider search failed. Please check your criteria and try again.")
 
     return result
 
@@ -772,7 +1139,8 @@ async def pharmacy_search(req: PharmacySearchRequest, _user: dict = Depends(get_
     )
 
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
+        log.warning("Pharmacy search error: %s", result.get("error", "unknown"))
+        raise HTTPException(status_code=400, detail="Pharmacy search failed. Please check your criteria and try again.")
 
     return result
 
@@ -842,7 +1210,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             if dental.get("has_comprehensive") and cmp_value:
                 _upsert_medical(medical, label_map, "Dental (comprehensive)", cmp_value, force=True)
     except Exception as e:
-        log.warning(f"CMS dental enrichment failed: {e}")
+        log.warning("CMS dental enrichment failed: %s", type(e).__name__)
 
     # ── Medical copays (CMS is authoritative) ──
     try:
@@ -857,7 +1225,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             if value:
                 _upsert_medical(medical, label_map, label, value, force=True)
     except Exception as e:
-        log.warning(f"CMS medical copay enrichment failed: {e}")
+        log.warning("CMS medical copay enrichment failed: %s", type(e).__name__)
 
     # ── Vision (CMS is authoritative) ──
     try:
@@ -882,7 +1250,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 ew_value = f"{copay} copay"
             _upsert_medical(medical, label_map, "Vision (eyewear)", ew_value, force=True)
     except Exception as e:
-        log.warning(f"CMS vision enrichment failed: {e}")
+        log.warning("CMS vision enrichment failed: %s", type(e).__name__)
 
     # ── Hearing (CMS is authoritative) ──
     try:
@@ -913,7 +1281,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 parts.append(period)
             _upsert_medical(medical, label_map, "Hearing (aids)", ", ".join(parts) if parts else "Covered", force=True)
     except Exception as e:
-        log.warning(f"CMS hearing enrichment failed: {e}")
+        log.warning("CMS hearing enrichment failed: %s", type(e).__name__)
 
     # ── OTC allowance (only fill if Claude missed it) ──
     try:
@@ -924,7 +1292,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             otc_value = f"{amt} {period}".strip() if amt else "Included"
             _upsert_medical(medical, label_map, "OTC allowance", otc_value)
     except Exception as e:
-        log.warning(f"CMS OTC enrichment failed: {e}")
+        log.warning("CMS OTC enrichment failed: %s", type(e).__name__)
 
     # ── Flex card / SSBCI (only fill if Claude missed it) ──
     try:
@@ -946,7 +1314,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 flex_value = ", ".join(cats[:3])
             _upsert_medical(medical, label_map, "Flex card / SSBCI", flex_value)
     except Exception as e:
-        log.warning(f"CMS flex enrichment failed: {e}")
+        log.warning("CMS flex enrichment failed: %s", type(e).__name__)
 
     # ── Part B giveback (only fill if Claude missed it) ──
     try:
@@ -955,7 +1323,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             gb_value = f"{giveback['monthly_amount']}/mo reduction"
             _upsert_medical(medical, label_map, "Part B giveback", gb_value)
     except Exception as e:
-        log.warning(f"CMS giveback enrichment failed: {e}")
+        log.warning("CMS giveback enrichment failed: %s", type(e).__name__)
 
     result["medical"] = medical
     return result
@@ -1079,7 +1447,7 @@ def _load_pre_extracted_benefits(plan_id: str) -> dict | None:
         with open(path, "r") as f:
             return json.load(f)
     except (json.JSONDecodeError, IOError) as e:
-        log.warning(f"Failed to load pre-extracted benefits for {plan_id}: {e}")
+        log.warning("Failed to load pre-extracted benefits for %s: %s", plan_id, type(e).__name__)
         return None
 
 
@@ -1104,13 +1472,31 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
     2. Fall back to on-demand Claude extraction if no pre-extracted file
     Results are cached in memory so it only parses once per plan.
     """
+    _authorize_plan(_user, req.plan_number)
     plan_id = normalize_plan_id(req.plan_number)
 
     # Check cache first (with TTL)
-    cached = _sob_cache.get(plan_id)
-    if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
-        return cached["data"]
+    with _sob_cache_lock:
+        cached = _sob_cache.get(plan_id)
+        if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
+            return cached["data"]
 
+    # Per-plan lock prevents cache stampede: only one request does the
+    # extraction while others wait and then read from cache.
+    with _sob_inflight_lock:
+        plan_lock = _sob_inflight.setdefault(plan_id, _threading.Lock())
+    with plan_lock:
+        # Re-check cache — another thread may have populated it while we waited
+        with _sob_cache_lock:
+            cached = _sob_cache.get(plan_id)
+            if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
+                return cached["data"]
+
+        return _extract_sob_benefits(plan_id, req.plan_number)
+
+
+def _extract_sob_benefits(plan_id: str, plan_number: str) -> dict:
+    """Extract SOB benefits (pre-extracted file or Claude API), cache the result."""
     # --- Try pre-extracted benefits first (instant, no API cost) ---
     pre = _load_pre_extracted_benefits(plan_id)
     if pre is not None:
@@ -1129,10 +1515,12 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         }
         # Enrich with CMS authoritative data
         try:
-            result = _enrich_sob_with_cms(result, req.plan_number)
+            result = _enrich_sob_with_cms(result, plan_number)
         except Exception as e:
-            log.warning(f"CMS enrichment failed (non-fatal): {e}")
-        _sob_cache[plan_id] = {"data": result, "ts": time.time()}
+            log.warning("CMS enrichment failed (non-fatal): %s", type(e).__name__)
+        with _sob_cache_lock:
+            _evict_oldest(_sob_cache, SOB_CACHE_MAX)
+            _sob_cache[plan_id] = {"data": result, "ts": time.time()}
         log.info(f"[SOB] {plan_id}: served from pre-extracted benefits")
         return result
 
@@ -1146,19 +1534,22 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
 
     context = _chunks_to_context(chunks)
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    from .circuit_breaker import anthropic_breaker
 
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=3000,
-        system=SOB_EXTRACTION_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Plan: {plan_id}\n\nFull document text:\n\n{context}",
-            }
-        ],
-    )
+    with anthropic_breaker:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=3000,
+            system=SOB_EXTRACTION_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Plan: {plan_id}\n\nFull document text:\n\n{context}",
+                }
+            ],
+        )
 
     # Parse Claude's response
     try:
@@ -1171,8 +1562,8 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
         raw = raw.strip()
         parsed = json.loads(raw)
     except (json.JSONDecodeError, IndexError) as e:
-        print(f"[SOB] JSON parse failed: {e}")
-        print(f"[SOB] Raw response: {raw[:500]}")
+        log.warning("[SOB] JSON parse failed: %s", e)
+        log.debug("[SOB] Raw response: %s", raw[:500])
         raise HTTPException(
             status_code=500,
             detail="Failed to parse SOB benefits. Try again.",
@@ -1194,12 +1585,14 @@ def get_sob_summary(req: SOBRequest, _user: dict = Depends(get_current_user)):
 
     # Enrich with CMS authoritative data
     try:
-        result = _enrich_sob_with_cms(result, req.plan_number)
+        result = _enrich_sob_with_cms(result, plan_number)
     except Exception as e:
         log.warning(f"CMS enrichment failed (non-fatal): {e}")
 
     # Cache it with timestamp
-    _sob_cache[plan_id] = {"data": result, "ts": time.time()}
+    with _sob_cache_lock:
+        _evict_oldest(_sob_cache, SOB_CACHE_MAX)
+        _sob_cache[plan_id] = {"data": result, "ts": time.time()}
     return result
 
 
@@ -1242,8 +1635,9 @@ def _find_sob_pdf(plan_number: str) -> str | None:
 
 
 @app.get("/sob/pdf/{plan_number}")
-def get_sob_pdf(plan_number: str):
-    """Serve the actual SOB PDF file for download (public — CMS documents)."""
+def get_sob_pdf(plan_number: ValidPlanNumber, _user: dict = Depends(get_current_user)):
+    """Serve the SOB PDF file for download."""
+    _authorize_plan(_user, plan_number)
     path = _find_sob_pdf(plan_number)
     if not path:
         raise HTTPException(status_code=404, detail="SOB PDF not found for this plan.")
@@ -1256,53 +1650,24 @@ def get_sob_pdf(plan_number: str):
     )
 
 
-# --- Admin: sync PDFs from Google Drive ---
+@app.get("/sob/raw/{plan_number}")
+def get_sob_raw(plan_number: str):
+    """Return the raw extracted JSON (chunks + carrier) for a plan."""
+    path = _find_extracted_file(normalize_plan_id(plan_number))
+    if not path:
+        raise HTTPException(status_code=404, detail=f"No extracted data for {plan_number}")
+    with open(path, "r") as f:
+        return json.load(f)
 
-class SyncRequest(BaseModel):
-    secret: str = ""
 
-_sync_status: dict = {"running": False, "last_result": None}
-
-def _run_sync_background():
-    """Run the full sync + process pipeline in a background thread."""
-    from .gdrive_sync import sync_folder
-    from .pdf_processor import process_pdf_list
-    try:
-        _sync_status["running"] = True
-        _sync_status["last_result"] = None
-        result = sync_folder(GDRIVE_FOLDER_ID, PDFS_DIR)
-        # Only process newly downloaded PDFs, not all 3600+
-        if result["downloaded"] > 0 and result.get("new_files"):
-            process_pdf_list(result["new_files"])
-        result.pop("new_files", None)  # Don't include file paths in status
-        _sync_status["last_result"] = result
-    except Exception as exc:
-        _sync_status["last_result"] = {"error": str(exc)}
-    finally:
-        _sync_status["running"] = False
-
-@app.post("/admin/sync-pdfs")
-def sync_pdfs_from_gdrive(body: SyncRequest):
-    """Download latest PDFs from the shared Google Drive folder (background)."""
-    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if _sync_status["running"]:
-        return {"status": "already running — check /admin/sync-status"}
-    import threading
-    t = threading.Thread(target=_run_sync_background, daemon=True)
-    t.start()
-    return {"status": "sync started in background — check /admin/sync-status for progress"}
-
-@app.post("/admin/sync-status")
-def sync_status(body: SyncRequest):
-    """Check progress of a background sync."""
-    if not ADMIN_SECRET or body.secret != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if _sync_status["running"]:
-        return {"status": "running"}
-    if _sync_status["last_result"] is None:
-        return {"status": "no sync has been run yet"}
-    return {"status": "complete", "result": _sync_status["last_result"]}
+@app.get("/debug/files")
+def list_disk_files():
+    """List files on the persistent disk (dev only)."""
+    files = {}
+    for folder in [EXTRACTED_DIR, PDFS_DIR]:
+        if os.path.exists(folder):
+            files[folder] = os.listdir(folder)
+    return files
 
 
 # --- OTC fallback from SOB extracted text ---
@@ -1344,15 +1709,37 @@ def _otc_from_sob_text(plan_number: str) -> dict | None:
     return None
 
 
+# --- Response Caching Helper ─────────────────────────────────────────────────
+
+def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> JSONResponse:
+    """Return a JSONResponse with Cache-Control and ETag headers.
+    If the client sends a matching If-None-Match, returns 304."""
+    body = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    etag = '"' + hashlib.sha256(body.encode()).hexdigest()[:32] + '"'
+
+    client_etag = request.headers.get("If-None-Match")
+    if client_etag and client_etag == etag:
+        return JSONResponse(status_code=304, content=None, headers={"ETag": etag})
+
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": f"private, max-age={max_age}, stale-while-revalidate=600",
+            "ETag": etag,
+        },
+    )
+
+
 # --- CMS Benefits Endpoints ---
 
 @app.get("/cms/benefits/{plan_number}")
-def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_benefits(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Full plan benefits from CMS data."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     result = cms.get_full_benefits(plan_number)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Plan not found.")
 
     # OTC fallback: if CMS says plan has OTC but no dollar amount, check SOB text
     otc = result.get("otc", {})
@@ -1362,75 +1749,84 @@ def cms_benefits(plan_number: str, _user: dict = Depends(get_current_user)):
             otc["amount"] = sob_otc["amount"]
             otc["period"] = sob_otc["period"]
 
-    return result
+    return _cached_json_response(result, request)
 
 
 @app.get("/cms/benefits/{plan_number}/medical")
-def cms_medical(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_medical(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """PCP, specialist, ER, urgent care copays."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_medical_copays(plan_number)
+    return _cached_json_response(cms.get_medical_copays(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/dental")
-def cms_dental(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_dental(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Dental preventive + comprehensive benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_dental_benefits(plan_number)
+    return _cached_json_response(cms.get_dental_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/otc")
-def cms_otc(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_otc(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """OTC allowance amount and delivery method."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_otc_allowance(plan_number)
+    return _cached_json_response(cms.get_otc_allowance(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/vision")
-def cms_vision(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_vision(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Eye exam + eyewear vision benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_vision_benefits(plan_number)
+    return _cached_json_response(cms.get_vision_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/hearing")
-def cms_hearing(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_hearing(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Hearing exam + hearing aid benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_hearing_benefits(plan_number)
+    return _cached_json_response(cms.get_hearing_benefits(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/flex")
-def cms_flex(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_flex(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Flex card / SSBCI supplemental benefits."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_flex_ssbci(plan_number)
+    return _cached_json_response(cms.get_flex_ssbci(plan_number), request)
 
 
 @app.get("/cms/benefits/{plan_number}/giveback")
-def cms_giveback(plan_number: str, _user: dict = Depends(get_current_user)):
+def cms_giveback(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Part B premium giveback amount."""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
-    return cms.get_part_b_giveback(plan_number)
+    return _cached_json_response(cms.get_part_b_giveback(plan_number), request)
 
 
 @app.post("/cms/drug")
 def cms_drug_lookup(req: DrugLookupRequest, _user: dict = Depends(get_current_user)):
     """Look up drug by name — returns tier, copay, restrictions."""
+    _authorize_plan(_user, req.plan_number)
     cms = get_cms()
     result = cms.get_drug_by_name(req.plan_number, req.drug_name)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Drug not found on this plan's formulary.")
     return result
 
 
 @app.get("/cms/drug/{plan_number}/{drug_name}")
-def cms_drug_lookup_get(plan_number: str, drug_name: str, _user: dict = Depends(get_current_user)):
+def cms_drug_lookup_get(plan_number: ValidPlanNumber, drug_name: str, _user: dict = Depends(get_current_user)):
     """GET version. Example: /cms/drug/H1036-077/Eliquis"""
+    _authorize_plan(_user, plan_number)
     cms = get_cms()
     result = cms.get_drug_by_name(plan_number, drug_name)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        raise HTTPException(status_code=404, detail="Drug not found on this plan's formulary.")
     return result
 
 
@@ -1477,27 +1873,20 @@ def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    # Cross-user check: JWT subject must match the session's phone
+    phone = session["phone"]
+    if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
     return _my_drugs_impl(session["data"])
 
 
 @app.get("/cms/my-drugs/{phone}")
 def cms_my_drugs(phone: str, _user: dict = Depends(get_current_user)):
-    """
-    Pull member's medications from Zoho, look up each in CMS formulary.
-    SOB (Summary of Benefits) governs over CMS for tier copays.
-    Returns individual drug costs + estimated monthly total.
-    """
-    # 1. Look up member in Zoho
-    try:
-        member = search_contact_by_phone(phone)
-    except Exception as e:
-        log.error(f"Zoho lookup failed in my-drugs: {e}")
-        raise HTTPException(status_code=500, detail="Unable to look up your account right now.")
-
-    if not member:
-        raise HTTPException(status_code=404, detail="Member not found")
-
-    return _my_drugs_impl(member)
+    """Deprecated — use /cms/my-drugs-session/{session_id} instead."""
+    raise HTTPException(
+        status_code=410,
+        detail="This endpoint is deprecated. Use /cms/my-drugs-session/{session_id} instead.",
+    )
 
 
 def _my_drugs_impl(member: dict):
@@ -1838,7 +2227,7 @@ def _compute_ic_monthly_cost(
 @app.get("/reminders/{session_id}")
 def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
     """List all medication reminders for this member."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     return {"reminders": db.get_reminders(phone)}
 
@@ -1846,7 +2235,7 @@ def list_reminders(session_id: str, _user: dict = Depends(get_current_user)):
 @app.post("/reminders/{session_id}")
 def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(get_current_user)):
     """Create a single medication reminder."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     if not 0 <= req.time_hour <= 23:
         raise HTTPException(status_code=400, detail="time_hour must be 0-23")
     if not 0 <= req.time_minute <= 59:
@@ -1862,18 +2251,26 @@ def create_reminder(session_id: str, req: ReminderCreate, _user: dict = Depends(
         refill_reminder=req.refill_reminder,
         last_refill_date=req.last_refill_date,
     )
+    get_audit_log().record(
+        actor=phone, action="create", resource="reminder",
+        resource_id=str(reminder.get("id", "")), detail="reminder_create",
+    )
     return {"reminder": reminder}
 
 
 @app.post("/reminders/{session_id}/bulk")
 def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict = Depends(get_current_user)):
     """Create multiple reminders at once (agent onboarding)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     reminders = db.create_reminders_bulk(
         phone=phone,
         reminders=[r.model_dump() for r in req.reminders],
         created_by=req.created_by,
+    )
+    get_audit_log().record(
+        actor=phone, action="create", resource="reminder",
+        detail=f"bulk_create:{len(reminders)}",
     )
     return {"reminders": reminders, "count": len(reminders)}
 
@@ -1881,22 +2278,30 @@ def create_reminders_bulk(session_id: str, req: BulkReminderCreate, _user: dict 
 @app.put("/reminders/{session_id}/{reminder_id}")
 def update_reminder(session_id: str, reminder_id: int, req: ReminderUpdate, _user: dict = Depends(get_current_user)):
     """Update a reminder (toggle, reschedule, etc.)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     reminder = db.update_reminder(phone, reminder_id, **req.model_dump(exclude_none=True))
     if not reminder:
         raise HTTPException(status_code=404, detail="Reminder not found")
+    get_audit_log().record(
+        actor=phone, action="update", resource="reminder",
+        resource_id=str(reminder_id), detail="reminder_update",
+    )
     return {"reminder": reminder}
 
 
 @app.delete("/reminders/{session_id}/{reminder_id}")
 def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get_current_user)):
     """Delete a medication reminder."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     deleted = db.delete_reminder(phone, reminder_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Reminder not found")
+    get_audit_log().record(
+        actor=phone, action="delete", resource="reminder",
+        resource_id=str(reminder_id), detail="reminder_delete",
+    )
     return {"deleted": True}
 
 
@@ -1910,7 +2315,7 @@ VALID_USAGE_CATEGORIES = {"otc", "dental", "flex", "vision", "hearing"}
 @app.post("/usage/{session_id}")
 def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_current_user)):
     """Log a benefits usage entry (e.g. OTC purchase, dental visit)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     cat = req.category.lower()
     if cat not in VALID_USAGE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(VALID_USAGE_CATEGORIES)}")
@@ -1925,13 +2330,17 @@ def log_usage(session_id: str, req: UsageCreate, _user: dict = Depends(get_curre
         description=req.description,
         usage_date=req.usage_date,
     )
+    get_audit_log().record(
+        actor=phone, action="create", resource="usage",
+        detail=f"category:{cat},amount:{req.amount}",
+    )
     return {"usage": entry}
 
 
 @app.get("/usage/{session_id}")
 def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Depends(get_current_user)):
     """Get all usage entries for this member, optionally filtered by category."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     entries = db.get_usage(phone, category)
     return {"usage": entries}
@@ -1940,7 +2349,7 @@ def get_usage(session_id: str, category: Optional[str] = None, _user: dict = Dep
 @app.delete("/usage/{session_id}/{usage_id}")
 def delete_usage(session_id: str, usage_id: int, _user: dict = Depends(get_current_user)):
     """Delete a usage entry (undo mistake)."""
-    phone = _session_phone(session_id)
+    phone = _session_phone(session_id, _user)
     db = get_user_db()
     deleted = db.delete_usage(phone, usage_id)
     if not deleted:
@@ -1957,9 +2366,12 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
-    session["ts"] = time.time()
-
     phone = session["phone"]
+    # Cross-user check: JWT subject must match the session's phone
+    if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
+    get_store().touch_session(session_id)
+
     plan_number = session["data"].get("plan_number", "")
     if not plan_number:
         return {"summary": []}
@@ -1972,7 +2384,7 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
 
     # OTC
     try:
-        otc = cms.get_otc_allowance(*_split_plan(plan_number))
+        otc = cms.get_otc_allowance(plan_number)
         if otc and otc.get("has_otc") and otc.get("amount"):
             amt = otc["amount"]
             # amount may be string with $ — normalize to float
@@ -1980,54 +2392,62 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
                 amt = float(amt.replace("$", "").replace(",", "").strip())
             period = otc.get("period", "Monthly")
             categories.append({"category": "otc", "cap": amt, "period": period, "label": "OTC Allowance"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("OTC category parse error: %s", e)
 
     # Dental
     try:
-        dental = cms.get_dental_benefits(*_split_plan(plan_number))
+        dental = cms.get_dental_benefits(plan_number)
         if dental and dental.get("has_preventive"):
             prev = dental.get("preventive", {})
             max_ben = prev.get("max_benefit")
             if max_ben:
                 cap = float(str(max_ben).replace("$", "").replace(",", ""))
                 categories.append({"category": "dental", "cap": cap, "period": "Yearly", "label": "Dental"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Dental category parse error: %s", e)
 
     # Flex / SSBCI
     try:
-        flex = cms.get_flex_ssbci(*_split_plan(plan_number))
+        flex = cms.get_flex_ssbci(plan_number)
         if flex and flex.get("has_ssbci") and flex.get("benefits"):
-            total = sum(b.get("max_amount", 0) for b in flex["benefits"] if b.get("max_amount"))
+            total = 0
+            for b in flex["benefits"]:
+                raw = b.get("amount", "0")
+                if isinstance(raw, str):
+                    raw = raw.replace("$", "").replace(",", "").strip()
+                    if raw and raw != "Included":
+                        total += float(raw)
+                elif isinstance(raw, (int, float)):
+                    total += float(raw)
             if total > 0:
                 categories.append({"category": "flex", "cap": total, "period": "Yearly", "label": "Flex Card"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Flex category parse error: %s", e)
 
     # Vision
     try:
-        vision = cms.get_vision_benefits(*_split_plan(plan_number))
-        if vision and vision.get("has_exams"):
-            exams = vision.get("exams", {})
+        vision = cms.get_vision_benefits(plan_number)
+        if vision and vision.get("has_eye_exam"):
+            exams = vision.get("eye_exam", {})
             max_amt = exams.get("max_benefit")
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
                 categories.append({"category": "vision", "cap": cap, "period": "Yearly", "label": "Vision"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Vision category parse error: %s", e)
 
     # Hearing
     try:
-        hearing = cms.get_hearing_benefits(*_split_plan(plan_number))
-        if hearing and hearing.get("has_aids"):
-            aids = hearing.get("aids", {})
+        hearing = cms.get_hearing_benefits(plan_number)
+        if hearing and hearing.get("has_hearing_aids"):
+            aids = hearing.get("hearing_aids", {})
             max_amt = aids.get("max_benefit")
             if max_amt:
                 cap = float(str(max_amt).replace("$", "").replace(",", ""))
                 categories.append({"category": "hearing", "cap": cap, "period": "Yearly", "label": "Hearing"})
-    except Exception:
-        pass
+    except (ValueError, TypeError, KeyError) as e:
+        log.debug("Hearing category parse error: %s", e)
 
     if not categories:
         return {"summary": []}
@@ -2055,28 +2475,21 @@ def usage_summary(session_id: str, _user: dict = Depends(get_current_user)):
     return {"summary": summary}
 
 
-def _split_plan(plan_number: str) -> tuple[str, str]:
-    """Split 'H1234-567' or 'H1234-567-000' into (contract_id, plan_id)."""
-    pid = normalize_plan_id(plan_number)
-    parts = pid.split("-")
-    if len(parts) >= 2:
-        return parts[0], parts[1]
-    return pid, ""
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DIGITAL ID CARD
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/cms/id-card/{plan_number}")
-def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
+def get_id_card_data(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
     """Return all data needed to render a digital insurance ID card."""
+    _authorize_plan(_user, plan_number)
     from .carrier_config import detect_carrier, get_carrier_config
 
     cms = get_cms()
     overview = cms.get_plan_overview(plan_number)
     if not overview:
-        raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found")
+        raise HTTPException(status_code=404, detail="Plan not found.")
 
     medical = cms.get_medical_copays(plan_number)
 
@@ -2086,7 +2499,7 @@ def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
     )
     rx = get_carrier_config(carrier_key) if carrier_key else {}
 
-    return {
+    result = {
         "plan_name": overview.get("plan_name", ""),
         "org_name": overview.get("org_name", ""),
         "contract_id": overview.get("contract_id", ""),
@@ -2106,4 +2519,5 @@ def get_id_card_data(plan_number: str, _user: dict = Depends(get_current_user)):
         "prior_auth_phone": rx.get("prior_auth", ""),
         "website": rx.get("website", ""),
     }
+    return _cached_json_response(result, request)
 

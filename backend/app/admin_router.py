@@ -8,6 +8,7 @@ import glob
 import json
 import logging
 import os
+import re as _re
 import shutil
 import tarfile
 import tempfile
@@ -15,64 +16,150 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from . import admin_db
 from .admin_auth import (
     authenticate_admin,
     bootstrap_super_admin,
+    clear_auth_cookies,
     create_admin_tokens,
     decode_admin_token,
     hash_password,
     require_admin,
     require_role,
+    set_auth_cookies,
 )
-from .auth import generate_otp
-from .config import ADMIN_SECRET, EXTRACTED_DIR, PDFS_DIR
+from .audit import get_audit_log
+from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
+from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+_ALLOWED_ADMIN_ORIGINS = {
+    "https://insurancenyou.com",
+    "https://www.insurancenyou.com",
+    "https://admin.insurancenyou.com",
+    "https://api.insurancenyou.com",
+}
+_CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def check_csrf_origin(request: Request):
+    """FastAPI dependency — validate Origin on mutating admin requests (H9)."""
+    if APP_ENV != "production":
+        return
+    if request.method not in _CSRF_METHODS:
+        return
+    origin = request.headers.get("origin", "")
+    if origin:
+        if origin not in _ALLOWED_ADMIN_ORIGINS:
+            raise HTTPException(
+                status_code=403,
+                detail="Origin is not allowed for admin operations.",
+            )
+        return
+    # No Origin header — fall back to Referer check
+    referer = request.headers.get("referer", "")
+    if referer:
+        from urllib.parse import urlparse
+        ref_origin = f"{urlparse(referer).scheme}://{urlparse(referer).netloc}"
+        if ref_origin not in _ALLOWED_ADMIN_ORIGINS:
+            raise HTTPException(
+                status_code=403,
+                detail="Request origin not allowed for admin operations.",
+            )
+        return
+    # Neither Origin nor Referer — reject (non-browser API clients use Bearer auth,
+    # but we still block to prevent CSRF from tools that strip these headers)
+    raise HTTPException(
+        status_code=403,
+        detail="Missing Origin or Referer header on mutating request.",
+    )
+
+
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(check_csrf_origin)],
+)
+
+# Lazy singleton — shares the same SQLite DB as the mobile OTP store
+_store = None
+
+def _get_store() -> PersistentStore:
+    global _store
+    if _store is None:
+        _store = PersistentStore()
+    return _store
 
 
 # ── Request / Response models ────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+def _validate_password_complexity(password: str) -> str:
+    """Enforce password complexity: 8+ chars, upper, lower, digit, special."""
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    if not _re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter.")
+    if not _re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter.")
+    if not _re.search(r"\d", password):
+        raise ValueError("Password must contain at least one digit.")
+    if not _re.search(r"[^A-Za-z0-9]", password):
+        raise ValueError("Password must contain at least one special character.")
+    return password
 
 
 class CreateAdminRequest(BaseModel):
-    email: str
-    password: str
-    first_name: str = ""
-    last_name: str = ""
-    role: str = "viewer"
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    first_name: str = Field("", max_length=100)
+    last_name: str = Field("", max_length=100)
+    role: str = Field("viewer", pattern=r"^(super_admin|admin|viewer)$")
+
+    @field_validator("password")
+    @classmethod
+    def check_complexity(cls, v: str) -> str:
+        return _validate_password_complexity(v)
 
 
 class UpdateAdminRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[str] = Field(None, pattern=r"^(super_admin|admin|viewer)$")
     is_active: Optional[bool] = None
     password: Optional[str] = None
 
+    @field_validator("password")
+    @classmethod
+    def check_complexity(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_password_complexity(v)
+        return v
+
 
 class CreateMemberRequest(BaseModel):
-    first_name: str
-    last_name: str
-    phone: str                          # E.164 or raw digits — used for OTP login
-    medicare_number: str = ""           # MBI — will be encrypted at rest
-    zip_code: str = ""
-    carrier: str = ""
-    plan_name: str = ""
-    plan_number: str = ""               # Links SOB extraction → member app
-    send_verification: bool = True      # Send OTP to phone after creation
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    phone: str = Field(..., pattern=r"^[\d\-\+\(\)\s]{7,20}$")  # Normalized in handler
+    medicare_number: str = Field("", max_length=20)
+    zip_code: str = Field("", pattern=r"^(\d{5})?$")
+    carrier: str = Field("", max_length=100)
+    plan_name: str = Field("", max_length=200)
+    plan_number: str = Field("", max_length=20)
+    send_verification: bool = True
 
 
 class SendOTPRequest(BaseModel):
-    phone: str
+    phone: str = Field(..., pattern=r"^[\d\-\+\(\)\s]{7,20}$")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -81,27 +168,64 @@ class SendOTPRequest(BaseModel):
 
 @router.post("/auth/login")
 async def admin_login(body: LoginRequest, request: Request):
-    """Admin email + password login."""
-    result = authenticate_admin(body.email, body.password)
+    """Admin email + password login with brute-force protection."""
+    ip = request.client.host if request.client else ""
+    ua = request.headers.get("user-agent", "")
+
+    # H10: Check for too many recent failed attempts (lockout)
+    failed_count = admin_db.count_recent_failed_logins(body.email)
+    if failed_count >= 5:
+        admin_db.record_login_event(
+            phone=body.email, ip_address=ip, user_agent=ua, success=False,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Please try again in 15 minutes.",
+        )
+
+    # H11: Record failed attempts, not just successes
+    try:
+        result = authenticate_admin(body.email, body.password)
+    except HTTPException:
+        admin_db.record_login_event(
+            phone=body.email, ip_address=ip, user_agent=ua, success=False,
+        )
+        raise
+
     admin_db.record_login_event(
-        phone=body.email, ip_address=request.client.host if request.client else "",
-        user_agent=request.headers.get("user-agent", ""), success=True,
+        phone=body.email, ip_address=ip, user_agent=ua, success=True,
     )
-    return result
+    admin_db.clear_failed_logins(body.email)
+    response = JSONResponse(content={"user": result["user"]})
+    set_auth_cookies(response, result["access_token"], result["refresh_token"])
+    return response
 
 
 @router.post("/auth/refresh")
 async def admin_refresh(request: Request):
-    """Refresh admin access token using refresh token."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing refresh token.")
-    token = auth_header[7:]
+    """Refresh admin access token using refresh token (with rotation)."""
+    # Read refresh token from cookie first, fall back to Authorization header
+    token = request.cookies.get("admin_refresh", "")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing refresh token.")
+        token = auth_header[7:]
     payload = decode_admin_token(token, expected_type="admin_refresh")
+
+    # Refresh token rotation — each token can only be used once
+    jti = payload.get("jti")
+    if jti and not _get_store().consume_refresh_jti(jti, f"admin:{payload['sub']}"):
+        log.warning("Admin refresh token replay detected for user %s", payload["sub"])
+        raise HTTPException(status_code=401, detail="Token already used. Please log in again.")
+
     user = admin_db.get_admin_user_by_id(int(payload["sub"]))
     if not user or not user["is_active"]:
         raise HTTPException(status_code=401, detail="Account not found or deactivated.")
-    return create_admin_tokens(user)
+    result = create_admin_tokens(user)
+    response = JSONResponse(content={"user": result["user"]})
+    set_auth_cookies(response, result["access_token"], result["refresh_token"])
+    return response
 
 
 @router.get("/auth/me")
@@ -120,6 +244,14 @@ async def admin_me(payload: dict = Depends(require_admin)):
     }
 
 
+@router.post("/auth/logout")
+async def admin_logout():
+    """Clear auth cookies."""
+    response = JSONResponse(content={"success": True})
+    clear_auth_cookies(response)
+    return response
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  ADMIN USER MANAGEMENT (super_admin only)
 # ════════════════════════════════════════════════════════════════════════════
@@ -132,6 +264,7 @@ async def list_admins(payload: dict = Depends(require_role("super_admin"))):
 
 @router.post("/users")
 async def create_admin(body: CreateAdminRequest,
+                       request: Request,
                        payload: dict = Depends(require_role("super_admin"))):
     """Create a new admin user."""
     existing = admin_db.get_admin_user_by_email(body.email)
@@ -142,19 +275,37 @@ async def create_admin(body: CreateAdminRequest,
         email=body.email, password_hash=pw_hash,
         first_name=body.first_name, last_name=body.last_name, role=body.role,
     )
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="admin_user",
+        resource_id=str(user["id"]),
+        ip_address=request.client.host if request.client else "",
+        detail=f"email={body.email} role={body.role}",
+    )
     return {"id": user["id"], "email": user["email"], "role": user["role"]}
 
 
 @router.patch("/users/{user_id}")
 async def update_admin(user_id: int, body: UpdateAdminRequest,
+                       request: Request,
                        payload: dict = Depends(require_role("super_admin"))):
     """Update an admin user."""
     fields = body.model_dump(exclude_none=True)
+    changed_fields = list(fields.keys())
     if "password" in fields:
         fields["password_hash"] = hash_password(fields.pop("password"))
     user = admin_db.update_admin_user(user_id, **fields)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="update",
+        resource="admin_user",
+        resource_id=str(user_id),
+        ip_address=request.client.host if request.client else "",
+        detail=f"fields={','.join(changed_fields)}",
+    )
     return {"id": user["id"], "email": user["email"], "role": user["role"],
             "is_active": bool(user["is_active"])}
 
@@ -174,6 +325,7 @@ def _normalize_phone(raw: str) -> str:
 
 @router.post("/members/create")
 async def create_member(body: CreateMemberRequest,
+                        request: Request,
                         payload: dict = Depends(require_admin)):
     """
     Create a new member account.
@@ -189,13 +341,11 @@ async def create_member(body: CreateMemberRequest,
     try:
         existing = search_contact_by_phone(phone)
     except Exception:
-        log.warning("Zoho lookup failed for %s, continuing with creation", phone)
+        log.warning("Zoho lookup failed for ***%s, continuing with creation", phone[-4:])
 
     if existing:
-        raise HTTPException(status_code=409, detail=f"Member with phone {phone} already exists.")
+        raise HTTPException(status_code=409, detail="A member with this phone number already exists.")
 
-    # TODO: Create contact in Zoho CRM via zoho_client.create_contact()
-    # For now, we log the creation and return the data
     member_data = {
         "phone": phone,
         "first_name": body.first_name,
@@ -206,31 +356,48 @@ async def create_member(body: CreateMemberRequest,
         "plan_name": body.plan_name,
         "plan_number": body.plan_number,
     }
-    log.info("Admin %s created member: %s %s (%s)",
-             payload.get("sub"), body.first_name, body.last_name, phone)
+    # Persist member data via a session so they can log in after OTP
+    _get_store().create_session(phone, member_data)
+
+    log.info("Admin %s created member: ***%s",
+             payload.get("sub"), phone[-4:])
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="member",
+        resource_id=f"***{phone[-4:]}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_member_create",
+    )
 
     # Send OTP verification if requested
     otp_sent = False
     if body.send_verification:
         try:
-            code = generate_otp(phone)
+            code = _get_store().generate_otp(phone)
             if code:
                 sms = create_sms_provider()
                 otp_sent = sms.send_otp(phone, code)
-                log.info("OTP sent to new member %s: %s", phone, "success" if otp_sent else "failed")
+                log.info("OTP sent to new member ***%s: %s", phone[-4:], "success" if otp_sent else "failed")
         except Exception as e:
-            log.error("Failed to send OTP to %s: %s", phone, e)
+            log.error("Failed to send OTP to ***%s: %s", phone[-4:], type(e).__name__)
 
     return {
         "success": True,
-        "member": member_data,
+        "member": {
+            "first_name": member_data["first_name"],
+            "last_name": member_data["last_name"],
+            "phone": f"***{phone[-4:]}",
+            "plan_number": member_data.get("plan_number", ""),
+        },
         "otp_sent": otp_sent,
-        "message": f"Member created. {'Verification code sent to ' + phone if otp_sent else 'OTP send failed — member can request code from the app.'}",
+        "message": f"Member created. {'Verification code sent.' if otp_sent else 'OTP send failed — member can request code from the app.'}",
     }
 
 
 @router.post("/members/send-otp")
 async def admin_send_otp(body: SendOTPRequest,
+                         request: Request,
                          payload: dict = Depends(require_admin)):
     """Send OTP login code to a member's phone (triggered by admin)."""
     phone = _normalize_phone(body.phone)
@@ -238,7 +405,7 @@ async def admin_send_otp(body: SendOTPRequest,
         raise HTTPException(status_code=400, detail="Invalid phone number.")
 
     try:
-        code = generate_otp(phone)
+        code = _get_store().generate_otp(phone)
         if not code:
             raise HTTPException(status_code=429, detail="Too many OTP requests. Try again later.")
         sms = create_sms_provider()
@@ -248,11 +415,19 @@ async def admin_send_otp(body: SendOTPRequest,
     except HTTPException:
         raise
     except Exception as e:
-        log.error("OTP send error for %s: %s", phone, e)
+        log.error("OTP send error for ***%s: %s", phone[-4:], type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to send OTP.")
 
-    log.info("Admin %s sent OTP to member %s", payload.get("sub"), phone)
-    return {"success": True, "message": f"Verification code sent to {phone}."}
+    log.info("Admin %s sent OTP to member ***%s", payload.get("sub"), phone[-4:])
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="otp",
+        resource_id=f"***{phone[-4:]}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_send_otp",
+    )
+    return {"success": True, "message": "Verification code sent."}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -262,19 +437,21 @@ async def admin_send_otp(body: SendOTPRequest,
 @router.get("/analytics/logins")
 async def analytics_logins(days: int = 30, payload: dict = Depends(require_admin)):
     """Login statistics for the given period."""
+    days = max(1, min(days, 365))  # L4: cap to prevent expensive queries
     return admin_db.get_login_stats(days)
 
 
 @router.get("/analytics/enrollments")
 async def analytics_enrollments(days: int = 30, payload: dict = Depends(require_admin)):
     """Enrollment stats (placeholder — will pull from Zoho)."""
-    # TODO: Pull from Zoho CRM contact creation dates
+    days = max(1, min(days, 365))
     return {"total_new": 0, "days": days, "note": "Coming soon — Zoho CRM integration"}
 
 
 @router.get("/analytics/features")
 async def analytics_features(days: int = 30, payload: dict = Depends(require_admin)):
     """Feature usage from search_events table."""
+    days = max(1, min(days, 365))
     return admin_db.get_search_stats(days)
 
 
@@ -327,6 +504,8 @@ async def analytics_age_groups(payload: dict = Depends(require_admin)):
 async def list_plans(search: str = "", page: int = 1, per_page: int = 50,
                      payload: dict = Depends(require_admin)):
     """List all plans with extraction status."""
+    per_page = max(1, min(per_page, 200))  # M16: cap pagination
+    page = max(1, page)
     plans = []
     if not os.path.isdir(EXTRACTED_DIR):
         return {"data": [], "total": 0, "page": page, "per_page": per_page}
@@ -397,6 +576,13 @@ async def get_plan_detail(plan_number: str, payload: dict = Depends(require_admi
     """Get full plan data including extracted JSON and benefits."""
     extracted_path = os.path.join(EXTRACTED_DIR, f"{plan_number}.json")
     benefits_path = os.path.join(EXTRACTED_DIR, f"{plan_number}_benefits.json")
+
+    # Path traversal prevention: resolved path must stay within EXTRACTED_DIR
+    extract_real = os.path.realpath(EXTRACTED_DIR)
+    if not os.path.realpath(extracted_path).startswith(extract_real + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid plan number.")
+    if not os.path.realpath(benefits_path).startswith(extract_real + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid plan number.")
 
     if not os.path.isfile(extracted_path):
         raise HTTPException(status_code=404, detail=f"Plan {plan_number} not found.")
@@ -491,7 +677,8 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
              -F "file=@extracted_jsons.tar.gz"
     """
     secret = request.headers.get("X-Admin-Secret", "")
-    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+    import hmac
+    if not ADMIN_SECRET or not hmac.compare_digest(secret, ADMIN_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden — invalid admin secret.")
 
     if not file.filename or not file.filename.endswith((".tar.gz", ".tgz")):
@@ -499,27 +686,48 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
 
     os.makedirs(EXTRACTED_DIR, exist_ok=True)
 
-    # Save to temp file first
+    # Save to temp file first — cap at 500 MB
+    MAX_TAR_BYTES = 500 * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
     try:
         total_bytes = 0
         while chunk := await file.read(1024 * 1024):  # 1MB chunks
-            tmp.write(chunk)
             total_bytes += len(chunk)
+            if total_bytes > MAX_TAR_BYTES:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(status_code=413, detail=f"File too large (max {MAX_TAR_BYTES // (1024*1024)} MB).")
+            tmp.write(chunk)
         tmp.close()
 
         log.info("Received %d MB tar.gz — extracting to %s",
                  total_bytes // (1024 * 1024), EXTRACTED_DIR)
 
-        # Extract
+        # M17: Validate gzip magic bytes before extraction
+        with open(tmp.name, "rb") as f:
+            magic = f.read(2)
+        if magic != b"\x1f\x8b":
+            raise HTTPException(status_code=400, detail="File is not a valid gzip archive.")
+
+        # Extract — with path validation to prevent zip-slip attacks
         count = 0
+        extract_real = os.path.realpath(EXTRACTED_DIR)
         with tarfile.open(tmp.name, "r:gz") as tar:
             for member in tar.getmembers():
-                if member.isfile() and member.name.endswith(".json"):
-                    # Flatten — strip any directory prefix
-                    member.name = os.path.basename(member.name)
-                    tar.extract(member, EXTRACTED_DIR)
-                    count += 1
+                if not member.isfile() or not member.name.endswith(".json"):
+                    continue
+                # Flatten — strip any directory prefix
+                member.name = os.path.basename(member.name)
+                # Reject symlinks and verify resolved path stays within target dir
+                if member.issym() or member.islnk():
+                    log.warning("Skipping symlink in tar: %s", member.name)
+                    continue
+                dest = os.path.realpath(os.path.join(EXTRACTED_DIR, member.name))
+                if not dest.startswith(extract_real + os.sep):
+                    log.warning("Skipping tar member outside target dir: %s", member.name)
+                    continue
+                tar.extract(member, EXTRACTED_DIR)
+                count += 1
 
         log.info("Extracted %d JSON files to %s", count, EXTRACTED_DIR)
 
@@ -541,4 +749,5 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
             "upload_size_mb": round(total_bytes / (1024 * 1024), 1),
         }
     finally:
-        os.unlink(tmp.name)
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)

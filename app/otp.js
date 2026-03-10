@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, ActivityIndicator } from 'react-native';
 import GradientBg from '../components/GradientBg';
 import { useRouter } from 'expo-router';
@@ -8,8 +8,6 @@ import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/them
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 import { setMemberSession, getPendingOtp, clearPendingOtp } from '../constants/session';
 
-const RESEND_COOLDOWN = 30; // seconds
-
 export default function OTPScreen() {
   const pending = getPendingOtp();
   const phone = pending?.phone || '';
@@ -18,47 +16,19 @@ export default function OTPScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resending, setResending] = useState(false);
-  const [cooldown, setCooldown] = useState(RESEND_COOLDOWN);
   const refs = useRef([]);
   const router = useRouter();
 
-  // Animations
+  // Entrance animation
   const contentOpacity = useRef(new Animated.Value(0)).current;
-  const contentSlide = useRef(new Animated.Value(24)).current;
-  const shieldScale = useRef(new Animated.Value(0.6)).current;
-  const shieldOpacity = useRef(new Animated.Value(0)).current;
-  const boxAnims = useRef(otp.map(() => new Animated.Value(0))).current;
+  const contentSlide = useRef(new Animated.Value(20)).current;
 
   useEffect(() => {
-    // Shield entrance
     Animated.parallel([
-      Animated.spring(shieldScale, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }),
-      Animated.timing(shieldOpacity, { toValue: 1, duration: MOTION.slow, useNativeDriver: true }),
+      Animated.timing(contentOpacity, { toValue: 1, duration: MOTION.slow, useNativeDriver: true }),
+      Animated.timing(contentSlide, { toValue: 0, duration: MOTION.slow, useNativeDriver: true }),
     ]).start();
-
-    // Content slide up
-    Animated.parallel([
-      Animated.timing(contentOpacity, { toValue: 1, duration: MOTION.slow, delay: 150, useNativeDriver: true }),
-      Animated.timing(contentSlide, { toValue: 0, duration: MOTION.slow, delay: 150, useNativeDriver: true }),
-    ]).start();
-
-    // Staggered OTP box entrance
-    Animated.stagger(MOTION.staggerDelay, boxAnims.map((a) =>
-      Animated.spring(a, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true })
-    )).start();
   }, []);
-
-  // Resend cooldown timer
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setInterval(() => setCooldown((c) => c - 1), 1000);
-    return () => clearInterval(t);
-  }, [cooldown]);
-
-  // Format phone for display
-  const displayPhone = phone
-    ? `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`
-    : '';
 
   const handleChange = (i, v) => {
     if (!/^\d?$/.test(v)) return;
@@ -66,15 +36,16 @@ export default function OTPScreen() {
     if (v && i < 5) refs.current[i + 1]?.focus();
     setError('');
   };
-
-  const handleKey = (i, k) => {
-    if (k === 'Backspace' && !otp[i] && i > 0) refs.current[i - 1]?.focus();
-  };
-
+  const handleKey = (i, k) => { if (k === 'Backspace' && !otp[i] && i > 0) refs.current[i - 1]?.focus(); };
   const filled = otp.every((d) => d !== '');
 
-  // Auto-submit when all digits filled
-  const handleVerify = useCallback(async (code) => {
+  // Format phone for display
+  const displayPhone = phone
+    ? `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`
+    : '';
+
+  const handleVerify = async () => {
+    if (!filled) return;
     if (!phone) {
       setError('Phone number missing. Please go back and try again.');
       return;
@@ -83,6 +54,7 @@ export default function OTPScreen() {
     setError('');
 
     try {
+      const code = otp.join('');
       const res = await fetchWithTimeout(`${API_URL}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -99,7 +71,10 @@ export default function OTPScreen() {
       const data = await res.json();
 
       if (data.access_token) {
+        // Store JWT tokens
         await setTokens(data.access_token, data.refresh_token);
+
+        // Store member data in memory (not URL params) to avoid PHI in URLs
         setMemberSession(
           {
             firstName: data.first_name,
@@ -111,6 +86,7 @@ export default function OTPScreen() {
           },
           data.session_id || '',
         );
+
         clearPendingOtp();
         router.replace('/home');
       } else {
@@ -125,17 +101,7 @@ export default function OTPScreen() {
     } finally {
       setLoading(false);
     }
-  }, [phone, router]);
-
-  // Trigger auto-submit when last digit entered (once)
-  const autoSubmitted = useRef(false);
-  useEffect(() => {
-    if (filled && !loading && !autoSubmitted.current) {
-      autoSubmitted.current = true;
-      handleVerify(otp.join(''));
-    }
-    if (!filled) autoSubmitted.current = false;
-  }, [otp, filled, loading, handleVerify]);
+  };
 
   const handleResend = async () => {
     setResending(true);
@@ -151,7 +117,6 @@ export default function OTPScreen() {
       } else {
         setOtp(['', '', '', '', '', '']);
         refs.current[0]?.focus();
-        setCooldown(RESEND_COOLDOWN);
       }
     } catch {
       setError("Couldn't resend code. Please try again.");
@@ -164,81 +129,56 @@ export default function OTPScreen() {
     <GradientBg style={s.gradient}>
       <SafeAreaView style={s.container}>
         <KeyboardAvoidingView style={s.inner} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          {/* Back button */}
-          <View style={s.topBar}>
-            <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+          <Animated.View style={[s.content, { opacity: contentOpacity, transform: [{ translateY: contentSlide }] }]}>
+            <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
               <View style={s.backIconWrap}>
                 <Ionicons name="chevron-back" size={18} color={COLORS.accent} />
               </View>
-              <Text style={s.backText}>Back</Text>
+              <Text style={s.back}>Back</Text>
             </TouchableOpacity>
-          </View>
 
-          <Animated.View style={[s.content, { opacity: contentOpacity, transform: [{ translateY: contentSlide }] }]}>
-            {/* Shield icon */}
-            <Animated.View style={[s.iconCircle, { opacity: shieldOpacity, transform: [{ scale: shieldScale }] }]}>
-              <Ionicons name="shield-checkmark" size={30} color={COLORS.accent} />
-            </Animated.View>
-
-            {/* Greeting + instructions */}
-            <Text style={s.title}>
-              {firstName ? `Hey ${firstName}, ` : ''}verify your number
-            </Text>
+            <View style={s.iconCircle}>
+              <Ionicons name="chatbubble-ellipses-outline" size={32} color={COLORS.accent} />
+            </View>
+            <Text style={s.title}>Verify your number</Text>
             <Text style={s.subtitle}>
               We sent a 6-digit code to{'\n'}
-              <Text style={s.phoneHighlight}>{displayPhone}</Text>
+              <Text style={{ fontWeight: '700', color: COLORS.text }}>{displayPhone}</Text>
             </Text>
 
             {/* OTP Input Card */}
             <View style={s.otpCard}>
-              <View style={s.otpCardHeader}>
-                <Ionicons name="lock-closed" size={14} color={COLORS.accent} />
-                <Text style={s.otpCardLabel}>Secure verification</Text>
-              </View>
               <View style={s.otpRow}>
                 {otp.map((d, i) => (
-                  <Animated.View
+                  <TextInput
                     key={i}
-                    style={{
-                      flex: 1,
-                      marginHorizontal: 4,
-                      opacity: boxAnims[i],
-                      transform: [{ scale: boxAnims[i].interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
-                    }}
-                  >
-                    <TextInput
-                      ref={(el) => (refs.current[i] = el)}
-                      style={[s.otpInput, d ? s.otpInputFilled : null]}
-                      value={d}
-                      onChangeText={(v) => handleChange(i, v)}
-                      onKeyPress={({ nativeEvent }) => handleKey(i, nativeEvent.key)}
-                      keyboardType="number-pad"
-                      maxLength={1}
-                      selectTextOnFocus
-                      editable={!loading}
-                      accessible
-                      accessibilityLabel={`Digit ${i + 1} of 6`}
-                    />
-                  </Animated.View>
+                    ref={(el) => (refs.current[i] = el)}
+                    style={[s.otpInput, d ? s.otpInputFilled : null]}
+                    value={d}
+                    onChangeText={(v) => handleChange(i, v)}
+                    onKeyPress={({ nativeEvent }) => handleKey(i, nativeEvent.key)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    selectTextOnFocus
+                    editable={!loading}
+                    accessibilityLabel={`Verification code digit ${i + 1} of 6`}
+                  />
                 ))}
               </View>
             </View>
 
-            {/* Error */}
             {error ? (
-              <View style={s.errorWrap} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+              <View style={s.errorWrap} accessibilityLiveRegion="assertive">
                 <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
-                <Text style={s.errorText}>{error}</Text>
+                <Text style={s.errorText} accessibilityRole="alert">{error}</Text>
               </View>
             ) : null}
 
-            {/* Verify button */}
             <TouchableOpacity
               style={[s.button, (!filled || loading) && s.buttonDisabled]}
-              onPress={() => handleVerify(otp.join(''))}
+              onPress={handleVerify}
               disabled={!filled || loading}
               activeOpacity={0.8}
-              accessible
               accessibilityRole="button"
               accessibilityLabel="Verify code"
               accessibilityState={{ disabled: !filled || loading }}
@@ -248,32 +188,16 @@ export default function OTPScreen() {
               ) : (
                 <>
                   <Text style={s.buttonText}>Verify</Text>
-                  <Ionicons name="checkmark-circle" size={20} color={COLORS.white} style={{ marginLeft: 8 }} />
+                  <Ionicons name="checkmark" size={18} color={COLORS.white} style={{ marginLeft: 6 }} />
                 </>
               )}
             </TouchableOpacity>
 
-            {/* Resend */}
-            <View style={s.resendWrap}>
-              {cooldown > 0 ? (
-                <Text style={s.resendText}>
-                  Resend code in <Text style={s.cooldownNum}>{cooldown}s</Text>
-                </Text>
-              ) : (
-                <TouchableOpacity activeOpacity={0.7} onPress={handleResend} disabled={resending}>
-                  <Text style={s.resendText}>
-                    Didn't get it?{' '}
-                    <Text style={s.resendLink}>{resending ? 'Sending...' : 'Resend code'}</Text>
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Trust footer */}
-            <View style={s.trustRow}>
-              <Ionicons name="lock-closed-outline" size={13} color={COLORS.textTertiary} />
-              <Text style={s.trustText}>End-to-end encrypted. Your data stays private.</Text>
-            </View>
+            <TouchableOpacity style={s.resendWrap} activeOpacity={0.7} onPress={handleResend} disabled={resending} accessibilityRole="button" accessibilityLabel={resending ? 'Sending new code' : 'Resend verification code'} accessibilityState={{ disabled: resending }}>
+              <Text style={s.resendText}>
+                Didn't get it? <Text style={s.resendLink}>{resending ? 'Sending...' : 'Resend code'}</Text>
+              </Text>
+            </TouchableOpacity>
           </Animated.View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -287,44 +211,36 @@ const s = StyleSheet.create({
   inner: { flex: 1, justifyContent: 'center' },
   content: { paddingHorizontal: SPACING.xl },
 
-  // Top bar
-  topBar: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: SPACING.xl, paddingTop: SPACING.sm, zIndex: 10 },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' },
+  // Back button
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SPACING.xl },
   backIconWrap: {
     width: 32, height: 32, borderRadius: 10,
     backgroundColor: COLORS.accentLight,
     justifyContent: 'center', alignItems: 'center',
   },
-  backText: { ...TYPE.label, fontSize: 15, color: COLORS.accent },
+  back: { ...TYPE.label, fontSize: 15, color: COLORS.accent },
 
-  // Shield icon
+  // Icon
   iconCircle: {
     width: 64, height: 64, borderRadius: 20,
     backgroundColor: COLORS.accentLighter,
-    borderWidth: 1, borderColor: COLORS.accentLight,
     justifyContent: 'center', alignItems: 'center',
     marginBottom: SPACING.md,
   },
 
   // Typography
-  title: { ...TYPE.h1, fontSize: 26, color: COLORS.text, marginBottom: SPACING.sm },
-  subtitle: { ...TYPE.body, fontSize: 16, color: COLORS.textSecondary, lineHeight: 24, marginBottom: 28 },
-  phoneHighlight: { fontWeight: '700', color: COLORS.text },
+  title: { ...TYPE.h1, color: COLORS.text, marginBottom: SPACING.sm },
+  subtitle: { ...TYPE.body, fontSize: 17, color: COLORS.textSecondary, lineHeight: 26, marginBottom: 28 },
 
   // OTP card
   otpCard: {
     backgroundColor: COLORS.white, borderRadius: RADII.lg,
-    paddingHorizontal: 12, paddingTop: 14, paddingBottom: 20, marginBottom: 24,
+    paddingHorizontal: 12, paddingVertical: 20, marginBottom: 24,
     ...SHADOWS.card,
   },
-  otpCardHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginBottom: 14, paddingHorizontal: 4,
-  },
-  otpCardLabel: { ...TYPE.labelSmall, color: COLORS.accent, letterSpacing: 0.5 },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between' },
   otpInput: {
-    height: 56, borderWidth: 2, borderColor: COLORS.border,
+    flex: 1, marginHorizontal: 4, height: 56, borderWidth: 2, borderColor: COLORS.border,
     borderRadius: 12, backgroundColor: COLORS.bg, textAlign: 'center',
     fontSize: 24, fontWeight: '600', color: COLORS.text,
   },
@@ -357,12 +273,4 @@ const s = StyleSheet.create({
   resendWrap: { marginTop: SPACING.lg, alignItems: 'center' },
   resendText: { fontSize: 15, color: COLORS.textSecondary },
   resendLink: { color: COLORS.accent, fontWeight: '600' },
-  cooldownNum: { color: COLORS.accent, fontWeight: '700' },
-
-  // Trust footer
-  trustRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, marginTop: SPACING.xl, opacity: 0.7,
-  },
-  trustText: { ...TYPE.caption, fontSize: 12, color: COLORS.textTertiary },
 });

@@ -143,40 +143,36 @@ export async function syncAllReminders(reminders) {
   }
 }
 
-// ── AsyncStorage cache ──────────────────────────────────────────
+// ── Encrypted AsyncStorage cache ────────────────────────────────
+
+import { secureSet, secureGet } from './secureCache';
 
 const REMINDERS_CACHE_KEY = '@med_reminders';
 const USAGE_CACHE_KEY = '@benefits_usage_summary';
 
 export async function cacheReminders(reminders) {
-  if (!AsyncStorageMod) return;
   try {
-    await AsyncStorageMod.setItem(REMINDERS_CACHE_KEY, JSON.stringify(reminders));
+    await secureSet(REMINDERS_CACHE_KEY, reminders);
   } catch (e) {}
 }
 
 export async function getCachedReminders() {
-  if (!AsyncStorageMod) return null;
   try {
-    const data = await AsyncStorageMod.getItem(REMINDERS_CACHE_KEY);
-    return data ? JSON.parse(data) : null;
+    return await secureGet(REMINDERS_CACHE_KEY);
   } catch (e) {
     return null;
   }
 }
 
 export async function cacheUsageSummary(summary) {
-  if (!AsyncStorageMod) return;
   try {
-    await AsyncStorageMod.setItem(USAGE_CACHE_KEY, JSON.stringify(summary));
+    await secureSet(USAGE_CACHE_KEY, summary);
   } catch (e) {}
 }
 
 export async function getCachedUsageSummary() {
-  if (!AsyncStorageMod) return null;
   try {
-    const data = await AsyncStorageMod.getItem(USAGE_CACHE_KEY);
-    return data ? JSON.parse(data) : null;
+    return await secureGet(USAGE_CACHE_KEY);
   } catch (e) {
     return null;
   }

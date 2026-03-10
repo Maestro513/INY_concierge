@@ -14,6 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-production")
 os.environ.setdefault("SMS_PROVIDER", "console")
+os.environ.setdefault("FIELD_ENCRYPTION_KEY", "tTpyb5AShevzMaryxDyxNWqd4wh86vTda5aOHAH5eA8=")
+os.environ.setdefault("ADMIN_SECRET", "test-admin-secret-for-tests")
 
 
 @pytest.fixture

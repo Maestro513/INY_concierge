@@ -65,7 +65,10 @@ export default function PhoneScreen() {
   };
 
   const rawDigits = phone.replace(/\D/g, '');
-  const isValid = rawDigits.length === 10;
+  const isValid = rawDigits.length === 10
+    && !/^(\d)\1{9}$/.test(rawDigits)
+    && !rawDigits.startsWith('000')
+    && !rawDigits.startsWith('1');
 
   const handleSubmit = async () => {
     if (!isValid) return;
@@ -83,7 +86,7 @@ export default function PhoneScreen() {
       if (res.status === 429) {
         setError("Too many attempts. Please wait a few minutes and try again.");
       } else if (data.found) {
-        setPendingOtp({ phone: rawDigits, firstName: data.first_name });
+        setPendingOtp(rawDigits, data.first_name);
         router.push('/otp');
       } else {
         setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");

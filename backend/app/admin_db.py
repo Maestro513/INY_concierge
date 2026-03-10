@@ -14,8 +14,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Database file lives alongside the mobile SQLite DB
-_DB_DIR = os.getenv("DATA_DIR", str(Path(__file__).resolve().parent.parent))
+# Database file lives on persistent disk in production, local dir in dev
+_DEFAULT_DB_DIR = "/data" if os.path.isdir("/data") else str(Path(__file__).resolve().parent.parent)
+_DB_DIR = os.getenv("DATA_DIR", _DEFAULT_DB_DIR)
 DB_PATH = os.path.join(_DB_DIR, "admin.db")
 
 SCHEMA = """
@@ -66,6 +67,7 @@ def _get_conn():
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")  # PR11: wait up to 5s on lock
     except sqlite3.OperationalError:
         pass
     conn.execute("PRAGMA foreign_keys=ON")
@@ -145,6 +147,27 @@ def record_login_event(phone: str = "", ip_address: str = "",
             "VALUES (?, ?, ?, ?)",
             (phone, ip_address, user_agent, 1 if success else 0),
         )
+
+
+def clear_failed_logins(email: str):
+    """Delete failed login records for an email (call after successful login)."""
+    with _get_conn() as conn:
+        conn.execute(
+            "DELETE FROM login_events WHERE phone = ? AND success = 0",
+            (email,),
+        )
+
+
+def count_recent_failed_logins(email: str, window_seconds: int = 900) -> int:
+    """Count failed login attempts for an email within the given window."""
+    cutoff = time.time() - window_seconds
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM login_events "
+            "WHERE phone = ? AND success = 0 AND created_at > ?",
+            (email, cutoff),
+        ).fetchone()
+        return row[0] if row else 0
 
 
 def get_login_stats(days: int = 30) -> dict:

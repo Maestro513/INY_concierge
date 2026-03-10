@@ -23,8 +23,23 @@ import threading
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
+
+# M15: Configurable timeout for external API calls (RxNorm, etc.)
+EXTERNAL_API_TIMEOUT = int(os.environ.get("EXTERNAL_API_TIMEOUT", "10"))
+
+# Retry-capable session for transient network errors (RxNorm API)
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[500, 502, 503, 504],  # PR16: exclude 429 to avoid retry storms
+    allowed_methods=["GET"],
+)
+_http = requests.Session()
+_http.mount("https://", HTTPAdapter(max_retries=_retry_strategy))
 
 # Default DB path — checks both same dir and parent dir
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -349,10 +364,10 @@ class CMSLookup:
         rxcuis = []
         try:
             # Strategy 1: /drugs endpoint returns all products for a drug name
-            resp = requests.get(
+            resp = _http.get(
                 "https://rxnav.nlm.nih.gov/REST/drugs.json",
                 params={"name": drug_name},
-                timeout=10,
+                timeout=EXTERNAL_API_TIMEOUT,
             )
             data = resp.json()
             groups = data.get("drugGroup", {}).get("conceptGroup", [])
@@ -363,10 +378,10 @@ class CMSLookup:
             # Strategy 2: /approximateTerm for fuzzy matching (helps with
             # brand names like Humalog that may return inconsistent results)
             try:
-                resp2 = requests.get(
+                resp2 = _http.get(
                     "https://rxnav.nlm.nih.gov/REST/approximateTerm.json",
                     params={"term": drug_name, "maxEntries": 20},
-                    timeout=10,
+                    timeout=EXTERNAL_API_TIMEOUT,
                 )
                 data2 = resp2.json()
                 candidates = data2.get("approximateGroup", {}).get("candidate", [])
@@ -379,10 +394,10 @@ class CMSLookup:
 
             if not rxcuis:
                 # Strategy 3: try approximate name search for ingredient RXCUI
-                resp3 = requests.get(
+                resp3 = _http.get(
                     "https://rxnav.nlm.nih.gov/REST/rxcui.json",
                     params={"name": drug_name, "search": 2},
-                    timeout=10,
+                    timeout=EXTERNAL_API_TIMEOUT,
                 )
                 data3 = resp3.json()
                 ids = data3.get("idGroup", {}).get("rxnormId", [])
@@ -398,7 +413,7 @@ class CMSLookup:
             return unique
 
         except Exception as e:
-            log.warning(f"RxNorm lookup failed for '{drug_name}': {e}")
+            log.warning("RxNorm lookup failed for drug query: %s", type(e).__name__)
             return rxcuis
 
     def get_drug_by_name(self, plan_number: str, drug_name: str,

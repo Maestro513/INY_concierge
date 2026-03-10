@@ -15,12 +15,15 @@ Usage:
 """
 
 import json
+import logging
 import os
 import re
 
 import fitz  # PyMuPDF
 
 from .config import EXTRACTED_DIR, PDFS_DIR
+
+log = logging.getLogger(__name__)
 
 # --- Section header patterns found in SOB PDFs across all carriers ---
 # These match the major section headings that appear in Medicare SOB documents.
@@ -166,7 +169,7 @@ def extract_plan_ids(filename: str) -> list[str]:
         return [f"{h}-{seg}" for h, seg in dict.fromkeys(y_match)]
 
     # Fallback: use full filename
-    print(f"  WARNING: Could not extract plan ID from: {filename}")
+    log.warning(f"Could not extract plan ID from: {filename}")
     return [name]
 
 
@@ -289,15 +292,15 @@ def process_single_pdf(pdf_path: str, base_dir: str) -> list[dict]:
     carrier = get_carrier_from_path(pdf_path, base_dir)
     plan_ids = extract_plan_ids(filename)
 
-    print(f"  {filename}")
-    print(f"     Carrier: {carrier}")
-    print(f"     Plan ID(s): {', '.join(plan_ids)}")
+    log.debug(f"  {filename}")
+    log.debug(f"     Carrier: {carrier}")
+    log.debug(f"     Plan ID(s): {', '.join(plan_ids)}")
 
     full_text = extract_text_from_pdf(pdf_path)
     sections = chunk_by_sections(full_text)
 
     section_labels = [s["section"] for s in sections]
-    print(f"     {len(full_text):,} chars -> {len(sections)} sections: {', '.join(section_labels[:6])}{'...' if len(section_labels) > 6 else ''}")
+    log.debug(f"     {len(full_text):,} chars -> {len(sections)} sections: {', '.join(section_labels[:6])}{'...' if len(section_labels) > 6 else ''}")
 
     results = []
     for plan_id in plan_ids:
@@ -330,11 +333,10 @@ def process_pdf_list(pdf_files: list[str]) -> dict:
                 with open(out_path, "w") as f:
                     json.dump(data, f, indent=2)
                 total_plans += 1
-                print(f"     -> {data['plan_id']}.json")
-            print()
+                log.debug(f"     -> {data['plan_id']}.json")
         except Exception as e:
             errors.append((pdf_path, str(e)))
-            print(f"     ERROR: {e}\n")
+            log.warning(f"     ERROR: {e}")
 
     return {"processed": total_plans, "errors": len(errors)}
 
@@ -348,22 +350,22 @@ def process_all_pdfs():
                 pdf_files.append(os.path.join(root, f))
 
     if not pdf_files:
-        print(f"\nNo PDFs found in {PDFS_DIR}")
-        print("Add SOB PDFs to pdfs/ (subfolders by carrier/state OK).\n")
+        log.warning(f"No PDFs found in {PDFS_DIR}")
+        log.warning("Add SOB PDFs to pdfs/ (subfolders by carrier/state OK).")
         return
 
-    print(f"\n{'='*60}")
-    print("  InsuranceNYou SOB PDF Processor")
-    print(f"  Found {len(pdf_files)} PDF(s)")
-    print(f"{'='*60}\n")
+    log.debug(f"\n{'='*60}")
+    log.debug("  InsuranceNYou SOB PDF Processor")
+    log.debug(f"  Found {len(pdf_files)} PDF(s)")
+    log.debug(f"{'='*60}\n")
 
     result = process_pdf_list(pdf_files)
 
-    print(f"{'='*60}")
-    print(f"  Done! {result['processed']} plan files created from {len(pdf_files)} PDFs")
+    log.debug(f"{'='*60}")
+    log.debug(f"  Done! {result['processed']} plan files created from {len(pdf_files)} PDFs")
     if result["errors"]:
-        print(f"  {result['errors']} error(s)")
-    print(f"{'='*60}\n")
+        log.warning(f"  {result['errors']} error(s)")
+    log.debug(f"{'='*60}\n")
 
 
 if __name__ == "__main__":

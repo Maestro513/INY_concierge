@@ -49,12 +49,17 @@ __pycache__/
 # Backend — sensitive / large files
 backend/.env
 backend/venv/
-backend/user_data.db
-backend/admin.db
+backend/*.db
 backend/*.db-shm
 backend/*.db-wal
 backend/pdfs/
 backend/extracted/
+backend/pdf Updated/
+
+# Audit / persistent data
+audit.db
+persistent_store.db
+
 # Vercel
 .vercel/
 

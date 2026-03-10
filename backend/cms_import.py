@@ -78,8 +78,13 @@ PBP_FILES = [
 
 
 def sanitize_col(name: str) -> str:
-    """Make column name safe for SQLite."""
-    return name.strip().lower().replace(" ", "_").replace("-", "_").replace(".", "_")
+    """Make column name safe for SQLite — only allow alphanumeric + underscore."""
+    import re
+    col = name.strip().lower().replace(" ", "_").replace("-", "_").replace(".", "_")
+    col = re.sub(r'[^a-z0-9_]', '', col)
+    if not col or not col[0].isalpha():
+        col = "col_" + col
+    return col
 
 
 def detect_encoding(filepath: str) -> str:

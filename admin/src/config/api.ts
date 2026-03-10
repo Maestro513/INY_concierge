@@ -1,9 +1,10 @@
-export const API_BASE = import.meta.env.VITE_API_URL || '';
+export const API_BASE = import.meta.env.VITE_API_URL || 'https://iny-concierge.onrender.com';
 
 export const ENDPOINTS = {
   // Admin auth
   LOGIN: '/api/admin/auth/login',
   REFRESH: '/api/admin/auth/refresh',
+  LOGOUT: '/api/admin/auth/logout',
   ME: '/api/admin/auth/me',
 
   // Members

@@ -108,10 +108,14 @@ function ReminderRow({ reminder, onToggle, onDelete }) {
         trackColor={{ false: COLORS.border, true: COLORS.accentSoft }}
         thumbColor={reminder.enabled ? COLORS.accent : COLORS.textTertiary}
         style={{ transform: [{ scale: 0.8 }] }}
+        accessibilityLabel={`${reminder.drug_name} reminder ${reminder.enabled ? 'enabled' : 'disabled'}`}
+        accessibilityRole="switch"
       />
       <TouchableOpacity
         onPress={() => onDelete(reminder.id)}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityRole="button"
+        accessibilityLabel={`Delete ${reminder.drug_name} reminder`}
       >
         <Ionicons name="trash-outline" size={16} color={COLORS.textTertiary} />
       </TouchableOpacity>
@@ -147,37 +151,37 @@ function AddReminderModal({ visible, onClose, onSave }) {
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add Reminder</Text>
-            <TouchableOpacity onPress={() => { reset(); onClose(); }}>
+            <TouchableOpacity onPress={() => { reset(); onClose(); }} accessibilityRole="button" accessibilityLabel="Close add reminder">
               <Ionicons name="close" size={24} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
           <Text style={styles.fieldLabel}>Medication</Text>
-          <TextInput style={styles.modalInput} value={drugName} onChangeText={setDrugName} placeholder="e.g. Metformin" placeholderTextColor={COLORS.textTertiary} autoFocus />
+          <TextInput style={styles.modalInput} value={drugName} onChangeText={setDrugName} placeholder="e.g. Metformin" placeholderTextColor={COLORS.textTertiary} autoFocus maxLength={200} accessibilityLabel="Medication name" />
           <Text style={styles.fieldLabel}>Dose (optional)</Text>
-          <TextInput style={styles.modalInput} value={doseLabel} onChangeText={setDoseLabel} placeholder="e.g. 500mg" placeholderTextColor={COLORS.textTertiary} />
+          <TextInput style={styles.modalInput} value={doseLabel} onChangeText={setDoseLabel} placeholder="e.g. 500mg" placeholderTextColor={COLORS.textTertiary} maxLength={200} accessibilityLabel="Dose, optional" />
           <Text style={styles.fieldLabel}>Reminder Time</Text>
           <View style={styles.timeRow}>
             <View style={styles.timeSpinner}>
-              <TouchableOpacity onPress={() => adjustHour(1)} style={styles.spinBtn}><Ionicons name="chevron-up" size={20} color={COLORS.accent} /></TouchableOpacity>
-              <Text style={styles.timeValue}>{String(hour).padStart(2, '0')}</Text>
-              <TouchableOpacity onPress={() => adjustHour(-1)} style={styles.spinBtn}><Ionicons name="chevron-down" size={20} color={COLORS.accent} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => adjustHour(1)} style={styles.spinBtn} accessibilityRole="button" accessibilityLabel="Increase hour"><Ionicons name="chevron-up" size={20} color={COLORS.accent} /></TouchableOpacity>
+              <Text style={styles.timeValue} accessibilityLabel={`Hour: ${hour}`}>{String(hour).padStart(2, '0')}</Text>
+              <TouchableOpacity onPress={() => adjustHour(-1)} style={styles.spinBtn} accessibilityRole="button" accessibilityLabel="Decrease hour"><Ionicons name="chevron-down" size={20} color={COLORS.accent} /></TouchableOpacity>
             </View>
-            <Text style={styles.timeColon}>:</Text>
+            <Text style={styles.timeColon} accessibilityElementsHidden>:</Text>
             <View style={styles.timeSpinner}>
-              <TouchableOpacity onPress={() => adjustMinute(15)} style={styles.spinBtn}><Ionicons name="chevron-up" size={20} color={COLORS.accent} /></TouchableOpacity>
-              <Text style={styles.timeValue}>{String(minute).padStart(2, '0')}</Text>
-              <TouchableOpacity onPress={() => adjustMinute(-15)} style={styles.spinBtn}><Ionicons name="chevron-down" size={20} color={COLORS.accent} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => adjustMinute(15)} style={styles.spinBtn} accessibilityRole="button" accessibilityLabel="Increase minutes"><Ionicons name="chevron-up" size={20} color={COLORS.accent} /></TouchableOpacity>
+              <Text style={styles.timeValue} accessibilityLabel={`Minutes: ${minute}`}>{String(minute).padStart(2, '0')}</Text>
+              <TouchableOpacity onPress={() => adjustMinute(-15)} style={styles.spinBtn} accessibilityRole="button" accessibilityLabel="Decrease minutes"><Ionicons name="chevron-down" size={20} color={COLORS.accent} /></TouchableOpacity>
             </View>
             <View style={styles.ampmToggle}>
-              <TouchableOpacity style={[styles.ampmBtn, ampm === 'AM' && styles.ampmActive]} onPress={() => setAmpm('AM')}>
+              <TouchableOpacity style={[styles.ampmBtn, ampm === 'AM' && styles.ampmActive]} onPress={() => setAmpm('AM')} accessibilityRole="button" accessibilityLabel="AM" accessibilityState={{ selected: ampm === 'AM' }}>
                 <Text style={[styles.ampmText, ampm === 'AM' && styles.ampmTextActive]}>AM</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.ampmBtn, ampm === 'PM' && styles.ampmActive]} onPress={() => setAmpm('PM')}>
+              <TouchableOpacity style={[styles.ampmBtn, ampm === 'PM' && styles.ampmActive]} onPress={() => setAmpm('PM')} accessibilityRole="button" accessibilityLabel="PM" accessibilityState={{ selected: ampm === 'PM' }}>
                 <Text style={[styles.ampmText, ampm === 'PM' && styles.ampmTextActive]}>PM</Text>
               </TouchableOpacity>
             </View>
           </View>
-          <TouchableOpacity style={[styles.saveBtn, (!drugName.trim() || saving) && styles.saveBtnDisabled]} onPress={handleSave} disabled={!drugName.trim() || saving} activeOpacity={0.8}>
+          <TouchableOpacity style={[styles.saveBtn, (!drugName.trim() || saving) && styles.saveBtnDisabled]} onPress={handleSave} disabled={!drugName.trim() || saving} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Save reminder" accessibilityState={{ disabled: !drugName.trim() || saving }}>
             {saving ? <ActivityIndicator color={COLORS.white} size="small" /> : <Text style={styles.saveBtnText}>Save Reminder</Text>}
           </TouchableOpacity>
         </View>
@@ -187,7 +191,7 @@ function AddReminderModal({ visible, onClose, onSave }) {
 }
 
 // ── Main component ──────────────────────────────────────────────
-export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder, drugsData }) {
+export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits, loading, benefitsError, onRetryBenefits, reminders = [], onToggleReminder, onDeleteReminder, onAddReminder, drugsData, onLogout }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showMedsModal, setShowMedsModal] = useState(false);
@@ -222,7 +226,14 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
       {/* Header: Greeting + Name + Agent | Carrier Logo + Plan Name */}
       <Animated.View style={[styles.header, { opacity: greetFade, transform: [{ translateY: greetSlide }] }]}>
         <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>{greeting()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={styles.greeting}>{greeting()}</Text>
+            {onLogout && (
+              <TouchableOpacity onPress={onLogout} accessibilityLabel="Log out" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
           <Text style={styles.name}>
             {member.firstName} {member.lastName}
           </Text>
@@ -245,7 +256,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Your Medications</Text>
-              <TouchableOpacity onPress={() => setShowMedsModal(false)}>
+              <TouchableOpacity onPress={() => setShowMedsModal(false)} accessibilityRole="button" accessibilityLabel="Close medications list">
                 <Ionicons name="close" size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -304,7 +315,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
               <ReminderRow key={String(r.id)} reminder={r} onToggle={onToggleReminder} onDelete={onDeleteReminder} />
             ))
           )}
-          <TouchableOpacity style={styles.remAddBtn} onPress={() => setShowAddModal(true)} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.remAddBtn} onPress={() => setShowAddModal(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Add medication reminder">
             <Ionicons name="add-circle-outline" size={16} color={COLORS.accent} />
             <Text style={styles.remAddText}>Add Reminder</Text>
           </TouchableOpacity>
@@ -391,7 +402,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
           <Ionicons name="cloud-offline-outline" size={32} color={COLORS.textTertiary} />
           <Text style={styles.errorText}>Couldn't load your benefits</Text>
           {onRetryBenefits ? (
-            <TouchableOpacity style={styles.retryBtn} onPress={onRetryBenefits} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.retryBtn} onPress={onRetryBenefits} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Retry loading benefits">
               <Ionicons name="refresh-outline" size={16} color={COLORS.white} />
               <Text style={styles.retryText}>Try Again</Text>
             </TouchableOpacity>

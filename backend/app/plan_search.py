@@ -14,8 +14,20 @@ import threading
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
+
+# Retry-capable session for transient network errors
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[500, 502, 503, 504],  # PR16: exclude 429 to avoid retry storms
+    allowed_methods=["GET", "POST"],
+)
+_http = requests.Session()
+_http.mount("https://", HTTPAdapter(max_retries=_retry_strategy))
 
 # Reuse the same DB path logic from cms_lookup
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,8 +43,30 @@ for _candidate in [
 if DEFAULT_DB is None:
     DEFAULT_DB = os.path.join(_PARENT_DIR, "cms_benefits.db")
 
+# Concurrency limiter for external CMS API calls (prevents thundering herd)
+_CMS_API_SEMAPHORE = threading.Semaphore(int(os.environ.get("CMS_API_CONCURRENCY", "10")))
+
 CMS_MARKETPLACE_API = "https://marketplace.api.healthcare.gov/api/v1"
 CMS_MARKETPLACE_API_KEY = os.environ.get("CMS_MARKETPLACE_API_KEY", "")
+
+# ── Geocoding cache (zip → county) — bounded LRU ─────────────────────────────
+import time as _time
+
+_geo_cache: dict[str, dict] = {}  # {zip: {"data": [...], "ts": float}}
+_GEO_CACHE_TTL = 86400   # 24 hours — counties don't change often
+_GEO_CACHE_MAX = 1000
+_geo_lock = threading.Lock()
+
+
+def _evict_geo_cache() -> None:
+    """Evict expired entries, then oldest if still over max."""
+    now = _time.time()
+    expired = [k for k, v in _geo_cache.items() if now - v["ts"] > _GEO_CACHE_TTL]
+    for k in expired:
+        del _geo_cache[k]
+    while len(_geo_cache) >= _GEO_CACHE_MAX:
+        oldest = min(_geo_cache, key=lambda k: _geo_cache[k]["ts"])
+        del _geo_cache[oldest]
 
 
 # ── Zip-to-County via CMS Marketplace API ────────────────────────────────────
@@ -41,22 +75,32 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
     """
     Get counties for a zip code using the CMS Marketplace API.
     Returns list of {fips, name, state} dicts.
-    Works for both Medicare and U65 flows.
+    Results are cached for 24 hours to avoid redundant geocoding calls.
     """
+    # Check cache first
+    with _geo_lock:
+        cached = _geo_cache.get(zipcode)
+        if cached and (_time.time() - cached["ts"]) < _GEO_CACHE_TTL:
+            return cached["data"]
+
     try:
+        from .circuit_breaker import cms_breaker
+
         params = {}
+        headers = {"Accept": "application/json"}
         if CMS_MARKETPLACE_API_KEY:
             params["apikey"] = CMS_MARKETPLACE_API_KEY
-        resp = requests.get(
-            f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
-            headers={"Accept": "application/json"},
-            params=params,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        with cms_breaker, _CMS_API_SEMAPHORE:
+            resp = _http.get(
+                f"{CMS_MARKETPLACE_API}/counties/by/zip/{zipcode}",
+                headers=headers,
+                params=params,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
         counties = data.get("counties", [])
-        return [
+        result = [
             {
                 "fips": c.get("fips"),
                 "name": c.get("name"),
@@ -64,8 +108,13 @@ def get_counties_by_zip(zipcode: str) -> list[dict]:
             }
             for c in counties
         ]
+        # Cache the result
+        with _geo_lock:
+            _evict_geo_cache()
+            _geo_cache[zipcode] = {"data": result, "ts": _time.time()}
+        return result
     except Exception as e:
-        log.warning(f"County lookup failed for zip {zipcode}: {e}")
+        log.warning("County lookup failed for zip %s: %s", zipcode, type(e).__name__)
         return []
 
 
@@ -147,7 +196,60 @@ class MedicarePlanSearch:
                 seen.add(key)
                 unique_plans.append(p)
 
-        # Enrich with benefit highlights
+        # Batch-fetch all benefit data in a single JOIN query
+        # instead of 6 individual queries per plan (N+1 → 1)
+        if not unique_plans:
+            return []
+
+        plan_keys = [(p["contract_id"], p["plan_id"]) for p in unique_plans]
+        placeholders = " OR ".join(
+            ["(sa.pbp_a_hnumber = ? AND sa.pbp_a_plan_identifier = ?)"] * len(plan_keys)
+        )
+        flat_params = [v for pair in plan_keys for v in pair]
+
+        benefits_sql = f"""
+            SELECT sa.pbp_a_hnumber AS contract_id,
+                   sa.pbp_a_plan_identifier AS plan_id,
+                   sa.pbp_a_org_marketing_name, sa.pbp_a_plan_name, sa.pbp_a_plan_type,
+                   b7.pbp_b7a_copay_amt_mc_min, b7.pbp_b7b_copay_mc_amt_min,
+                   sd.pbp_d_mplusc_bonly_premium,
+                   b16.pbp_b16b_copay_ov_amt, b16.pbp_b16b_copay_ov_amt_min,
+                   b16.pbp_b16c_maxplan_cmp_amt, b16.pbp_b16c_maxenr_cmp_amt,
+                   b17.pbp_b17a_bendesc_yn,
+                   b13.pbp_b13b_bendesc_otc, b13.pbp_b13b_maxplan_amt, b13.pbp_b13b_maxenr_amt
+            FROM pbp_section_a sa
+            LEFT JOIN pbp_b7_health_prof b7
+                ON b7.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b7.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_section_d sd
+                ON sd.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND sd.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_b16_dental b16
+                ON b16.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b16.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_b17_vision b17
+                ON b17.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b17.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            LEFT JOIN pbp_b13_other_services b13
+                ON b13.pbp_a_hnumber = sa.pbp_a_hnumber
+               AND b13.pbp_a_plan_identifier = sa.pbp_a_plan_identifier
+            WHERE {placeholders}
+        """
+        benefit_rows = self._query_all(benefits_sql, tuple(flat_params))
+
+        # Index benefit rows by plan key
+        benefits_by_key = {}
+        for row in benefit_rows:
+            key = f"{row['contract_id']}-{row['plan_id']}"
+            if key not in benefits_by_key:
+                benefits_by_key[key] = row
+
+        plan_type_map = {
+            "1": "HMO", "2": "HMOPOS", "3": "Local PPO",
+            "4": "Regional PPO", "5": "PFFS", "6": "Cost",
+            "9": "ESRD",
+        }
+
         results = []
         for p in unique_plans:
             plan_number = f"{p['contract_id']}-{p['plan_id']}"
@@ -162,100 +264,48 @@ class MedicarePlanSearch:
                 "type": "medicare",
             }
 
-            # Get org marketing name from section_a if available
-            section_a = self._query_one(
-                """SELECT pbp_a_org_marketing_name, pbp_a_plan_name,
-                          pbp_a_plan_type
-                   FROM pbp_section_a
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if section_a:
-                if section_a.get("pbp_a_org_marketing_name"):
-                    card["org_name"] = section_a["pbp_a_org_marketing_name"]
-                if section_a.get("pbp_a_plan_name"):
-                    card["plan_name"] = section_a["pbp_a_plan_name"]
-                plan_type_map = {
-                    "1": "HMO", "2": "HMOPOS", "3": "Local PPO",
-                    "4": "Regional PPO", "5": "PFFS", "6": "Cost",
-                    "9": "ESRD",
-                }
-                pt = str(section_a.get("pbp_a_plan_type", "")).strip()
+            b = benefits_by_key.get(plan_number)
+            if b:
+                # Section A
+                if b.get("pbp_a_org_marketing_name"):
+                    card["org_name"] = b["pbp_a_org_marketing_name"]
+                if b.get("pbp_a_plan_name"):
+                    card["plan_name"] = b["pbp_a_plan_name"]
+                pt = str(b.get("pbp_a_plan_type", "")).strip()
                 card["plan_type"] = plan_type_map.get(pt, pt)
 
-            # Medical copays
-            b7 = self._query_one(
-                """SELECT pbp_b7a_copay_amt_mc_min, pbp_b7b_copay_mc_amt_min
-                   FROM pbp_b7_health_prof
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b7:
-                pcp = self._safe_float(b7.get("pbp_b7a_copay_amt_mc_min"))
-                spec = self._safe_float(b7.get("pbp_b7b_copay_mc_amt_min"))
+                # Medical copays (b7)
+                pcp = self._safe_float(b.get("pbp_b7a_copay_amt_mc_min"))
+                spec = self._safe_float(b.get("pbp_b7b_copay_mc_amt_min"))
                 card["pcp_copay"] = f"${pcp:.0f}" if pcp is not None else None
                 card["specialist_copay"] = f"${spec:.0f}" if spec is not None else None
 
-            # Part B giveback
-            sd = self._query_one(
-                """SELECT pbp_d_mplusc_bonly_premium
-                   FROM pbp_section_d
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if sd:
-                gb = self._safe_float(sd.get("pbp_d_mplusc_bonly_premium"))
+                # Part B giveback (section_d)
+                gb = self._safe_float(b.get("pbp_d_mplusc_bonly_premium"))
                 if gb and gb > 0:
                     card["part_b_giveback"] = f"${gb:.2f}"
 
-            # Dental
-            b16 = self._query_one(
-                """SELECT pbp_b16b_copay_ov_amt, pbp_b16b_copay_ov_amt_min,
-                          pbp_b16c_maxplan_cmp_amt, pbp_b16c_maxenr_cmp_amt
-                   FROM pbp_b16_dental
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b16:
-                card["has_dental"] = True
-                cmp_max = self._safe_float(
-                    b16.get("pbp_b16c_maxplan_cmp_amt") or
-                    b16.get("pbp_b16c_maxenr_cmp_amt")
-                )
-                if cmp_max:
-                    card["dental_max"] = f"${cmp_max:.0f}"
+                # Dental (b16)
+                if b.get("pbp_b16b_copay_ov_amt") is not None or b.get("pbp_b16c_maxplan_cmp_amt") is not None:
+                    card["has_dental"] = True
+                    cmp_max = self._safe_float(
+                        b.get("pbp_b16c_maxplan_cmp_amt") or b.get("pbp_b16c_maxenr_cmp_amt")
+                    )
+                    if cmp_max:
+                        card["dental_max"] = f"${cmp_max:.0f}"
 
-            # Vision
-            b17 = self._query_one(
-                """SELECT pbp_b17a_bendesc_yn
-                   FROM pbp_b17_vision
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b17 and str(b17.get("pbp_b17a_bendesc_yn", "")).strip().upper() in ("Y", "1"):
-                card["has_vision"] = True
+                # Vision (b17)
+                if str(b.get("pbp_b17a_bendesc_yn", "")).strip().upper() in ("Y", "1"):
+                    card["has_vision"] = True
 
-            # OTC
-            b13 = self._query_one(
-                """SELECT pbp_b13b_bendesc_otc, pbp_b13b_maxplan_amt,
-                          pbp_b13b_maxenr_amt
-                   FROM pbp_b13_other_services
-                   WHERE pbp_a_hnumber = ? AND pbp_a_plan_identifier = ?
-                   LIMIT 1""",
-                (p["contract_id"], p["plan_id"]),
-            )
-            if b13 and str(b13.get("pbp_b13b_bendesc_otc", "")).strip().upper() in ("Y", "1"):
-                card["has_otc"] = True
-                otc_amt = self._safe_float(
-                    b13.get("pbp_b13b_maxplan_amt") or b13.get("pbp_b13b_maxenr_amt")
-                )
-                if otc_amt and otc_amt > 0:
-                    card["otc_amount"] = f"${otc_amt:.0f}"
+                # OTC (b13)
+                if str(b.get("pbp_b13b_bendesc_otc", "")).strip().upper() in ("Y", "1"):
+                    card["has_otc"] = True
+                    otc_amt = self._safe_float(
+                        b.get("pbp_b13b_maxplan_amt") or b.get("pbp_b13b_maxenr_amt")
+                    )
+                    if otc_amt and otc_amt > 0:
+                        card["otc_amount"] = f"${otc_amt:.0f}"
 
             results.append(card)
 
@@ -354,43 +404,44 @@ def search_marketplace_plans(
         "sort": "premium",
     }
 
-    try:
-        url = f"{CMS_MARKETPLACE_API}/plans/search"
-        if CMS_MARKETPLACE_API_KEY:
-            url += f"?apikey={CMS_MARKETPLACE_API_KEY}"
-        resp = requests.post(
-            url,
-            json=search_body,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.HTTPError as e:
-        log.warning(f"Marketplace API error for zip {zipcode}: {e}")
-        # Try with year 2025 if 2026 fails
-        search_body["year"] = 2025
+    url = f"{CMS_MARKETPLACE_API}/plans/search"
+    _mkt_params = {"apikey": CMS_MARKETPLACE_API_KEY} if CMS_MARKETPLACE_API_KEY else {}
+    _mkt_headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    with _CMS_API_SEMAPHORE:
         try:
-            resp = requests.post(
-                f"{CMS_MARKETPLACE_API}/plans/search",
+            resp = _http.post(
+                url,
                 json=search_body,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
+                params=_mkt_params,
+                headers=_mkt_headers,
                 timeout=15,
             )
             resp.raise_for_status()
             data = resp.json()
-        except Exception as e2:
-            log.error(f"Marketplace API fallback failed: {e2}")
+        except requests.exceptions.HTTPError as e:
+            log.warning("Marketplace API error for zip %s: %s", zipcode, type(e).__name__)
+            # Try with year 2025 if 2026 fails
+            search_body["year"] = 2025
+            try:
+                resp = _http.post(
+                    f"{CMS_MARKETPLACE_API}/plans/search",
+                    json=search_body,
+                    params=_mkt_params,
+                    headers=_mkt_headers,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e2:
+                log.error("Marketplace API fallback failed: %s", type(e2).__name__)
+                return {"error": "Unable to search marketplace plans", "plans": []}
+        except Exception as e:
+            log.error("Marketplace API request failed: %s", type(e).__name__)
             return {"error": "Unable to search marketplace plans", "plans": []}
-    except Exception as e:
-        log.error(f"Marketplace API request failed: {e}")
-        return {"error": "Unable to search marketplace plans", "plans": []}
 
     # Step 3: Transform response into plan cards
     raw_plans = data.get("plans", [])

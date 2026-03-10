@@ -4,10 +4,29 @@ Claude API client for answering member questions about their SOB.
 
 import json
 import os
+import re
 
 import anthropic
 
 from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR
+
+# PHI patterns to strip from user questions before sending to third-party API
+_PHI_PATTERNS = [
+    (re.compile(r"\b\d{1}[A-Z]{2}\d{1}-[A-Z]{2}\d{1}-[A-Z]{2}\d{2}\b"), "[MEDICARE_ID]"),   # Medicare number
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[SSN]"),                                           # SSN
+    (re.compile(r"\b\d{9}\b"), "[SSN]"),                                                        # SSN without dashes
+    (re.compile(r"\b\d{10}\b"), "[PHONE]"),                                                     # Phone number
+    (re.compile(r"\b\(\d{3}\)\s*\d{3}-\d{4}\b"), "[PHONE]"),                                   # (xxx) xxx-xxxx
+    (re.compile(r"\b\d{3}-\d{3}-\d{4}\b"), "[PHONE]"),                                         # xxx-xxx-xxxx
+    (re.compile(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"), "[DOB]"),                                     # Date of birth
+]
+
+
+def _scrub_phi(text: str) -> str:
+    """Remove PHI patterns (Medicare IDs, SSNs, phone numbers, DOBs) from text."""
+    for pattern, replacement in _PHI_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def normalize_plan_id(plan_id: str) -> str:
@@ -240,11 +259,16 @@ def ask_claude(question: str, plan_number: str) -> dict:
             "has_context": False,
         }
 
-    context = find_relevant_chunks(chunks, question)
+    # H9: Scrub PHI from user question before sending to third-party API
+    safe_question = _scrub_phi(question)
+    context = find_relevant_chunks(chunks, question)  # Use original for relevance matching
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    from .circuit_breaker import anthropic_breaker
 
-    message = client.messages.create(
+    with anthropic_breaker:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+
+        message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=300,
         system=SYSTEM_PROMPT,
@@ -259,7 +283,7 @@ Summary of Benefits sections:
 
 ---
 
-Question: {question}""",
+Question: {safe_question}""",
             }
         ],
     )

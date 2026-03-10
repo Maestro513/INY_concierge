@@ -22,26 +22,23 @@ ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 # Google APIs (Geocoding + Places)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Google Drive – service account credentials (JSON string from env var)
-GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-
 # App environment
-APP_ENV = os.getenv("APP_ENV", "development")  # development | staging | production
+APP_ENV = os.getenv("APP_ENV", "production")  # development | staging | production
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # CORS — comma-separated extra origins (insurancenyou.com is always allowed in prod)
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "")  # e.g. "https://staging.insurancenyou.com"
 
-# Google Drive – folder ID for SOB PDFs
-GDRIVE_FOLDER_ID = os.getenv(
-    "GDRIVE_FOLDER_ID", "1vLrYoIa3lmn9vEdZSXJ9s3p1qoomLHpO"
-)
-
 # Secret for admin endpoints (set in Render env vars)
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
+if APP_ENV in ("production", "staging") and not ADMIN_SECRET:
+    raise RuntimeError("ADMIN_SECRET must be set in production/staging.")
 
 # JWT Authentication
 JWT_SECRET = os.getenv("JWT_SECRET", "")  # MUST be set in production
+if not JWT_SECRET:
+    import secrets as _secrets
+    JWT_SECRET = _secrets.token_urlsafe(32)  # random per-startup fallback for dev
 JWT_ACCESS_TTL = int(os.getenv("JWT_ACCESS_TTL", "7200"))         # 2 hours
 JWT_REFRESH_TTL = int(os.getenv("JWT_REFRESH_TTL", "2592000"))    # 30 days
 
@@ -55,18 +52,27 @@ TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
 OTP_TTL = int(os.getenv("OTP_TTL", "180"))                  # 3 minutes
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "4"))   # lockout after 4 wrong guesses
 OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "4"))         # max 4 sends per window
-OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "600"))   # 10 minute window
+OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "300"))   # 5 minute window
 
-# Test account (works in any environment — for app review & admin access)
-# Set these in Render env vars so you can always log in without a real phone
-TEST_PHONE = os.getenv("TEST_PHONE", "")          # e.g. "5555550100"
-TEST_OTP = os.getenv("TEST_OTP", "")              # e.g. "123456"
+# Test account — only enabled in development/staging (never in production)
+TEST_PHONE = os.getenv("TEST_PHONE", "") if APP_ENV != "production" else ""
+TEST_OTP = os.getenv("TEST_OTP", "") if APP_ENV != "production" else ""
+
+# Warn if well-known/predictable test credentials are being used
+if TEST_PHONE and TEST_OTP:
+    import logging as _log_cfg
+    _KNOWN_WEAK = {("5555550100", "123456"), ("0000000000", "000000")}
+    if (TEST_PHONE, TEST_OTP) in _KNOWN_WEAK:
+        _log_cfg.getLogger(__name__).warning(
+            "TEST_PHONE/TEST_OTP use well-known values — change them to unique values"
+        )
 
 # Sentry
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")  # Set in Render env vars for production
 
 # Field-level encryption for PHI at rest (medications, Medicare numbers)
 # Generate with: python -c "from app.encryption import generate_key; print(generate_key())"
+# Enforced at startup in main.py — RuntimeError if missing in production/staging
 FIELD_ENCRYPTION_KEY = os.getenv("FIELD_ENCRYPTION_KEY", "")
 
 # Paths

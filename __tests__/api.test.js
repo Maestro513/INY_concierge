@@ -1,7 +1,7 @@
 /**
  * Tests for the token management functions in constants/api.js.
  *
- * We mock AsyncStorage and verify set/load/clear token operations.
+ * We mock expo-secure-store and verify set/load/clear token operations.
  */
 
 // Mock react-native Platform before anything imports it
@@ -9,7 +9,14 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'android', select: jest.fn((obj) => obj.android) },
 }));
 
-const AsyncStorage = require('@react-native-async-storage/async-storage');
+// Mock expo-secure-store with jest functions
+const mockSecureStore = {
+  setItemAsync: jest.fn().mockResolvedValue(undefined),
+  getItemAsync: jest.fn().mockResolvedValue(null),
+  deleteItemAsync: jest.fn().mockResolvedValue(undefined),
+};
+jest.mock('expo-secure-store', () => mockSecureStore);
+
 const { setTokens, loadTokens, clearTokens, getAccessToken } = require('../constants/api');
 
 describe('Token Management', () => {
@@ -17,41 +24,33 @@ describe('Token Management', () => {
     jest.clearAllMocks();
   });
 
-  test('setTokens stores tokens in AsyncStorage', async () => {
+  test('setTokens stores tokens in SecureStore', async () => {
     await setTokens('access-123', 'refresh-456');
-    expect(AsyncStorage.multiSet).toHaveBeenCalledWith([
-      ['@iny_access_token', 'access-123'],
-      ['@iny_refresh_token', 'refresh-456'],
-    ]);
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('@iny_access_token', 'access-123');
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('@iny_refresh_token', 'refresh-456');
   });
 
-  test('loadTokens retrieves tokens from AsyncStorage', async () => {
-    AsyncStorage.multiGet.mockResolvedValueOnce([
-      ['@iny_access_token', 'stored-access'],
-      ['@iny_refresh_token', 'stored-refresh'],
-    ]);
+  test('loadTokens retrieves tokens from SecureStore', async () => {
+    mockSecureStore.getItemAsync
+      .mockResolvedValueOnce('stored-access')
+      .mockResolvedValueOnce('stored-refresh');
     const tokens = await loadTokens();
     expect(tokens.access).toBe('stored-access');
     expect(tokens.refresh).toBe('stored-refresh');
   });
 
   test('loadTokens handles missing tokens', async () => {
-    AsyncStorage.multiGet.mockResolvedValueOnce([
-      ['@iny_access_token', null],
-      ['@iny_refresh_token', null],
-    ]);
+    mockSecureStore.getItemAsync.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
     const tokens = await loadTokens();
     expect(tokens.access).toBeNull();
     expect(tokens.refresh).toBeNull();
   });
 
-  test('clearTokens removes tokens from AsyncStorage', async () => {
+  test('clearTokens removes tokens from SecureStore', async () => {
     await setTokens('access-123', 'refresh-456');
     await clearTokens();
-    expect(AsyncStorage.multiRemove).toHaveBeenCalledWith([
-      '@iny_access_token',
-      '@iny_refresh_token',
-    ]);
+    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('@iny_access_token');
+    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('@iny_refresh_token');
     expect(getAccessToken()).toBeNull();
   });
 

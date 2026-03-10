@@ -16,6 +16,7 @@ Base: https://flex.optum.com/fhirpublic/R4
 Token: https://flex.optum.com/authz/{payer}/oauth/token
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -37,8 +38,9 @@ UHC_TOKEN_URL = f"https://flex.optum.com/authz/{UHC_PAYER_ID}/oauth/token"
 HEADERS = {"Accept": "application/fhir+json"}
 TIMEOUT = 30.0
 
-# Cache the OAuth token in memory
+# Cache the OAuth token in memory (with lock to prevent concurrent refresh storms)
 _token_cache = {"access_token": "", "expires_at": 0}
+_token_lock = asyncio.Lock()
 
 
 async def _get_access_token(client: httpx.AsyncClient) -> str:
@@ -47,40 +49,45 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
         return _token_cache["access_token"]
 
-    if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
-        raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
+    async with _token_lock:
+        # Double-check after acquiring lock
+        now = time.time()
+        if _token_cache["access_token"] and _token_cache["expires_at"] > now + 60:
+            return _token_cache["access_token"]
 
-    print(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
-    print(f"[UHC] client_id length={len(UHC_CLIENT_ID)}, secret length={len(UHC_CLIENT_SECRET)}")
-    scope = os.getenv(
-        "UHC_SCOPE",
-        "public/HealthcareService.read public/InsurancePlan.read "
-        "public/Location.read public/Organization.read "
-        "public/OrganizationAffiliation.read public/Practitioner.read "
-        "public/PractitionerRole.read public/Network.read "
-        "public/Endpoint.read",
-    )
-    resp = await client.post(
-        UHC_TOKEN_URL,
-        data={
-            "grant_type": "client_credentials",
-            "client_id": UHC_CLIENT_ID,
-            "client_secret": UHC_CLIENT_SECRET,
-            "scope": scope,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=15.0,
-    )
-    if resp.status_code != 200:
-        print(f"[UHC] Token error {resp.status_code}: {resp.text[:500]}")
-    resp.raise_for_status()
-    token_data = resp.json()
+        if not UHC_CLIENT_ID or not UHC_CLIENT_SECRET:
+            raise ValueError("UHC_CLIENT_ID and UHC_CLIENT_SECRET must be set")
 
-    _token_cache["access_token"] = token_data["access_token"]
-    _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+        logger.debug(f"[UHC] Fetching OAuth token from {UHC_TOKEN_URL}")
+        scope = os.getenv(
+            "UHC_SCOPE",
+            "public/HealthcareService.read public/InsurancePlan.read "
+            "public/Location.read public/Organization.read "
+            "public/OrganizationAffiliation.read public/Practitioner.read "
+            "public/PractitionerRole.read public/Network.read "
+            "public/Endpoint.read",
+        )
+        resp = await client.post(
+            UHC_TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": UHC_CLIENT_ID,
+                "client_secret": UHC_CLIENT_SECRET,
+                "scope": scope,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"[UHC] Token error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+        token_data = resp.json()
 
-    print(f"[UHC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
-    return _token_cache["access_token"]
+        _token_cache["access_token"] = token_data["access_token"]
+        _token_cache["expires_at"] = now + token_data.get("expires_in", 3600)
+
+        logger.debug(f"[UHC] Token acquired, expires in {token_data.get('expires_in', '?')}s")
+        return _token_cache["access_token"]
 
 
 class UHCAdapter(BaseAdapter):
@@ -132,12 +139,12 @@ class UHCAdapter(BaseAdapter):
                     )
 
                 results = self._deduplicate(results, limit)
-                print(f"[UHC] Final: {len(results)} providers")
+                logger.debug(f"[UHC] Final: {len(results)} providers")
                 return results
 
         except Exception as e:
             logger.error(f"UHC search failed: {e}")
-            print(f"[UHC] Search failed: {e}")
+            logger.warning(f"[UHC] Search failed: {e}")
             return []
 
     async def _search_with_include(
@@ -153,7 +160,7 @@ class UHCAdapter(BaseAdapter):
         Primary search: PractitionerRole with chained location + _include.
         Returns all data in a single bundle.
         """
-        print(f"[UHC] Searching PractitionerRole: specialty={nucc_code}, zip={zip_code}")
+        logger.debug(f"[UHC] Searching PractitionerRole: specialty={nucc_code}, zip={zip_code}")
 
         params = [
             ("specialty", nucc_code),
@@ -174,10 +181,10 @@ class UHCAdapter(BaseAdapter):
             return self._parse_bundle(bundle, specialty_display)
 
         except httpx.HTTPStatusError as e:
-            print(f"[UHC] PractitionerRole search failed: {e.response.status_code} {e.response.text[:200]}")
+            logger.warning(f"[UHC] PractitionerRole search failed: {e.response.status_code} {e.response.text[:200]}")
             return []
         except Exception as e:
-            print(f"[UHC] PractitionerRole search error: {e}")
+            logger.warning(f"[UHC] PractitionerRole search error: {e}")
             return []
 
     async def _search_by_state(
@@ -194,7 +201,7 @@ class UHCAdapter(BaseAdapter):
         if not state:
             return []
 
-        print(f"[UHC] Fallback: searching by state {state}")
+        logger.debug(f"[UHC] Fallback: searching by state {state}")
 
         params = [
             ("specialty", nucc_code),
@@ -215,7 +222,7 @@ class UHCAdapter(BaseAdapter):
             return self._parse_bundle(bundle, specialty_display)
 
         except Exception as e:
-            print(f"[UHC] State search failed: {e}")
+            logger.warning(f"[UHC] State search failed: {e}")
             return []
 
     # ─────────────────────────────────────────────
@@ -231,7 +238,7 @@ class UHCAdapter(BaseAdapter):
         """
         entries = bundle.get("entry", []) or []
         total = bundle.get("total", len(entries))
-        print(f"[UHC] Bundle: {len(entries)} entries (total available: {total})")
+        logger.debug(f"[UHC] Bundle: {len(entries)} entries (total available: {total})")
 
         if not entries:
             return []
@@ -260,7 +267,7 @@ class UHCAdapter(BaseAdapter):
                 if full_url:
                     locations[full_url] = resource
 
-        print(f"[UHC] Parsed: {len(roles)} roles, {len(set(id(v) for v in practitioners.values()))} practitioners, {len(set(id(v) for v in locations.values()))} locations")
+        logger.debug(f"[UHC] Parsed: {len(roles)} roles, {len(set(id(v) for v in practitioners.values()))} practitioners, {len(set(id(v) for v in locations.values()))} locations")
 
         # Build results from roles
         results = []

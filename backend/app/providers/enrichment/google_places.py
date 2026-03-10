@@ -4,6 +4,7 @@ Looks up providers by name + location to get ratings, reviews, and Maps links.
 Uses Places API (New) for better data and lower cost.
 """
 
+import asyncio
 import logging
 from urllib.parse import quote
 
@@ -73,57 +74,54 @@ async def enrich_provider(
         return None
 
 
+async def _enrich_single(client: httpx.AsyncClient, provider) -> None:
+    """Enrich a single provider with Google Places data (called concurrently)."""
+    if not provider.last_name or not provider.city:
+        return
+
+    query = f"{provider.full_name} {provider.city} {provider.state} doctor"
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_API_KEY,
+        "X-Goog-FieldMask": "places.rating,places.userRatingCount,places.googleMapsUri,places.id",
+    }
+
+    body = {
+        "textQuery": query,
+        "maxResultCount": 1,
+    }
+
+    try:
+        resp = await client.post(PLACES_SEARCH_URL, json=body, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+
+        places = data.get("places", [])
+        if places:
+            place = places[0]
+            provider.google_rating = place.get("rating")
+            provider.google_review_count = place.get("userRatingCount")
+            provider.google_maps_url = place.get("googleMapsUri", "")
+            provider.google_place_id = place.get("id", "")
+    except Exception as e:
+        logger.warning(f"Places enrichment failed for {provider.full_name}: {e}")
+
+
 async def enrich_providers(
     providers: list,
-    max_enrich: int = 15,
+    max_enrich: int = 25,
 ) -> list:
     """
     Enrich a list of ProviderResult objects with Google Places data.
-    Only enriches the top N (closest/most relevant) to control API costs.
+    Uses asyncio.gather to fetch all concurrently instead of sequentially.
     """
-    enriched_count = 0
+    to_enrich = providers[:max_enrich]
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        for provider in providers:
-            if enriched_count >= max_enrich:
-                break
-
-            if not provider.last_name or not provider.city:
-                continue
-
-            query = f"{provider.full_name} {provider.city} {provider.state} doctor"
-
-            headers = {
-                "Content-Type": "application/json",
-                "X-Goog-Api-Key": GOOGLE_API_KEY,
-                "X-Goog-FieldMask": "places.rating,places.userRatingCount,places.googleMapsUri,places.id",
-            }
-
-            body = {
-                "textQuery": query,
-                "maxResultCount": 1,
-            }
-
-            try:
-                resp = await client.post(
-                    PLACES_SEARCH_URL,
-                    json=body,
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-
-                places = data.get("places", [])
-                if places:
-                    place = places[0]
-                    provider.google_rating = place.get("rating")
-                    provider.google_review_count = place.get("userRatingCount")
-                    provider.google_maps_url = place.get("googleMapsUri", "")
-                    provider.google_place_id = place.get("id", "")
-                    enriched_count += 1
-
-            except Exception as e:
-                logger.warning(f"Places enrichment failed for {provider.full_name}: {e}")
-                continue
+        await asyncio.gather(*[
+            _enrich_single(client, provider)
+            for provider in to_enrich
+        ])
 
     return providers

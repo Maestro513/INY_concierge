@@ -43,11 +43,13 @@ class TestFieldEncryption:
         """Decrypt of non-encrypted value returns it unchanged."""
         assert cipher.decrypt("plain text") == "plain text"
 
-    def test_disabled_cipher(self):
-        """No key = no encryption, values pass through."""
+    def test_disabled_cipher(self, monkeypatch):
+        """No key = encrypt raises RuntimeError, decrypt passes through."""
+        monkeypatch.delenv("FIELD_ENCRYPTION_KEY", raising=False)
         cipher = FieldCipher(key="")
         assert cipher.enabled is False
-        assert cipher.encrypt("secret") == "secret"
+        with pytest.raises(RuntimeError, match="FIELD_ENCRYPTION_KEY is not configured"):
+            cipher.encrypt("secret")
         assert cipher.decrypt("secret") == "secret"
 
     def test_different_keys_cannot_decrypt(self):

@@ -1,43 +1,100 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  ActivityIndicator, Linking,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
+import { getMemberSession } from '../constants/session';
+
+// L7: Whitelist of valid specialty values (matches SPECIALTY_KEYWORDS values in VoiceHelp)
+const VALID_SPECIALTIES = new Set([
+  'dermatologist',
+  'cardiologist',
+  'primary care',
+  'family medicine',
+  'ophthalmologist',
+  'podiatrist',
+  'ent',
+  'orthopedic',
+  'neurologist',
+  'urologist',
+  'psychiatrist',
+  'pulmonologist',
+  'gastroenterologist',
+  'endocrinologist',
+  'rheumatologist',
+  'oncologist',
+  'surgeon',
+  'pain management',
+  'physical therapist',
+  'dentist',
+  'optometrist',
+  'nephrologist',
+  'obgyn',
+  'pediatrician',
+]);
 
 export default function DoctorResults() {
-  const { specialty, zipCode, planName } = useLocalSearchParams();
+  const { specialty: rawSpecialty } = useLocalSearchParams();
   const router = useRouter();
+  const { member: _mem } = getMemberSession();
+  const { zipCode, planName } = _mem || {};
+  // L7: Validate and sanitize specialty param from deep link
+  const specialty = VALID_SPECIALTIES.has(rawSpecialty) ? rawSpecialty : 'primary care';
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [meta, setMeta] = useState({});
 
-  useEffect(() => { searchProviders(); }, []);
+  useEffect(() => {
+    searchProviders();
+  }, []);
 
   const searchProviders = async () => {
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
-      const res = await authFetch(`${API_URL}/providers/search`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_name: planName, specialty, zip_code: zipCode, radius_miles: 25, limit: 50, enrich_google: true }),
-      }, 30000);
+      const res = await authFetch(
+        `${API_URL}/providers/search`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            plan_name: planName,
+            specialty,
+            zip_code: zipCode,
+            radius_miles: 25,
+            limit: 50,
+            enrich_google: true,
+          }),
+        },
+        30000,
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Search failed');
       setProviders(data.providers || []);
       setMeta({ total: data.total, carrier: data.carrier, specialty: data.specialty });
     } catch (err) {
-      console.log('Provider search error:', err);
+      if (__DEV__) console.log('Provider search error:', err);
       if (err.name === 'AbortError') {
         setError('Search is taking too long. Check your connection and try again.');
       } else if (err.message === 'Network request failed' || err.name === 'TypeError') {
         setError("Can't connect to the server right now. Check your connection and try again.");
-      } else { setError(err.message || 'Something went wrong. Please try again.'); }
-    } finally { setLoading(false); }
+      } else {
+        setError('Search failed. Please try again or call us at (844) 463-2931.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const callDoctor = (phone) => {
@@ -50,14 +107,18 @@ export default function DoctorResults() {
     const full = Math.floor(rating);
     const half = rating - full >= 0.5;
     const stars = [];
-    for (let i = 0; i < full; i++) stars.push(<Ionicons key={'f'+i} name="star" size={14} color={COLORS.warning} />);
+    for (let i = 0; i < full; i++)
+      stars.push(<Ionicons key={'f' + i} name="star" size={14} color={COLORS.warning} />);
     if (half) stars.push(<Ionicons key="h" name="star-half" size={14} color={COLORS.warning} />);
     return stars;
   };
 
   const getInitials = (name) => {
     if (!name) return '?';
-    const parts = name.replace(/^Dr\.?\s*/i, '').split(' ').filter(Boolean);
+    const parts = name
+      .replace(/^Dr\.?\s*/i, '')
+      .split(' ')
+      .filter(Boolean);
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     return (parts[0] || '?')[0].toUpperCase();
   };
@@ -108,7 +169,13 @@ export default function DoctorResults() {
 
       {/* Phone button */}
       {item.phone ? (
-        <TouchableOpacity style={s.callDocBtn} onPress={() => callDoctor(item.phone)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Call ${item.name} at ${item.phone}`}>
+        <TouchableOpacity
+          style={s.callDocBtn}
+          onPress={() => callDoctor(item.phone)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Call ${item.name} at ${item.phone}`}
+        >
           <Ionicons name="call" size={15} color={COLORS.accent} />
           <Text style={s.callDocText}>{item.phone}</Text>
         </TouchableOpacity>
@@ -120,7 +187,13 @@ export default function DoctorResults() {
     <SafeAreaView style={s.container} edges={['top']}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={s.backBtn}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="chevron-back" size={22} color={COLORS.accent} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
@@ -147,7 +220,13 @@ export default function DoctorResults() {
             <Ionicons name="cloud-offline-outline" size={36} color={COLORS.textTertiary} />
           </View>
           <Text style={s.errorText}>{error}</Text>
-          <TouchableOpacity style={s.retryBtn} onPress={searchProviders} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Try search again">
+          <TouchableOpacity
+            style={s.retryBtn}
+            onPress={searchProviders}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Try search again"
+          >
             <Text style={s.retryBtnText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -195,15 +274,21 @@ const s = StyleSheet.create({
 
   // Header
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: COLORS.white,
-    borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: { ...TYPE.h3, color: COLORS.text },
@@ -213,15 +298,26 @@ const s = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText: { ...TYPE.body, color: COLORS.textSecondary, marginTop: 16 },
   errorIcon: {
-    width: 72, height: 72, borderRadius: 22,
+    width: 72,
+    height: 72,
+    borderRadius: 22,
     backgroundColor: COLORS.bg,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 16,
   },
-  errorText: { ...TYPE.body, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 20, lineHeight: 24 },
+  errorText: {
+    ...TYPE.body,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 24,
+  },
   retryBtn: {
-    backgroundColor: COLORS.accent, borderRadius: RADII.md,
-    paddingHorizontal: 28, paddingVertical: 12,
+    backgroundColor: COLORS.accent,
+    borderRadius: RADII.md,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
     ...SHADOWS.button,
   },
   retryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
@@ -229,12 +325,18 @@ const s = StyleSheet.create({
 
   // Results
   countRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 4,
   },
   countBadge: {
-    backgroundColor: COLORS.accentLight, borderRadius: RADII.xs,
-    paddingHorizontal: 8, paddingVertical: 3,
+    backgroundColor: COLORS.accentLight,
+    borderRadius: RADII.xs,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   countBadgeText: { ...TYPE.label, color: COLORS.accent, fontSize: 12 },
   resultCount: { ...TYPE.label, color: COLORS.textSecondary },
@@ -242,18 +344,26 @@ const s = StyleSheet.create({
 
   // Card
   card: {
-    backgroundColor: COLORS.white, borderRadius: RADII.lg,
-    padding: 18, marginTop: 12,
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.lg,
+    padding: 18,
+    marginTop: 12,
     ...SHADOWS.card,
-    borderWidth: 1, borderColor: COLORS.borderLight,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   cardHeader: {
-    flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
   avatar: {
-    width: 40, height: 40, borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 12,
   },
   avatarText: { fontSize: 15, fontWeight: '700', color: COLORS.accent },
@@ -263,10 +373,13 @@ const s = StyleSheet.create({
 
   // Status pill
   statusPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     backgroundColor: COLORS.successBg,
     borderRadius: RADII.full,
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   statusPillClosed: { backgroundColor: COLORS.errorBg },
   statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.success },
@@ -284,19 +397,30 @@ const s = StyleSheet.create({
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 },
   address: { fontSize: 14, color: COLORS.text, lineHeight: 20, flex: 1 },
   distanceBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: COLORS.accentLighter, borderRadius: RADII.xs,
-    paddingHorizontal: 8, paddingVertical: 4,
-    alignSelf: 'flex-start', marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.accentLighter,
+    borderRadius: RADII.xs,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
   distanceText: { fontSize: 12, fontWeight: '600', color: COLORS.accent },
 
   // Call button
   callDocBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: COLORS.accentLighter, borderRadius: RADII.md,
-    paddingVertical: 12, marginTop: 8,
-    borderWidth: 1.5, borderColor: COLORS.accentLight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.accentLighter,
+    borderRadius: RADII.md,
+    paddingVertical: 12,
+    marginTop: 8,
+    borderWidth: 1.5,
+    borderColor: COLORS.accentLight,
   },
   callDocText: { fontSize: 15, fontWeight: '600', color: COLORS.accent },
 });
