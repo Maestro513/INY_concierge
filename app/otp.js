@@ -72,6 +72,10 @@ export default function OTPScreen() {
 
   // Auto-submit when all digits filled
   const handleVerify = useCallback(async (code) => {
+    if (!phone) {
+      setError('Phone number missing. Please go back and try again.');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -120,11 +124,14 @@ export default function OTPScreen() {
     }
   }, [phone, router]);
 
-  // Trigger auto-submit when last digit entered
+  // Trigger auto-submit when last digit entered (once)
+  const autoSubmitted = useRef(false);
   useEffect(() => {
-    if (filled && !loading) {
+    if (filled && !loading && !autoSubmitted.current) {
+      autoSubmitted.current = true;
       handleVerify(otp.join(''));
     }
+    if (!filled) autoSubmitted.current = false;
   }, [otp, filled, loading, handleVerify]);
 
   const handleResend = async () => {
