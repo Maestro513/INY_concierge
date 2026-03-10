@@ -641,7 +641,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
           <View style={s.headerIcon}>
             <Ionicons name="chatbubble-ellipses" size={16} color={COLORS.accent} />
           </View>
-          <Text style={s.headerTitle}>Ask anything</Text>
+          <Text style={s.headerTitle}>Need help?</Text>
         </View>
         <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Call us for help">
           <Ionicons name="call" size={14} color="#fff" />
@@ -729,7 +729,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
             </TouchableOpacity>
           </View>
           <Text style={s.status}>
-            {mode === 'idle' ? 'Tap mic or type below' :
+            {mode === 'idle' ? 'Tap the mic to ask about plan benefits, find doctors, book transportation and set reminders' :
              mode === 'listening' ? 'Listening...' :
              mode === 'thinking' ? 'Thinking...' :
              'Tap mic to ask another'}
@@ -877,7 +877,7 @@ const s = StyleSheet.create({
     ...SHADOWS.glow,
   },
   micActive: { backgroundColor: COLORS.accentDark, transform: [{ scale: 1.06 }] },
-  status: { fontSize: 17, fontWeight: '600', color: COLORS.textSecondary, marginTop: 10, marginBottom: 4, textAlign: 'center' },
+  status: { fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, marginTop: 10, marginBottom: 4, textAlign: 'center', lineHeight: 20, paddingHorizontal: 30 },
 
   // Input bar
   inputBar: {

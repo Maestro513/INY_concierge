@@ -284,30 +284,24 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
         </View>
       </Modal>
 
-      {/* Quick Actions */}
+      {/* Quick Actions — pill style */}
       <View style={styles.quickActionsRow}>
-        <TouchableOpacity onPress={onViewIDCard} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View digital ID card">
-          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.careBg }]}>
-            <Ionicons name="card-outline" size={20} color={COLORS.careVisit} />
-          </View>
-          <Text style={styles.quickActionText}>ID Card</Text>
+        <TouchableOpacity onPress={onViewIDCard} style={styles.quickPill} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View digital ID card">
+          <Ionicons name="card-outline" size={18} color={COLORS.accent} />
+          <Text style={styles.quickPillText}>ID Card</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setRemindersExpanded(!remindersExpanded)} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Medication reminders">
-          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.rxDrugBg || '#FDECEA' }]}>
-            <Ionicons name="alarm-outline" size={22} color={COLORS.rxDrug} />
-            {reminders.length > 0 ? (
-              <View style={styles.quickActionBadge}>
-                <Text style={styles.quickActionBadgeText}>{reminders.length}</Text>
-              </View>
-            ) : null}
-          </View>
-          <Text style={styles.quickActionText}>Reminders</Text>
+        <TouchableOpacity onPress={() => setRemindersExpanded(!remindersExpanded)} style={styles.quickPill} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Medication reminders">
+          <Ionicons name="alarm-outline" size={18} color={COLORS.accent} />
+          <Text style={styles.quickPillText}>Reminders</Text>
+          {reminders.length > 0 ? (
+            <View style={styles.quickPillBadge}>
+              <Text style={styles.quickPillBadgeText}>{reminders.length}</Text>
+            </View>
+          ) : null}
         </TouchableOpacity>
-        <TouchableOpacity onPress={onViewSOB} style={styles.quickAction} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
-          <View style={[styles.quickActionIcon, { backgroundColor: COLORS.savingsBg }]}>
-            <Ionicons name="document-text-outline" size={20} color={COLORS.savings} />
-          </View>
-          <Text style={styles.quickActionText}>Benefits</Text>
+        <TouchableOpacity onPress={onViewSOB} style={styles.quickPill} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="View summary of benefits">
+          <Ionicons name="document-text-outline" size={18} color={COLORS.accent} />
+          <Text style={styles.quickPillText}>Benefits</Text>
         </TouchableOpacity>
       </View>
 
@@ -338,52 +332,71 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
         ) : <View />}
       </View>
 
-      {/* Benefits Grid */}
+      {/* Benefits */}
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="small" color={COLORS.accent} />
           <Text style={styles.loadingText}>Loading benefits...</Text>
         </View>
       ) : row1.length > 0 ? (
-        <View style={styles.benefitsWrap}>
-          <View style={styles.benefitsRow}>
-            {row1.map((b, i) => (
-              <AnimatedCard key={'r1-' + String(i)} index={i} style={styles.benefitCard}>
-                <BenefitIcon label={b.label} size={20} />
-                <Text style={styles.benefitValue}>{b.in_network || ''}</Text>
-                <Text style={styles.benefitLabel} numberOfLines={1}>{b.label}</Text>
-              </AnimatedCard>
-            ))}
+        <>
+          {/* Copays — 2x2 grid */}
+          <Text style={styles.sectionLabel}>Your Copays</Text>
+          <View style={styles.copayGrid}>
+            {row1.map((b, i) => {
+              const value = b.in_network || '';
+              const isFree = value === '$0' || value.toLowerCase().includes('no cost');
+              return (
+                <AnimatedCard key={'c-' + String(i)} index={i} style={styles.copayCard}>
+                  <BenefitIcon label={b.label} size={20} />
+                  <View style={styles.copayInfo}>
+                    <Text style={styles.copayLabel} numberOfLines={1}>{b.label}</Text>
+                    <Text style={styles.copayValue}>{value}</Text>
+                    {isFree ? (
+                      <View style={styles.badgeFree}><Text style={styles.badgeFreeText}>No Cost</Text></View>
+                    ) : b._highlight ? (
+                      <View style={styles.badgeHighlight}><Text style={styles.badgeHighlightText}>{b._highlight}</Text></View>
+                    ) : null}
+                  </View>
+                </AnimatedCard>
+              );
+            })}
           </View>
-          {/* Row 2: Rx cost + supplementals (2-4 cards) */}
+
+          {/* Allowances — horizontal scroll */}
           {row2.length > 0 ? (
-            <View style={styles.benefitsRow}>
-              {row2.map((b, i) => {
-                const isRx = b.label.toLowerCase().includes('rx');
-                const cardContent = (
-                  <>
-                    <BenefitIcon label={b.label} size={20} />
-                    <Text style={styles.benefitValue}>{b.in_network || ''}</Text>
-                    <Text style={styles.benefitLabel} numberOfLines={1}>{b.label}</Text>
-                  </>
-                );
-                return (
-                  <AnimatedCard
-                    key={'r2-' + String(i)}
-                    index={row1.length + i}
-                    style={row2.length <= 2 ? styles.benefitCardWide : styles.benefitCard}
-                  >
-                    {isRx && drugsData ? (
-                      <TouchableOpacity onPress={() => setShowMedsModal(true)} activeOpacity={0.7} style={styles.benefitCardTap}>
-                        {cardContent}
-                      </TouchableOpacity>
-                    ) : cardContent}
-                  </AnimatedCard>
-                );
-              })}
-            </View>
+            <>
+              <Text style={styles.sectionLabel}>Your Allowances</Text>
+              <View style={styles.allowanceScroll}>
+                {row2.map((b, i) => {
+                  const isRx = b.label.toLowerCase().includes('rx');
+                  const cardInner = (
+                    <>
+                      <View style={styles.allowanceBar} />
+                      <View style={styles.allowanceBody}>
+                        <BenefitIcon label={b.label} size={22} />
+                        <Text style={styles.allowanceValue}>{b.in_network || ''}</Text>
+                        <Text style={styles.allowanceLabel} numberOfLines={1}>{b.label}</Text>
+                        {b._highlight ? (
+                          <View style={styles.badgeHighlight}><Text style={styles.badgeHighlightText}>{b._highlight}</Text></View>
+                        ) : null}
+                      </View>
+                    </>
+                  );
+                  return (
+                    <AnimatedCard key={'a-' + String(i)} index={row1.length + i} style={styles.allowanceCard}>
+                      {isRx && drugsData ? (
+                        <TouchableOpacity onPress={() => setShowMedsModal(true)} activeOpacity={0.7}>
+                          {cardInner}
+                        </TouchableOpacity>
+                      ) : cardInner}
+                    </AnimatedCard>
+                  );
+                })}
+              </View>
+            </>
           ) : null}
-        </View>
+        </>
       ) : benefitsError ? (
         <View style={styles.errorWrap}>
           <Ionicons name="cloud-offline-outline" size={32} color={COLORS.textTertiary} />
@@ -427,24 +440,23 @@ const styles = StyleSheet.create({
   carrierLogo: { width: 96, height: 48 },
   planName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, textAlign: 'right', marginTop: 6, lineHeight: 18 },
 
-  // Quick actions row
+  // Quick action pills
   quickActionsRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    marginBottom: 14, gap: 12,
+    flexDirection: 'row', gap: 10, marginBottom: 14,
   },
-  quickAction: { flex: 1, alignItems: 'center', gap: 6 },
-  quickActionIcon: {
-    width: 48, height: 48, borderRadius: 24,
-    justifyContent: 'center', alignItems: 'center',
+  quickPill: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: COLORS.quickPillBg,
+    borderWidth: 1.5, borderColor: COLORS.quickPillBorder,
+    borderRadius: RADII.md, paddingVertical: 12, paddingHorizontal: 10,
   },
-  quickActionText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, letterSpacing: 0.2 },
-  quickActionBadge: {
-    position: 'absolute', top: -4, right: -4,
+  quickPillText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
+  quickPillBadge: {
     backgroundColor: COLORS.accent, borderRadius: 10,
-    minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 5, borderWidth: 2, borderColor: COLORS.white,
+    minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 4,
   },
-  quickActionBadgeText: { fontSize: 11, fontWeight: '700', color: COLORS.white },
+  quickPillBadgeText: { fontSize: 10, fontWeight: '700', color: COLORS.white },
 
   // Agent row (right above cards)
   aboveCardsRow: {
@@ -475,44 +487,55 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, fontWeight: '500', color: COLORS.textTertiary, textAlign: 'center' },
 
   // Section label
-  sectionLabelRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginBottom: 10,
+  sectionLabel: {
+    ...TYPE.sectionHeader, color: COLORS.textTertiary,
+    marginBottom: 10, marginTop: 4,
   },
-  sectionDot: {
-    width: 6, height: 6, borderRadius: 3,
-    backgroundColor: COLORS.accent,
+
+  // Copay grid — 2x2
+  copayGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18,
   },
-  sectionLabel: { ...TYPE.labelSmall, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6 },
-
-  // Benefits grid
-  benefitsWrap: { gap: 10 },
-  benefitsRow: { flexDirection: 'row', gap: 10 },
-
-  benefitCard: {
-    flex: 1, backgroundColor: COLORS.white, borderRadius: RADII.md,
-    paddingVertical: 16, paddingHorizontal: 8, alignItems: 'center',
-    gap: 6, ...SHADOWS.cardLifted,
+  copayCard: {
+    width: '48%', flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: COLORS.white, borderRadius: 16,
+    padding: 14, ...SHADOWS.card,
     borderWidth: 1, borderColor: COLORS.borderLight,
   },
-  benefitCardWide: {
-    flex: 1, backgroundColor: COLORS.white, borderRadius: RADII.md,
-    paddingVertical: 16, paddingHorizontal: 10, alignItems: 'center',
-    gap: 6, ...SHADOWS.cardLifted,
+  copayInfo: { flex: 1 },
+  copayLabel: { fontSize: 13, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 1 },
+  copayValue: { ...TYPE.cardValue, color: COLORS.text },
+
+  // Badges
+  badgeFree: {
+    backgroundColor: COLORS.badgeFree, borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start', marginTop: 3,
+  },
+  badgeFreeText: { fontSize: 10, fontWeight: '600', color: COLORS.white },
+  badgeHighlight: {
+    backgroundColor: COLORS.badgeHighlightBg, borderRadius: 5,
+    paddingHorizontal: 7, paddingVertical: 2, alignSelf: 'flex-start', marginTop: 3,
+  },
+  badgeHighlightText: { fontSize: 9, fontWeight: '600', color: COLORS.badgeHighlight },
+
+  // Allowance cards — horizontal scroll
+  allowanceScroll: {
+    flexDirection: 'row', gap: 12, marginBottom: 18,
+  },
+  allowanceCard: {
+    width: 140, backgroundColor: COLORS.white, borderRadius: 16,
+    overflow: 'hidden', ...SHADOWS.card,
     borderWidth: 1, borderColor: COLORS.borderLight,
   },
+  allowanceBar: { height: 4, backgroundColor: COLORS.allowanceBar },
+  allowanceBody: { padding: 16, alignItems: 'flex-start', gap: 4 },
+  allowanceValue: { ...TYPE.cardValue, color: COLORS.text, marginTop: 6 },
+  allowanceLabel: { fontSize: 12, fontWeight: '500', color: COLORS.textSecondary },
 
   // Icon circle
   iconCircle: {
     width: 40, height: 40, borderRadius: 14,
     justifyContent: 'center', alignItems: 'center',
-  },
-
-  benefitValue: {
-    ...TYPE.cardValue, color: COLORS.text, textAlign: 'center',
-  },
-  benefitLabel: {
-    ...TYPE.cardLabel, color: COLORS.textSecondary, textAlign: 'center', width: '100%',
   },
 
   // Expanded reminder body
