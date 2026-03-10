@@ -58,9 +58,10 @@ backend/extracted/
 # Vercel
 .vercel/
 
-# Claude Code - keep .claude/skills/ tracked for portable skills
-.claude/*
-!.claude/skills/
+# Claude Code
+.claude/
+preview/
+scripts/stitch-mcp-server.js
 
 # MCP config (contains API keys)
 .mcp.json
