@@ -46,6 +46,10 @@ export default function OTPScreen() {
 
   const handleVerify = async () => {
     if (!filled) return;
+    if (!phone) {
+      setError('Phone number missing. Please go back and try again.');
+      return;
+    }
     setLoading(true);
     setError('');
 
