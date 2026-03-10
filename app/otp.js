@@ -1,16 +1,19 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, ActivityIndicator } from 'react-native';
 import GradientBg from '../components/GradientBg';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
+import { setMemberSession, getPendingOtp, clearPendingOtp } from '../constants/session';
 
 const RESEND_COOLDOWN = 30; // seconds
 
 export default function OTPScreen() {
-  const { phone, firstName } = useLocalSearchParams();
+  const pending = getPendingOtp();
+  const phone = pending?.phone || '';
+  const firstName = pending?.firstName || '';
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -97,19 +100,19 @@ export default function OTPScreen() {
 
       if (data.access_token) {
         await setTokens(data.access_token, data.refresh_token);
-        router.replace({
-          pathname: '/home',
-          params: {
+        setMemberSession(
+          {
             firstName: data.first_name,
             lastName: data.last_name,
             planName: data.plan_name,
             planNumber: data.plan_number,
             agent: data.agent || '',
-            medicareNumber: data.medicare_number || '',
-            sessionId: data.session_id || '',
             zipCode: data.zip_code || '',
           },
-        });
+          data.session_id || '',
+        );
+        clearPendingOtp();
+        router.replace('/home');
       } else {
         setError('Verification failed. Please try again.');
       }

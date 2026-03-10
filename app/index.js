@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
+import { setPendingOtp } from '../constants/session';
 import GradientBg from '../components/GradientBg';
 
 const logo = require('../assets/images/logo.png');
@@ -82,13 +83,8 @@ export default function PhoneScreen() {
       if (res.status === 429) {
         setError("Too many attempts. Please wait a few minutes and try again.");
       } else if (data.found) {
-        router.push({
-          pathname: '/otp',
-          params: {
-            phone: rawDigits,
-            firstName: data.first_name,
-          },
-        });
+        setPendingOtp({ phone: rawDigits, firstName: data.first_name });
+        router.push('/otp');
       } else {
         setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
       }

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
+import { getMemberSession } from '../constants/session';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
@@ -17,7 +18,8 @@ import {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { firstName, lastName, planName, planNumber, agent, medicareNumber, sessionId, zipCode } = useLocalSearchParams();
+  const { data: memberData, sessionId } = getMemberSession();
+  const { firstName, lastName, planName, planNumber, agent, zipCode } = memberData || {};
   const [showSOB, setShowSOB] = useState(false);
   const [benefits, setBenefits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +44,7 @@ export default function HomeScreen() {
     planName: planName || '',
     planNumber: planNumber || '',
     agent: agent || '',
-    medicareNumber: medicareNumber || '',
+    medicareNumber: memberData?.medicareNumber || '',
   };
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export default function HomeScreen() {
   const handleViewIDCard = () => {
     router.push({
       pathname: '/digital-id',
-      params: { firstName, lastName, planName, planNumber, medicareNumber: medicareNumber || '' },
+      params: { firstName, lastName, planName, planNumber, medicareNumber: memberData?.medicareNumber || '' },
     });
   };
 
