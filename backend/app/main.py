@@ -1660,6 +1660,16 @@ def get_sob_raw(plan_number: str):
         return json.load(f)
 
 
+@app.get("/debug/files")
+def list_disk_files():
+    """List files on the persistent disk (dev only)."""
+    files = {}
+    for folder in [EXTRACTED_DIR, PDFS_DIR]:
+        if os.path.exists(folder):
+            files[folder] = os.listdir(folder)
+    return files
+
+
 # --- OTC fallback from SOB extracted text ---
 
 def _otc_from_sob_text(plan_number: str) -> dict | None:
