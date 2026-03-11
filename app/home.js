@@ -116,7 +116,7 @@ export default function HomeScreen() {
           .catch((err) => { if (__DEV__) console.warn('Benefits fetch error:', err); return null; }),
         sessionId
           ? authFetch(`${API_URL}/cms/my-drugs-session/${sessionId}`)
-              .then(r => {
+              .then(async (r) => {
                 if (!r.ok) {
                   if (__DEV__) {
                     const errBody = await r.text().catch(() => '');
