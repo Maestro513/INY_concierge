@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INY Concierge - Login (Inverted)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #1a1a2e;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; padding: 40px 20px;
+    gap: 40px;
+  }
+  h2.label {
+    color: #aaa; font-size: 14px; text-transform: uppercase;
+    letter-spacing: 2px; text-align: center; margin-bottom: 10px;
+  }
+
+  .phone {
+    width: 375px; height: 812px;
+    border-radius: 44px;
+    overflow: hidden;
+    box-shadow: 0 25px 80px rgba(0,0,0,0.5), 0 0 0 8px #222, 0 0 0 10px #444;
+    display: flex; flex-direction: column;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .notch {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 150px; height: 30px; background: #1a1a1a;
+    border-radius: 0 0 20px 20px; z-index: 10;
+  }
+
+  .status-bar {
+    height: 50px; padding: 14px 28px 0;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; font-weight: 600;
+    position: relative; z-index: 5;
+  }
+  .status-icons { display: flex; gap: 5px; align-items: center; }
+  .status-icons svg { width: 16px; height: 16px; }
+
+  /* ─── CURRENT (left) ─── */
+  .current .status-bar { color: #1a1a1a; background: #EDE7F6; }
+  .current .top-section {
+    background: linear-gradient(180deg, #EDE7F6 0%, #D1C4E9 40%, #B39DDB 70%, #9575CD 100%);
+    padding: 10px 28px 50px; text-align: center;
+  }
+  .current .bottom-section {
+    flex: 1; background: #fff;
+    border-top-left-radius: 32px; border-top-right-radius: 32px;
+    margin-top: -32px; padding: 36px 28px 0;
+    display: flex; flex-direction: column;
+  }
+
+  /* ─── INVERTED (right) ─── */
+  .inverted .status-bar { color: #1a1a1a; background: #fff; }
+  .inverted .top-section {
+    background: #fff;
+    padding: 10px 28px 50px; text-align: center;
+  }
+  .inverted .bottom-section {
+    flex: 1;
+    background: linear-gradient(180deg, #9B6BD4 0%, #7B3FBF 50%, #6B2FAF 100%);
+    border-top-left-radius: 32px; border-top-right-radius: 32px;
+    margin-top: -32px; padding: 36px 28px 0;
+    display: flex; flex-direction: column;
+  }
+
+  /* ─── Shared logo area ─── */
+  .logo-img {
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    object-fit: contain;
+    margin: 0 auto 10px;
+    display: block;
+    background: rgba(255,255,255,0.3);
+    padding: 10px;
+  }
+  .logo-placeholder {
+    width: 120px; height: 120px;
+    border-radius: 24px;
+    margin: 0 auto 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px; font-weight: 700;
+    background: rgba(123,63,191,0.1);
+    color: #7B3FBF;
+    border: 3px solid rgba(123,63,191,0.15);
+  }
+  .powered-by { font-size: 12px; color: rgba(74,20,140,0.45); }
+  .powered-brand { font-size: 14px; font-weight: 600; color: rgba(74,20,140,0.7); }
+
+  /* Inverted logo text colors */
+  .inverted .powered-by { color: rgba(74,20,140,0.35); }
+  .inverted .powered-brand { color: rgba(74,20,140,0.6); }
+
+  /* ─── Card content ─── */
+  .card-title {
+    font-size: 26px; font-weight: 700; margin-bottom: 6px;
+  }
+  .card-sub {
+    font-size: 15px; line-height: 22px; margin-bottom: 28px;
+  }
+  .current .card-title { color: #1E1B2E; }
+  .current .card-sub { color: #7A7585; }
+  .inverted .card-title { color: #fff; }
+  .inverted .card-sub { color: rgba(255,255,255,0.75); }
+
+  .field-label {
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.5px; margin-bottom: 8px;
+  }
+  .current .field-label { color: #7A7585; }
+  .inverted .field-label { color: rgba(255,255,255,0.7); }
+
+  .input-wrap {
+    display: flex; align-items: center; gap: 10px;
+    border-radius: 16px; border-width: 2px; border-style: solid;
+    padding: 0 16px; margin-bottom: 10px;
+  }
+  .current .input-wrap {
+    background: #F7F5FA; border-color: #7B3FBF;
+  }
+  .inverted .input-wrap {
+    background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4);
+  }
+  .input-wrap svg.phone-icon { width: 20px; height: 20px; flex-shrink: 0; }
+  .current .input-wrap svg.phone-icon { color: #7B3FBF; }
+  .inverted .input-wrap svg.phone-icon { color: rgba(255,255,255,0.7); }
+
+  .phone-input {
+    flex: 1; border: none; background: transparent; outline: none;
+    padding: 18px 10px; font-size: 22px; font-weight: 600;
+    letter-spacing: 1px; font-family: inherit;
+  }
+  .current .phone-input { color: #1E1B2E; }
+  .inverted .phone-input { color: #fff; }
+  .phone-input::placeholder { color: #A49EB0; }
+  .inverted .phone-input::placeholder { color: rgba(255,255,255,0.4); }
+
+  .check-icon { width: 22px; height: 22px; }
+  .current .check-icon { color: #10B981; }
+  .inverted .check-icon { color: #6EE7B7; }
+
+  .hint { font-size: 13px; margin-bottom: 24px; }
+  .current .hint { color: #A49EB0; }
+  .inverted .hint { color: rgba(255,255,255,0.55); }
+
+  .submit-btn {
+    width: 100%; display: flex; align-items: center; justify-content: center;
+    gap: 6px; border: none; border-radius: 16px;
+    padding: 20px; cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .submit-btn:hover { transform: scale(1.02); }
+  .current .submit-btn {
+    background: #7B3FBF; box-shadow: 0 4px 20px rgba(123,63,191,0.3);
+  }
+  .inverted .submit-btn {
+    background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  }
+  .submit-btn span { font-size: 18px; font-weight: 700; letter-spacing: 0.3px; }
+  .current .submit-btn span { color: #fff; }
+  .inverted .submit-btn span { color: #7B3FBF; }
+  .submit-btn svg.arrow { width: 20px; height: 20px; }
+  .current .submit-btn svg.arrow { color: #fff; }
+  .inverted .submit-btn svg.arrow { color: #7B3FBF; }
+
+  .trust-row {
+    display: flex; justify-content: center; gap: 16px;
+    margin-top: 20px; padding-top: 20px;
+    border-top: 1px solid;
+    width: 100%;
+  }
+  .current .trust-row { border-top-color: #F0EDF4; }
+  .inverted .trust-row { border-top-color: rgba(255,255,255,0.15); }
+  .trust-item {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 500;
+  }
+  .trust-item svg { width: 14px; height: 14px; }
+  .current .trust-item { color: #A49EB0; }
+  .current .trust-item svg { color: #A49EB0; }
+  .inverted .trust-item { color: rgba(255,255,255,0.55); }
+  .inverted .trust-item svg { color: rgba(255,255,255,0.55); }
+
+  .footer {
+    margin-top: auto; padding: 12px 0 20px; text-align: center;
+  }
+  .footer-text { font-size: 15px; }
+  .footer-link { font-weight: 600; text-decoration: none; }
+  .current .footer-text { color: #7A7585; }
+  .current .footer-link { color: #7B3FBF; }
+  .inverted .footer-text { color: rgba(255,255,255,0.6); }
+  .inverted .footer-link { color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- ════════ CURRENT VERSION ════════ -->
+<div style="text-align:center">
+  <h2 class="label">Current</h2>
+  <div class="phone current">
+    <div class="notch"></div>
+    <div class="status-bar">
+      <span>9:41</span>
+      <div class="status-icons">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+      </div>
+    </div>
+
+    <!-- Purple gradient top -->
+    <div class="top-section">
+      <div class="logo-placeholder">INY</div>
+      <div class="powered-by">Powered by</div>
+      <div class="powered-brand">Insurance 'n You</div>
+    </div>
+
+    <!-- White card bottom -->
+    <div class="bottom-section">
+      <div class="card-title">Welcome to better Medicare</div>
+      <div class="card-sub">Enter your phone number to access<br>your plan benefits and concierge.</div>
+      <div class="field-label">PHONE NUMBER</div>
+      <div class="input-wrap">
+        <svg class="phone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+        <input class="phone-input" placeholder="(555) 123-4567" value="(844) 463-2931" readonly />
+        <svg class="check-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      </div>
+      <div class="hint">We'll send a one-time verification code.</div>
+      <button class="submit-btn">
+        <span>Continue</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+      <div class="trust-row">
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          HIPAA Secure
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          256-bit Encrypted
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          No data stored
+        </div>
+      </div>
+      <div class="footer">
+        <span class="footer-text">Need help? <a class="footer-link">Call (844) 463-2931</a></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ INVERTED VERSION ════════ -->
+<div style="text-align:center">
+  <h2 class="label">Inverted (White Top / Purple Bottom)</h2>
+  <div class="phone inverted">
+    <div class="notch"></div>
+    <div class="status-bar">
+      <span>9:41</span>
+      <div class="status-icons">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+      </div>
+    </div>
+
+    <!-- White top -->
+    <div class="top-section">
+      <div class="logo-placeholder">INY</div>
+      <div class="powered-by">Powered by</div>
+      <div class="powered-brand">Insurance 'n You</div>
+    </div>
+
+    <!-- Purple card bottom -->
+    <div class="bottom-section">
+      <div class="card-title">Welcome to better Medicare</div>
+      <div class="card-sub">Enter your phone number to access<br>your plan benefits and concierge.</div>
+      <div class="field-label">PHONE NUMBER</div>
+      <div class="input-wrap">
+        <svg class="phone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+        <input class="phone-input" placeholder="(555) 123-4567" value="(844) 463-2931" readonly />
+        <svg class="check-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      </div>
+      <div class="hint">We'll send a one-time verification code.</div>
+      <button class="submit-btn">
+        <span>Continue</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+      <div class="trust-row">
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          HIPAA Secure
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          256-bit Encrypted
+        </div>
+        <div class="trust-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          No data stored
+        </div>
+      </div>
+      <div class="footer">
+        <span class="footer-text">Need help? <a class="footer-link">Call (844) 463-2931</a></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -111,38 +111,36 @@ export default function PhoneScreen() {
   };
   return (
     <View style={styles.container}>
-      {/* ── Top Section: Light gradient header ── */}
-      <LinearGradient
-        colors={['#EDE7F6', '#D1C4E9', '#B39DDB', '#9575CD']}
-        start={{ x: 0.2, y: 0 }}
-        end={{ x: 0.8, y: 1 }}
-        style={styles.topSection}
-      >
-        <SafeAreaView edges={['top']} style={styles.topSafe}>
-          <Animated.View
-            style={{
-              alignItems: 'center',
-              opacity: logoOpacity,
-              transform: [{ scale: logoScale }],
-            }}
-          >
-            <Image
-              source={logo}
-              style={styles.logo}
-              resizeMode="contain"
-              accessible={true}
-              accessibilityLabel="InsuranceNYou Concierge logo"
-            />
-            <Text style={styles.poweredBy}>Powered by</Text>
-            <Text style={styles.poweredBrand}>Insurance 'n You</Text>
-          </Animated.View>
-        </SafeAreaView>
-      </LinearGradient>
-      {/* ── Bottom Section: White card ── */}
+      {/* ── Top Section: White with logo ── */}
+      <SafeAreaView edges={['top']} style={styles.topSection}>
+        <Animated.View
+          style={{
+            alignItems: 'center',
+            opacity: logoOpacity,
+            transform: [{ scale: logoScale }],
+          }}
+        >
+          <Image
+            source={logo}
+            style={styles.logo}
+            resizeMode="contain"
+            accessible={true}
+            accessibilityLabel="InsuranceNYou Concierge logo"
+          />
+          <Text style={styles.poweredBy}>Powered by</Text>
+          <Text style={styles.poweredBrand}>Insurance 'n You</Text>
+        </Animated.View>
+      </SafeAreaView>
+      {/* ── Bottom Section: Purple gradient card ── */}
       <KeyboardAvoidingView
         style={styles.cardSection}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <LinearGradient
+          colors={['#9B6BD4', '#7B3FBF', '#6B2FAF']}
+          locations={[0, 0.5, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
         <Animated.View
           style={[
             styles.cardInner,
@@ -161,15 +159,15 @@ export default function PhoneScreen() {
             style={[
               styles.inputWrap,
               {
-                borderColor: inputBorderColor,
-                backgroundColor: inputBgColor,
+                borderColor: focused ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.25)',
+                backgroundColor: focused ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.12)',
               },
             ]}
           >
             <Ionicons
               name="call-outline"
               size={20}
-              color={focused ? '#7B3FBF' : '#A49EB0'}
+              color={focused ? '#fff' : 'rgba(255,255,255,0.6)'}
               style={{ marginLeft: 2 }}
             />
             <TextInput
@@ -182,7 +180,7 @@ export default function PhoneScreen() {
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               placeholder="(555) 123-4567"
-              placeholderTextColor="#A49EB0"
+              placeholderTextColor="rgba(255,255,255,0.4)"
               keyboardType="phone-pad"
               autoFocus
               editable={!loading}
@@ -191,7 +189,7 @@ export default function PhoneScreen() {
               accessibilityHint="Enter your 10-digit phone number to look up your plan"
             />
             {isValid && !loading ? (
-              <Ionicons name="checkmark-circle" size={22} color={COLORS.success} />
+              <Ionicons name="checkmark-circle" size={22} color="#6EE7B7" />
             ) : null}
           </Animated.View>
           <Text style={styles.hint}>We'll send a one-time verification code.</Text>
@@ -201,12 +199,12 @@ export default function PhoneScreen() {
               accessibilityRole="alert"
               accessibilityLiveRegion="assertive"
             >
-              <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
+              <Ionicons name="alert-circle-outline" size={16} color="#FCA5A5" />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
           <TouchableOpacity
-            style={[styles.btn, (!isValid || loading) && styles.btnDisabled]}
+            style={[styles.btn, isValid && !loading && styles.btnActive, (!isValid || loading) && styles.btnDisabled]}
             onPress={handleSubmit}
             disabled={!isValid || loading}
             activeOpacity={0.8}
@@ -227,15 +225,15 @@ export default function PhoneScreen() {
           {/* Trust signals */}
           <View style={styles.trustRow}>
             <View style={styles.trustItem}>
-              <Ionicons name="lock-closed-outline" size={14} color="#A49EB0" />
+              <Ionicons name="lock-closed-outline" size={14} color="rgba(255,255,255,0.5)" />
               <Text style={styles.trustText}>HIPAA Secure</Text>
             </View>
             <View style={styles.trustItem}>
-              <Ionicons name="shield-checkmark-outline" size={14} color="#A49EB0" />
+              <Ionicons name="shield-checkmark-outline" size={14} color="rgba(255,255,255,0.5)" />
               <Text style={styles.trustText}>256-bit Encrypted</Text>
             </View>
             <View style={styles.trustItem}>
-              <Ionicons name="checkmark-circle-outline" size={14} color="#A49EB0" />
+              <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.5)" />
               <Text style={styles.trustText}>No data stored</Text>
             </View>
           </View>
@@ -259,48 +257,48 @@ export default function PhoneScreen() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  // ── Top gradient section ──
+  // ── Top white section ──
   topSection: {
-    paddingBottom: 40,
-  },
-  topSafe: {
     alignItems: 'center',
-    paddingTop: 50,
-    paddingBottom: 10,
+    paddingTop: 30,
+    paddingBottom: 40,
+    backgroundColor: '#fff',
   },
-  logo: { width: 150, height: 150, marginBottom: 12 },
+  logo: { width: 198, height: 198, marginBottom: 0 },
   poweredBy: {
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '400',
     color: 'rgba(74,20,140,0.45)',
     marginBottom: 2,
+    marginTop: -16,
   },
   poweredBrand: {
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: '600',
     color: 'rgba(74,20,140,0.7)',
+    marginBottom: 0,
   },
-  // ── White card section ──
+  // ── Purple gradient card section ──
   cardSection: {
     flex: 1,
-    backgroundColor: '#fff',
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
-    marginTop: -32,
+    marginTop: -20,
     paddingHorizontal: 28,
-    paddingTop: 36,
+    paddingTop: 32,
+    overflow: 'hidden',
   },
   cardInner: { flex: 1 },
   cardTitle: {
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
     fontSize: 26,
     fontWeight: '700',
-    color: '#1E1B2E',
+    color: '#fff',
     marginBottom: 6,
   },
   cardSub: {
     fontSize: 15,
-    color: '#7A7585',
+    color: '#fff',
     marginBottom: 28,
     lineHeight: 22,
   },
@@ -308,17 +306,15 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#7A7585',
+    color: '#fff',
     letterSpacing: 0.5,
     marginBottom: 8,
   },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F7F5FA',
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#F0EDF4',
     paddingHorizontal: 16,
     marginBottom: 10,
   },
@@ -328,12 +324,12 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     fontSize: 22,
     fontWeight: '600',
-    color: '#1E1B2E',
+    color: '#fff',
     letterSpacing: 1,
   },
   hint: {
     fontSize: 13,
-    color: '#A49EB0',
+    color: 'rgba(255,255,255,0.9)',
     marginBottom: 24,
   },
   // ── Error ──
@@ -341,13 +337,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: COLORS.errorBg,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADII.sm,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 16,
   },
-  errorText: { fontSize: 14, color: COLORS.error, flex: 1, lineHeight: 20 },
+  errorText: { fontSize: 14, color: '#FCA5A5', flex: 1, lineHeight: 20 },
   // ── Button ──
   btn: {
     flexDirection: 'row',
@@ -355,14 +351,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 16,
     paddingVertical: 20,
-    backgroundColor: '#7B3FBF',
-    shadowColor: 'rgba(123,63,191,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    shadowColor: 'rgba(0,0,0,0.1)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 1,
     shadowRadius: 20,
     elevation: 6,
   },
-  btnDisabled: { opacity: 0.35 },
+  btnActive: {
+    backgroundColor: '#10B981',
+    shadowColor: 'rgba(16,185,129,0.3)',
+  },
+  btnDisabled: { opacity: 0.5 },
   btnText: {
     fontSize: 18,
     fontWeight: '700',
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingTop: 20,
     borderTopWidth: 1,
-    borderTopColor: '#F0EDF4',
+    borderTopColor: 'rgba(255,255,255,0.15)',
   },
   trustItem: {
     flexDirection: 'row',
@@ -385,19 +385,19 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   trustText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '500',
-    color: '#A49EB0',
+    color: 'rgba(255,255,255,0.9)',
   },
   // ── Footer ──
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 20,
+    paddingBottom: 56,
     paddingTop: 12,
     marginTop: 'auto',
   },
-  footerText: { fontSize: 15, color: '#7A7585' },
-  footerLink: { fontSize: 15, color: '#7B3FBF', fontWeight: '600' },
+  footerText: { fontSize: 17, color: 'rgba(255,255,255,0.95)' },
+  footerLink: { fontSize: 17, color: '#fff', fontWeight: '600' },
 });

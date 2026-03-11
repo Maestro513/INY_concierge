@@ -878,11 +878,11 @@ const s = StyleSheet.create({
     maxHeight: 80,
   },
   bottomRight: { alignItems: 'center', marginLeft: 14 },
-  needHelpLabel: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.7)', marginBottom: 5 },
+  needHelpLabel: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.8)', marginBottom: 6 },
   callBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: '#FFFFFF', borderRadius: RADII.full,
-    paddingHorizontal: 18, paddingVertical: 10,
+    paddingHorizontal: 22, paddingVertical: 12,
   },
-  callText: { color: COLORS.accent, fontSize: 15, fontWeight: '700' },
+  callText: { color: COLORS.accent, fontSize: 17, fontWeight: '700' },
 });
