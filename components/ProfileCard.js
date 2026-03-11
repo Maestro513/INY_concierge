@@ -226,25 +226,29 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
       {/* Header: Greeting + Name + Agent | Carrier Logo + Plan Name */}
       <Animated.View style={[styles.header, { opacity: greetFade, transform: [{ translateY: greetSlide }] }]}>
         <View style={styles.headerLeft}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={styles.greeting}>{greeting()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {onLogout && (
               <TouchableOpacity onPress={onLogout} accessibilityLabel="Log out" hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
               </TouchableOpacity>
             )}
+            <Text style={styles.greeting}>{greeting()}</Text>
           </View>
           <Text style={styles.name}>
             {member.firstName} {member.lastName}
           </Text>
         </View>
         <View style={styles.headerRight}>
-          {carrierLogo ? (
-            <View style={styles.logoBg} accessibilityLabel={`${carrier} insurance logo`}>
+          <View style={styles.logoBg} accessibilityLabel={`${carrier || 'insurance'} plan`}>
+            {carrierLogo ? (
               <Image source={carrierLogo} style={styles.carrierLogo} resizeMode="contain" accessibilityRole="image" />
-            </View>
-          ) : null}
-          <Text style={styles.planName} numberOfLines={2}>{member.planName}</Text>
+            ) : (
+              <Text style={styles.carrierFallbackText} numberOfLines={1}>{member.planName}</Text>
+            )}
+            {member.planNumber ? (
+              <Text style={styles.planNumberInLogo}>{member.planNumber}</Text>
+            ) : null}
+          </View>
         </View>
       </Animated.View>
 
@@ -366,7 +370,14 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
           {/* Allowances — horizontal scroll */}
           {row2.length > 0 ? (
             <>
-              <Text style={styles.sectionLabel}>Your Allowances</Text>
+              <View style={styles.sectionLabelRow}>
+                <Text style={[styles.sectionLabel, { marginBottom: 0, marginTop: 0 }]}>Your Allowances</Text>
+                <View style={styles.scrollHint}>
+                  <Ionicons name="chevron-back" size={16} color={COLORS.textSecondary} />
+                  <Text style={styles.scrollHintText}>Scroll</Text>
+                  <Ionicons name="chevron-forward" size={16} color={COLORS.textSecondary} />
+                </View>
+              </View>
               <ScrollView horizontal showsHorizontalScrollIndicator style={styles.allowanceScroll} contentContainerStyle={styles.allowanceScrollContent}>
                 {row2.map((b, i) => {
                   const isRx = b.label.toLowerCase().includes('rx');
@@ -421,7 +432,7 @@ export default function ProfileCard({ member, onViewSOB, onViewIDCard, benefits,
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 20, paddingTop: SPACING.md, paddingBottom: SPACING.md },
+  container: { paddingHorizontal: 18, paddingTop: SPACING.sm, paddingBottom: SPACING.sm },
 
   // Header
   header: {
@@ -437,11 +448,12 @@ const styles = StyleSheet.create({
   agent: { fontSize: 16, fontWeight: '700', color: COLORS.textSecondary },
   logoBg: {
     backgroundColor: '#FFFFFF', borderRadius: RADII.md,
-    padding: 8, overflow: 'hidden',
+    padding: 8, alignItems: 'center', overflow: 'hidden',
     ...SHADOWS.card,
   },
-  carrierLogo: { width: 96, height: 48 },
-  planName: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, textAlign: 'right', marginTop: 6, lineHeight: 18 },
+  carrierLogo: { width: 125, height: 36 },
+  carrierFallbackText: { fontSize: 14, fontWeight: '700', color: COLORS.accent, textAlign: 'center' },
+  planNumberInLogo: { fontSize: 11, fontWeight: '600', color: COLORS.textSecondary, marginTop: 2 },
 
   // Quick action pills
   quickActionsRow: {
@@ -494,20 +506,33 @@ const styles = StyleSheet.create({
     ...TYPE.sectionHeader, color: COLORS.textTertiary,
     marginBottom: 10, marginTop: 4,
   },
+  sectionLabelRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 10, marginTop: 4,
+  },
+  scrollHint: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: COLORS.accentLight || '#F0E8F8',
+    borderRadius: RADII.full,
+    paddingHorizontal: 20, paddingVertical: 4,
+  },
+  scrollHintText: {
+    fontSize: 12, fontWeight: '600', color: COLORS.accent,
+  },
 
   // Copay grid — 2x2
   copayGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18,
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12,
   },
   copayCard: {
-    width: '48%', flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: COLORS.white, borderRadius: 16,
-    padding: 14, ...SHADOWS.card,
+    width: '48%', flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: COLORS.white, borderRadius: 14,
+    padding: 10, ...SHADOWS.card,
     borderWidth: 1, borderColor: COLORS.borderLight,
   },
   copayInfo: { flex: 1 },
-  copayLabel: { fontSize: 13, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 1 },
-  copayValue: { ...TYPE.cardValue, color: COLORS.text },
+  copayLabel: { fontSize: 12, fontWeight: '500', color: COLORS.textSecondary, marginBottom: 1 },
+  copayValue: { fontSize: 22, fontWeight: '700', color: COLORS.text },
 
   // Badges
   badgeFree: {
@@ -523,25 +548,25 @@ const styles = StyleSheet.create({
 
   // Allowance cards — horizontal scroll
   allowanceScroll: {
-    marginBottom: 18,
+    marginBottom: 10,
   },
   allowanceScrollContent: {
     flexDirection: 'row', gap: 12, paddingRight: 4,
   },
   allowanceCard: {
-    width: 140, backgroundColor: COLORS.white, borderRadius: 16,
+    width: 115, backgroundColor: COLORS.white, borderRadius: 13,
     overflow: 'hidden', ...SHADOWS.card,
     borderWidth: 1, borderColor: COLORS.borderLight,
   },
-  allowanceBar: { height: 4, backgroundColor: COLORS.allowanceBar },
-  allowanceBody: { padding: 16, alignItems: 'flex-start', gap: 4 },
-  allowanceValue: { ...TYPE.cardValue, color: COLORS.text, marginTop: 6 },
-  allowanceLabel: { fontSize: 12, fontWeight: '500', color: COLORS.textSecondary },
-  allowancePeriod: { fontSize: 11, fontWeight: '400', color: COLORS.textTertiary, fontStyle: 'italic', marginTop: 2 },
+  allowanceBar: { height: 2, backgroundColor: COLORS.allowanceBar },
+  allowanceBody: { padding: 9, alignItems: 'flex-start', gap: 2 },
+  allowanceValue: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 3 },
+  allowanceLabel: { fontSize: 11, fontWeight: '500', color: COLORS.textSecondary },
+  allowancePeriod: { fontSize: 10, fontWeight: '400', color: COLORS.textTertiary, fontStyle: 'italic', marginTop: 1 },
 
   // Icon circle
   iconCircle: {
-    width: 40, height: 40, borderRadius: 14,
+    width: 36, height: 36, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center',
   },
 

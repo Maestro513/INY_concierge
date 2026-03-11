@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "com.insurancenyou.app",
+      "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#FFFFFF"

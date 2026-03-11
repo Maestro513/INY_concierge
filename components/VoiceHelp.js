@@ -9,6 +9,7 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import * as Speech from 'expo-speech';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { CALL_NUMBER } from '../constants/data';
 import { API_URL, authFetch } from '../constants/api';
@@ -642,34 +643,16 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {/* Purple gradient background layers */}
-      <View style={s.gradientBase} />
-      <View style={s.gradientBand1} />
-      <View style={s.gradientBand2} />
-      <View style={s.gradientBand3} />
+      {/* Purple gradient background */}
+      <LinearGradient
+        colors={['#9B6BD4', '#7B3FBF', '#6B2FAF']}
+        locations={[0, 0.5, 1]}
+        style={StyleSheet.absoluteFillObject}
+      />
 
       {/* Answer / Status Area */}
+      {mode !== 'idle' && (
       <ScrollView style={s.answerScroll} contentContainerStyle={s.answerArea}>
-        {mode === 'idle' && (
-          <View style={s.idleWrap}>
-            <Text style={s.idleTitle}>How can I help?</Text>
-            <Text style={s.idleText}>Ask about your benefits, find a doctor, or look up drug costs</Text>
-            <View style={s.chipRow}>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my specialist copay?')} activeOpacity={0.7}>
-                <Ionicons name="medical-outline" size={14} color={COLORS.accent} />
-                <Text style={s.chipText}>Specialist copay</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('Find a pharmacy near me')} activeOpacity={0.7}>
-                <Ionicons name="storefront-outline" size={14} color={COLORS.accent} />
-                <Text style={s.chipText}>Find pharmacy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What dental benefits do I have?')} activeOpacity={0.7}>
-                <Ionicons name="heart-outline" size={14} color={COLORS.accent} />
-                <Text style={s.chipText}>Dental benefits</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
         {mode === 'answer' && (
           <Animated.View style={{ opacity: fade }}>
             <View style={s.questionBubble}>
@@ -716,6 +699,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
           </Animated.View>
         )}
       </ScrollView>
+      )}
 
       {/* Centered Mic Button — hide when keyboard is up */}
       {!keyboardVisible && (
@@ -743,7 +727,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
               accessibilityRole="button"
               accessibilityLabel={mode === 'listening' ? 'Stop listening' : 'Start voice input'}
             >
-              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={30} color={COLORS.accent} />
+              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={34} color={COLORS.accent} />
             </TouchableOpacity>
           </View>
           <Text style={s.status}>
@@ -769,7 +753,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
           accessibilityLabel="Type your question"
         />
         <View style={s.bottomRight}>
-          <Text style={s.needHelpLabel}>Need help?</Text>
+          <Text style={s.needHelpLabel}>NEED HELP?</Text>
           <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Call us for help">
             <Ionicons name="call" size={14} color={COLORS.accent} />
             <Text style={s.callText}>Call Us</Text>
@@ -788,23 +772,6 @@ const s = StyleSheet.create({
     ...SHADOWS.container,
   },
 
-  // Purple gradient background (layered bands)
-  gradientBase: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#7B3FBF',
-  },
-  gradientBand1: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: '50%',
-    backgroundColor: '#9B6BD4', opacity: 0.5,
-  },
-  gradientBand2: {
-    position: 'absolute', top: '25%', left: 0, right: 0, height: '30%',
-    backgroundColor: '#8B55C8', opacity: 0.3,
-  },
-  gradientBand3: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%',
-    backgroundColor: '#6B2FAF', opacity: 0.3,
-  },
 
   // Content area
   answerScroll: { flex: 1, width: '100%', zIndex: 1 },
@@ -882,11 +849,11 @@ const s = StyleSheet.create({
   newQuestionText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.8)' },
 
   // Mic section (centered)
-  micSection: { alignItems: 'center', zIndex: 1, paddingBottom: 8 },
-  micWrap: { width: 120, height: 120, justifyContent: 'center', alignItems: 'center' },
+  micSection: { alignItems: 'center', zIndex: 1, paddingBottom: 4 },
+  micWrap: { width: 130, height: 90, justifyContent: 'center', alignItems: 'center' },
   ring: { position: 'absolute' },
   mic: {
-    width: 66, height: 66, borderRadius: 33, backgroundColor: '#FFFFFF',
+    width: 92, height: 68, borderRadius: 34, backgroundColor: '#FFFFFF',
     justifyContent: 'center', alignItems: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2, shadowRadius: 12, elevation: 6,
@@ -910,12 +877,12 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
     maxHeight: 80,
   },
-  bottomRight: { alignItems: 'center', marginLeft: 12 },
-  needHelpLabel: { fontSize: 11, fontWeight: '500', color: 'rgba(255,255,255,0.6)', marginBottom: 4 },
+  bottomRight: { alignItems: 'center', marginLeft: 14 },
+  needHelpLabel: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.7)', marginBottom: 5 },
   callBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#FFFFFF', borderRadius: RADII.full,
-    paddingHorizontal: 14, paddingVertical: 8,
+    paddingHorizontal: 18, paddingVertical: 10,
   },
-  callText: { color: COLORS.accent, fontSize: 13, fontWeight: '600' },
+  callText: { color: COLORS.accent, fontSize: 15, fontWeight: '700' },
 });

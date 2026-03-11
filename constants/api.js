@@ -30,8 +30,8 @@ const getApiUrl = () => {
 export let API_URL = getApiUrl();
 
 // ── Token Storage ─────────────────────────────────────────────
-const TOKEN_KEY = '@iny_access_token';
-const REFRESH_KEY = '@iny_refresh_token';
+const TOKEN_KEY = 'iny_access_token';
+const REFRESH_KEY = 'iny_refresh_token';
 
 let _accessToken = null;
 let _refreshToken = null;

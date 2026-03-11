@@ -306,7 +306,7 @@ export default function HomeScreen() {
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <View style={[styles.container, { paddingBottom: Platform.OS === 'android' ? Math.max(insets.bottom, 24) : 0 }]}>
+    <View style={styles.container}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ProfileCard
           member={member}
