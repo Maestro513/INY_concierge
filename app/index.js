@@ -1,14 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, Image,
-  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Animated, Linking,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Animated,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
-import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
+import { COLORS, RADII, MOTION } from '../constants/theme';
+import { API_URL, fetchWithTimeout } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
 import { setPendingOtp } from '../constants/session';
 const logo = require('../assets/images/logo.png');
@@ -30,8 +39,18 @@ export default function PhoneScreen() {
       Animated.timing(logoOpacity, { toValue: 1, duration: MOTION.slow, useNativeDriver: true }),
     ]).start();
     Animated.parallel([
-      Animated.timing(cardSlide, { toValue: 0, duration: MOTION.slow, delay: 200, useNativeDriver: true }),
-      Animated.timing(cardOpacity, { toValue: 1, duration: MOTION.slow, delay: 200, useNativeDriver: true }),
+      Animated.timing(cardSlide, {
+        toValue: 0,
+        duration: MOTION.slow,
+        delay: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardOpacity, {
+        toValue: 1,
+        duration: MOTION.slow,
+        delay: 200,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, []);
   useEffect(() => {
@@ -56,10 +75,11 @@ export default function PhoneScreen() {
     return '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6);
   };
   const rawDigits = phone.replace(/\D/g, '');
-  const isValid = rawDigits.length === 10
-    && !/^(\d)\1{9}$/.test(rawDigits)
-    && !rawDigits.startsWith('000')
-    && !rawDigits.startsWith('1');
+  const isValid =
+    rawDigits.length === 10 &&
+    !/^(\d)\1{9}$/.test(rawDigits) &&
+    !rawDigits.startsWith('000') &&
+    !rawDigits.startsWith('1');
   const handleSubmit = async () => {
     if (!isValid) return;
     setLoading(true);
@@ -72,7 +92,7 @@ export default function PhoneScreen() {
       });
       const data = await res.json();
       if (res.status === 429) {
-        setError("Too many attempts. Please wait a few minutes and try again.");
+        setError('Too many attempts. Please wait a few minutes and try again.');
       } else if (data.found) {
         setPendingOtp(rawDigits, data.first_name);
         router.push('/otp');
@@ -81,7 +101,7 @@ export default function PhoneScreen() {
       }
     } catch (err) {
       if (err.name === 'AbortError') {
-        setError("Request timed out. Please check your connection and try again.");
+        setError('Request timed out. Please check your connection and try again.');
       } else {
         setError("Can't connect right now. Please try again.");
       }
@@ -99,11 +119,13 @@ export default function PhoneScreen() {
         style={styles.topSection}
       >
         <SafeAreaView edges={['top']} style={styles.topSafe}>
-          <Animated.View style={{
-            alignItems: 'center',
-            opacity: logoOpacity,
-            transform: [{ scale: logoScale }],
-          }}>
+          <Animated.View
+            style={{
+              alignItems: 'center',
+              opacity: logoOpacity,
+              transform: [{ scale: logoScale }],
+            }}
+          >
             <Image
               source={logo}
               style={styles.logo}
@@ -121,19 +143,29 @@ export default function PhoneScreen() {
         style={styles.cardSection}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Animated.View style={[styles.cardInner, {
-          opacity: cardOpacity,
-          transform: [{ translateY: cardSlide }],
-        }]}>
+        <Animated.View
+          style={[
+            styles.cardInner,
+            {
+              opacity: cardOpacity,
+              transform: [{ translateY: cardSlide }],
+            },
+          ]}
+        >
           <Text style={styles.cardTitle}>Welcome to better Medicare</Text>
           <Text style={styles.cardSub}>
             Enter your phone number to access{'\n'}your plan benefits and concierge.
           </Text>
           <Text style={styles.fieldLabel}>PHONE NUMBER</Text>
-          <Animated.View style={[styles.inputWrap, {
-            borderColor: inputBorderColor,
-            backgroundColor: inputBgColor,
-          }]}>
+          <Animated.View
+            style={[
+              styles.inputWrap,
+              {
+                borderColor: inputBorderColor,
+                backgroundColor: inputBgColor,
+              },
+            ]}
+          >
             <Ionicons
               name="call-outline"
               size={20}
@@ -143,7 +175,10 @@ export default function PhoneScreen() {
             <TextInput
               style={styles.phoneInput}
               value={phone}
-              onChangeText={(val) => { setPhone(formatPhone(val)); setError(''); }}
+              onChangeText={(val) => {
+                setPhone(formatPhone(val));
+                setError('');
+              }}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               placeholder="(555) 123-4567"
@@ -161,7 +196,11 @@ export default function PhoneScreen() {
           </Animated.View>
           <Text style={styles.hint}>We'll send a one-time verification code.</Text>
           {error ? (
-            <View style={styles.errorWrap} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+            <View
+              style={styles.errorWrap}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+            >
               <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
