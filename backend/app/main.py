@@ -1172,7 +1172,8 @@ def _upsert_medical(medical: list, label_map: dict, label: str,
 
 
 def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
-    """Supplement Claude's SOB extraction with authoritative CMS data."""
+    """Fill gaps in SOB extraction with CMS data. SOB is the source of truth —
+    CMS only fills in benefits the SOB extraction missed (force=False)."""
     try:
         cms = get_cms()
     except Exception:
@@ -1184,7 +1185,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
         lbl = (item.get("label") or "").lower()
         label_map[lbl] = i
 
-    # ── Dental (ALWAYS override — CMS is authoritative) ──
+    # ── Dental (only fill if SOB missed it) ──
     try:
         dental = cms.get_dental_benefits(plan_number)
         if dental.get("has_preventive") or dental.get("has_comprehensive"):
@@ -1206,13 +1207,13 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 else:
                     cmp_value = f"{cmp_max}/yr max"
 
-            _upsert_medical(medical, label_map, "Dental (preventive)", pv_value, force=True)
+            _upsert_medical(medical, label_map, "Dental (preventive)", pv_value)
             if dental.get("has_comprehensive") and cmp_value:
-                _upsert_medical(medical, label_map, "Dental (comprehensive)", cmp_value, force=True)
+                _upsert_medical(medical, label_map, "Dental (comprehensive)", cmp_value)
     except Exception as e:
         log.warning("CMS dental enrichment failed: %s", type(e).__name__)
 
-    # ── Medical copays (CMS is authoritative) ──
+    # ── Medical copays (only fill if SOB missed them) ──
     try:
         med_copays = cms.get_medical_copays(plan_number)
         copay_map = {
@@ -1223,22 +1224,21 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
         }
         for label, value in copay_map.items():
             if value:
-                _upsert_medical(medical, label_map, label, value, force=True)
+                _upsert_medical(medical, label_map, label, value)
     except Exception as e:
         log.warning("CMS medical copay enrichment failed: %s", type(e).__name__)
 
-    # ── Vision (CMS is authoritative) ──
+    # ── Vision (only fill if SOB missed it) ──
     try:
         vision = cms.get_vision_benefits(plan_number)
         if vision.get("has_eye_exam"):
             exam = vision["eye_exam"]
             copay = exam.get("copay", "$0")
-            max_b = exam.get("max_benefit")
             exams = exam.get("exams_per_year")
             parts = [copay + " copay"]
             if exams:
                 parts.append(f"{exams}/yr")
-            _upsert_medical(medical, label_map, "Vision (exam)", ", ".join(parts), force=True)
+            _upsert_medical(medical, label_map, "Vision (exam)", ", ".join(parts))
 
         if vision.get("has_eyewear"):
             ew = vision["eyewear"]
@@ -1248,11 +1248,11 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 ew_value = f"{copay} copay ({max_b}/yr allowance)"
             else:
                 ew_value = f"{copay} copay"
-            _upsert_medical(medical, label_map, "Vision (eyewear)", ew_value, force=True)
+            _upsert_medical(medical, label_map, "Vision (eyewear)", ew_value)
     except Exception as e:
         log.warning("CMS vision enrichment failed: %s", type(e).__name__)
 
-    # ── Hearing (CMS is authoritative) ──
+    # ── Hearing (only fill if SOB missed it) ──
     try:
         hearing = cms.get_hearing_benefits(plan_number)
         if hearing.get("has_hearing_exam"):
@@ -1262,7 +1262,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
             parts = [copay + " copay"]
             if exams:
                 parts.append(f"{exams}/yr")
-            _upsert_medical(medical, label_map, "Hearing (exam)", ", ".join(parts), force=True)
+            _upsert_medical(medical, label_map, "Hearing (exam)", ", ".join(parts))
 
         if hearing.get("has_hearing_aids"):
             aids = hearing["hearing_aids"]
@@ -1279,7 +1279,7 @@ def _enrich_sob_with_cms(result: dict, plan_number: str) -> dict:
                 parts.append(f"{aids_num} aids")
             if period:
                 parts.append(period)
-            _upsert_medical(medical, label_map, "Hearing (aids)", ", ".join(parts) if parts else "Covered", force=True)
+            _upsert_medical(medical, label_map, "Hearing (aids)", ", ".join(parts) if parts else "Covered")
     except Exception as e:
         log.warning("CMS hearing enrichment failed: %s", type(e).__name__)
 
@@ -1728,6 +1728,252 @@ def _cached_json_response(data: dict, request: Request, max_age: int = 3600) -> 
             "ETag": etag,
         },
     )
+
+
+# --- Benefits Endpoint (SOB-first, CMS fallback) ---
+
+def _sob_to_benefits_shape(sob: dict) -> dict:
+    """
+    Convert SOB extraction data (medical array, supplemental array)
+    into the structured shape that buildBenefitCards expects:
+      { medical: {pcp_copay, ...}, dental: {...}, otc: {...}, ... }
+    """
+    medical_list = sob.get("medical", [])
+    supplemental = sob.get("supplemental", [])
+
+    # Build lookup from SOB medical array
+    def _find(label_fragment: str) -> str | None:
+        frag = label_fragment.lower()
+        for item in medical_list:
+            lbl = (item.get("label") or "").lower()
+            if frag in lbl or lbl in frag:
+                return item.get("in_network") or item.get("value")
+        for item in supplemental:
+            lbl = (item.get("label") or "").lower()
+            if frag in lbl or lbl in frag:
+                return item.get("in_network") or item.get("value")
+        return None
+
+    # Medical copays
+    medical = {}
+    pcp = _find("pcp")
+    if pcp:
+        medical["pcp_copay"] = pcp
+    spec = _find("specialist")
+    if spec:
+        medical["specialist_copay"] = spec
+    uc = _find("urgent care")
+    if uc:
+        medical["urgent_care_copay"] = uc
+    er = _find("emergency")
+    if er:
+        medical["er_copay"] = er
+
+    # Dental
+    dental = {}
+    dental_prev = _find("dental") or _find("preventive dental")
+    if dental_prev:
+        dental["has_preventive"] = True
+        dental["preventive"] = {"copay": dental_prev, "max_benefit": None}
+        # Try to extract max benefit from value like "$0 copay ($2000/yr max)"
+        import re as _re
+        m = _re.search(r"\$[\d,]+(?:/yr)?\s*max", dental_prev, _re.IGNORECASE)
+        if m:
+            dental["preventive"]["max_benefit"] = m.group(0).replace("/yr max", "").strip()
+    dental_comp = _find("comprehensive dental") or _find("dental (comprehensive)")
+    if dental_comp:
+        dental["has_comprehensive"] = True
+        dental["comprehensive"] = {"max_benefit": dental_comp}
+
+    # OTC
+    otc = {}
+    otc_val = _find("otc") or _find("over-the-counter")
+    if otc_val:
+        otc["has_otc"] = True
+        otc["amount"] = otc_val
+        # Try to detect period
+        v = otc_val.lower()
+        if "month" in v:
+            otc["period"] = "Monthly"
+        elif "quarter" in v:
+            otc["period"] = "Quarterly"
+        else:
+            otc["period"] = "Yearly"
+
+    # Part B giveback
+    giveback = {}
+    gb_val = _find("part b") or _find("giveback") or sob.get("part_b_premium_reduction")
+    if gb_val and gb_val not in ("null", "None", "$0", "$0.00", ""):
+        giveback["has_giveback"] = True
+        import re as _re
+        m = _re.search(r"\$[\d,.]+", str(gb_val))
+        giveback["monthly_amount"] = m.group(0) if m else gb_val
+
+    # Flex / SSBCI
+    flex = {}
+    flex_val = _find("flex") or _find("ssbci")
+    if flex_val:
+        flex["has_ssbci"] = True
+        flex["benefits"] = [{"category": "Flex card", "amount": flex_val}]
+
+    return {
+        "plan": {
+            "plan_name": sob.get("plan_name", ""),
+            "plan_type": sob.get("plan_type", ""),
+            "monthly_premium": sob.get("monthly_premium", ""),
+        },
+        "medical": medical,
+        "dental": dental,
+        "otc": otc,
+        "flex_ssbci": flex,
+        "part_b_giveback": giveback,
+    }
+
+
+def _cms_fill_gaps(result: dict, plan_number: str) -> dict:
+    """Fill empty fields with CMS data — never overwrite existing SOB values."""
+    try:
+        cms = get_cms()
+    except Exception:
+        return result
+
+    med = result.get("medical", {})
+    dental = result.get("dental", {})
+    otc = result.get("otc", {})
+    flex = result.get("flex_ssbci", {})
+    giveback = result.get("part_b_giveback", {})
+
+    # Medical copays — only fill if SOB didn't have them
+    try:
+        cms_med = cms.get_medical_copays(plan_number)
+        if not med.get("pcp_copay") and cms_med.get("pcp_copay"):
+            med["pcp_copay"] = cms_med["pcp_copay"]
+        if not med.get("specialist_copay") and cms_med.get("specialist_copay"):
+            med["specialist_copay"] = cms_med["specialist_copay"]
+        if not med.get("urgent_care_copay") and cms_med.get("urgent_care_copay"):
+            med["urgent_care_copay"] = cms_med["urgent_care_copay"]
+        if not med.get("er_copay") and cms_med.get("er_copay"):
+            med["er_copay"] = cms_med["er_copay"]
+    except Exception:
+        pass
+
+    # Dental — only fill if SOB didn't have it
+    if not dental.get("has_preventive"):
+        try:
+            cms_dental = cms.get_dental_benefits(plan_number)
+            if cms_dental.get("has_preventive") or cms_dental.get("has_comprehensive"):
+                result["dental"] = cms_dental
+        except Exception:
+            pass
+
+    # OTC — only fill if SOB didn't have it
+    if not otc.get("has_otc"):
+        try:
+            cms_otc = cms.get_otc_allowance(plan_number)
+            if cms_otc.get("has_otc"):
+                result["otc"] = cms_otc
+        except Exception:
+            pass
+
+    # Flex — only fill if SOB didn't have it
+    if not flex.get("has_ssbci"):
+        try:
+            cms_flex = cms.get_flex_ssbci(plan_number)
+            if cms_flex.get("has_ssbci"):
+                result["flex_ssbci"] = cms_flex
+        except Exception:
+            pass
+
+    # Part B giveback — only fill if SOB didn't have it
+    if not giveback.get("has_giveback"):
+        try:
+            cms_gb = cms.get_part_b_giveback(plan_number)
+            if cms_gb.get("has_giveback"):
+                result["part_b_giveback"] = cms_gb
+        except Exception:
+            pass
+
+    result["medical"] = med
+    return result
+
+
+@app.get("/benefits/{plan_number}")
+def get_benefits(plan_number: ValidPlanNumber, request: Request, _user: dict = Depends(get_current_user)):
+    """
+    Benefits for home screen cards.
+    Source of truth: SOB extraction (parsed PDFs).
+    Fallback: CMS database (gap-fill only, never overrides SOB).
+    """
+    _authorize_plan(_user, plan_number)
+    plan_id = normalize_plan_id(plan_number)
+
+    # 1. Try SOB extraction (pre-extracted JSON or cached)
+    sob = None
+    pre = _load_pre_extracted_benefits(plan_id)
+    if pre is not None:
+        sob = {
+            "plan_name": pre.get("plan_name", plan_id),
+            "plan_type": pre.get("plan_type", ""),
+            "monthly_premium": pre.get("monthly_premium", ""),
+            "part_b_premium_reduction": pre.get("part_b_premium_reduction"),
+            "medical": pre.get("medical", []),
+            "supplemental": pre.get("supplemental", []),
+        }
+    else:
+        # Check SOB cache
+        with _sob_cache_lock:
+            cached = _sob_cache.get(plan_id)
+            if cached and (time.time() - cached["ts"]) < SOB_CACHE_TTL:
+                sob = cached["data"]
+
+    if sob is None:
+        # Try on-demand extraction (loads PDF text, calls Claude)
+        try:
+            chunks = load_plan_chunks(plan_id)
+            if chunks is not None:
+                context = _chunks_to_context(chunks)
+                from .circuit_breaker import anthropic_breaker
+                with anthropic_breaker:
+                    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+                    message = client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=3000,
+                        system=SOB_EXTRACTION_PROMPT,
+                        messages=[{"role": "user", "content": f"Plan: {plan_id}\n\nFull document text:\n\n{context}"}],
+                    )
+                raw = message.content[0].text.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("\n", 1)[1]
+                if raw.endswith("```"):
+                    raw = raw.rsplit("```", 1)[0]
+                sob = json.loads(raw.strip())
+                # Cache it
+                with _sob_cache_lock:
+                    _evict_oldest(_sob_cache, SOB_CACHE_MAX)
+                    _sob_cache[plan_id] = {"data": sob, "ts": time.time()}
+        except Exception as e:
+            log.warning("SOB extraction failed for %s: %s", plan_id, type(e).__name__)
+
+    # 2. Convert SOB to the shape buildBenefitCards expects
+    if sob:
+        result = _sob_to_benefits_shape(sob)
+    else:
+        # 3. Last resort: try CMS directly
+        try:
+            cms = get_cms()
+            result = cms.get_full_benefits(plan_number)
+            if "error" in result:
+                raise HTTPException(status_code=404, detail="No benefits data found for this plan.")
+            return _cached_json_response(result, request)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=404, detail="No benefits data found for this plan.")
+
+    # 4. Fill gaps with CMS (never override SOB)
+    result = _cms_fill_gaps(result, plan_number)
+
+    return _cached_json_response(result, request)
 
 
 # --- CMS Benefits Endpoints ---

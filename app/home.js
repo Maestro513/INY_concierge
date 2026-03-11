@@ -109,7 +109,7 @@ export default function HomeScreen() {
     setLoading(true);
     setBenefitsError('');
     try {
-      const benefitsUrl = `${API_URL}/cms/benefits/${planNumber}`;
+      const benefitsUrl = `${API_URL}/benefits/${planNumber}`;
       const [benefitsResult, drugsRes] = await Promise.all([
         cachedFetch(authFetch, benefitsUrl)
           .then(r => r.data)
