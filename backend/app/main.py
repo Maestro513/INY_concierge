@@ -194,14 +194,14 @@ _default_prod_origins = [
     "https://www.insurancenyou.com",
     "https://api.insurancenyou.com",
 ]
-if APP_ENV in ("production", "staging"):
+if APP_ENV == "production":
     _extra = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()] if CORS_ORIGINS else []
     _origins = _default_prod_origins + _extra
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
 else:
