@@ -386,10 +386,11 @@ function buildBenefitCards(data, drugsData) {
   }
 
   if (giveback.has_giveback && giveback.monthly_amount) {
+    const amt = String(giveback.monthly_amount);
+    const display = amt.startsWith('$') ? amt : '$' + amt;
     row2.push({
       label: 'Part B Giveback',
-      in_network: '$' + String(giveback.monthly_amount),
-      _period: 'Per month',
+      in_network: display + '/mo',
     });
   }
 
