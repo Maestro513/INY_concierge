@@ -2173,7 +2173,11 @@ def _my_drugs_impl(member: dict):
         }
 
     # 3. Load SOB tier copays (primary source) + CMS (fallback)
-    cms = get_cms()
+    try:
+        cms = get_cms()
+    except HTTPException:
+        cms = None
+        log.info("CMS not available for drug lookup — using SOB only")
     sob_tiers = get_sob_tier_copays(plan_number)
     sob_insulin_cap = sob_tiers.get("insulin_cap", 35) if sob_tiers else 35
     sob_source = sob_tiers is not None
@@ -2200,7 +2204,7 @@ def _my_drugs_impl(member: dict):
         is_insulin = any(ins in name.lower() for ins in INSULIN_NAMES)
 
         # CMS lookup — gives us tier + restrictions (even if we override cost with SOB)
-        result = cms.get_drug_by_name(plan_number, name, days_supply=days_supply)
+        result = cms.get_drug_by_name(plan_number, name, days_supply=days_supply) if cms else None
         found_in_formulary = result and "error" not in result
 
         if found_in_formulary:
