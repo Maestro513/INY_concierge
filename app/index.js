@@ -95,7 +95,7 @@ export default function PhoneScreen() {
       if (err.name === 'AbortError') {
         setError("Request timed out. Please check your connection and try again.");
       } else {
-        setError("Can't connect right now. Please try again.");
+        setError(`Can't connect: ${err.name}: ${err.message}`);
       }
     } finally {
       setLoading(false);

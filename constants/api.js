@@ -144,7 +144,7 @@ async function _tryRefresh() {
 }
 
 // ── Legacy: plain fetch with timeout (for pre-auth calls) ─────
-export function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+export function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal }).finally(() =>
