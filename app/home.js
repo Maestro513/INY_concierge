@@ -365,23 +365,24 @@ function buildBenefitCards(data, drugsData) {
     row1.push({ label: 'Urgent Care', in_network: String(med.urgent_care_copay) });
   }
   if (med.er_copay) {
-    row1.push({ label: 'Emergency', in_network: String(med.er_copay) });
+    row1.push({ label: 'Emergency Room', in_network: String(med.er_copay) });
   } else if (med.pcp_copay) {
-    row1.push({ label: 'Emergency', in_network: '$0' });
+    row1.push({ label: 'Emergency Room', in_network: '$0' });
   }
 
   // --- Row 2: Rx cost + supplementals ---
   if (drugsData && drugsData.has_medications) {
     row2.push({
       label: 'Est. Annual Rx',
-      in_network: String(drugsData.annual_display) + '/yr',
+      in_network: String(drugsData.annual_display),
+      _period: 'Per year',
     });
   }
 
   if (dental.has_preventive && dental.preventive) {
     const maxBenefit = dental.preventive.max_benefit;
-    const dentalValue = maxBenefit ? `${maxBenefit}/yr max` : '$0 copay';
-    row2.push({ label: 'Dental', in_network: dentalValue });
+    const dentalValue = maxBenefit || '$0 copay';
+    row2.push({ label: 'Dental Max', in_network: dentalValue, _period: 'Per year' });
   }
 
   if (giveback.has_giveback && giveback.monthly_amount) {
@@ -394,12 +395,13 @@ function buildBenefitCards(data, drugsData) {
   }
 
   if (otc.has_otc && otc.amount) {
-    const period = otc.period === 'Monthly' ? '/mo' : otc.period === 'Quarterly' ? '/qtr' : '/yr';
+    const periodLabel = otc.period === 'Monthly' ? 'Per month' : otc.period === 'Quarterly' ? 'Per quarter' : 'Per year';
     const amt = String(otc.amount);
     const display = amt.startsWith('$') ? amt : '$' + amt;
     row2.push({
       label: 'OTC Allowance',
-      in_network: display + period,
+      in_network: display,
+      _period: periodLabel,
     });
   }
 

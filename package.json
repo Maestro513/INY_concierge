@@ -25,6 +25,7 @@
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@sentry/react-native": "^8.2.0",
     "babel-preset-expo": "~54.0.10",
@@ -43,6 +44,7 @@
     "expo-speech": "~14.0.8",
     "expo-speech-recognition": "^3.1.0",
     "expo-status-bar": "~3.0.9",
+    "node-fetch": "^3.3.2",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",

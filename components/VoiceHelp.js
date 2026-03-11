@@ -642,19 +642,11 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {/* Header */}
-      <View style={s.header}>
-        <View style={s.headerLeft}>
-          <View style={s.headerIcon}>
-            <Ionicons name="chatbubble-ellipses" size={16} color={COLORS.accent} />
-          </View>
-          <Text style={s.headerTitle}>Ask anything</Text>
-        </View>
-        <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Call us for help">
-          <Ionicons name="call" size={14} color="#fff" />
-          <Text style={s.callText}>Call Us</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Purple gradient background layers */}
+      <View style={s.gradientBase} />
+      <View style={s.gradientBand1} />
+      <View style={s.gradientBand2} />
+      <View style={s.gradientBand3} />
 
       {/* Answer / Status Area */}
       <ScrollView style={s.answerScroll} contentContainerStyle={s.answerArea}>
@@ -681,7 +673,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
         {mode === 'answer' && (
           <Animated.View style={{ opacity: fade }}>
             <View style={s.questionBubble}>
-              <Ionicons name="chatbubble-outline" size={14} color={COLORS.textSecondary} />
+              <Ionicons name="chatbubble-outline" size={14} color="rgba(255,255,255,0.6)" />
               <Text style={s.qText}>{question}</Text>
             </View>
             <View style={s.answerCard}>
@@ -698,7 +690,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
                 <Text style={s.speakerText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.newQuestionBtn} onPress={() => { Speech.stop(); setIsSpeaking(false); setMode('idle'); setAnswer(''); setQuestion(''); }} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Ask a new question">
-                <Ionicons name="refresh-outline" size={16} color={COLORS.textSecondary} />
+                <Ionicons name="refresh-outline" size={16} color="rgba(255,255,255,0.7)" />
                 <Text style={s.newQuestionText}>New question</Text>
               </TouchableOpacity>
             </View>
@@ -707,11 +699,11 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
         {mode === 'thinking' && (
           <Animated.View style={{ opacity: fade, alignItems: 'center' }}>
             <View style={s.questionBubble}>
-              <Ionicons name="chatbubble-outline" size={14} color={COLORS.textSecondary} />
+              <Ionicons name="chatbubble-outline" size={14} color="rgba(255,255,255,0.6)" />
               <Text style={s.qText}>{question}</Text>
             </View>
             <View style={s.thinkingWrap}>
-              <ActivityIndicator size="small" color={COLORS.accent} />
+              <ActivityIndicator size="small" color="#fff" />
               <Text style={s.thinkingText}>Looking that up...</Text>
             </View>
           </Animated.View>
@@ -725,23 +717,23 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
         )}
       </ScrollView>
 
-      {/* Mic Button — hide when keyboard is up */}
+      {/* Centered Mic Button — hide when keyboard is up */}
       {!keyboardVisible && (
-        <>
+        <View style={s.micSection}>
           <View style={s.micWrap}>
             <Animated.View style={[s.ring, {
               width: 140, height: 140, borderRadius: 70,
-              backgroundColor: COLORS.micRing3,
+              backgroundColor: 'rgba(255,255,255,0.06)',
               transform: [{ scale: pulse }], opacity: pulseOp,
             }]} />
             <Animated.View style={[s.ring, {
               width: 115, height: 115, borderRadius: 57.5,
-              backgroundColor: COLORS.micRing2,
+              backgroundColor: 'rgba(255,255,255,0.10)',
               transform: [{ scale: pulse }], opacity: pulseOp,
             }]} />
             <Animated.View style={[s.ring, {
               width: 96, height: 96, borderRadius: 48,
-              backgroundColor: COLORS.micRing1,
+              backgroundColor: 'rgba(255,255,255,0.15)',
               transform: [{ scale: pulse }], opacity: pulseOp,
             }]} />
             <TouchableOpacity
@@ -751,24 +743,24 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
               accessibilityRole="button"
               accessibilityLabel={mode === 'listening' ? 'Stop listening' : 'Start voice input'}
             >
-              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={34} color="#fff" />
+              <Ionicons name={mode === 'listening' ? 'pause' : 'mic'} size={30} color={COLORS.accent} />
             </TouchableOpacity>
           </View>
           <Text style={s.status}>
-            {mode === 'idle' ? 'Tap mic or type below' :
+            {mode === 'idle' ? 'Tap the mic to ask about plan benefits, find doctors, book transportation and set reminders' :
              mode === 'listening' ? 'Listening...' :
              mode === 'thinking' ? 'Thinking...' :
              'Tap mic to ask another'}
           </Text>
-        </>
+        </View>
       )}
 
-      {/* Chat Input Bar */}
+      {/* Bottom bar: text input left, Need help? + Call Us right */}
       <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <TextInput
           style={s.textInput}
           placeholder="Type your question..."
-          placeholderTextColor={COLORS.textTertiary}
+          placeholderTextColor="rgba(255,255,255,0.4)"
           value={typedText}
           onChangeText={setTypedText}
           onSubmitEditing={handleSend}
@@ -776,16 +768,13 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
           editable={mode !== 'thinking' && mode !== 'listening'}
           accessibilityLabel="Type your question"
         />
-        <TouchableOpacity
-          style={[s.sendBtn, typedText.trim().length === 0 && s.sendBtnDisabled]}
-          onPress={handleSend}
-          disabled={typedText.trim().length === 0 || mode === 'thinking'}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Send question"
-        >
-          <Ionicons name="arrow-up" size={20} color="#fff" />
-        </TouchableOpacity>
+        <View style={s.bottomRight}>
+          <Text style={s.needHelpLabel}>Need help?</Text>
+          <TouchableOpacity style={s.callBtn} onPress={() => Linking.openURL('tel:' + CALL_NUMBER)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Call us for help">
+            <Ionicons name="call" size={14} color={COLORS.accent} />
+            <Text style={s.callText}>Call Us</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -793,62 +782,61 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
 
 const s = StyleSheet.create({
   container: {
-    flex: 1, backgroundColor: COLORS.white,
+    flex: 1,
     borderTopLeftRadius: RADII.xxl, borderTopRightRadius: RADII.xxl,
+    overflow: 'hidden',
     ...SHADOWS.container,
   },
 
-  // Header
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6, width: '100%',
+  // Purple gradient background (layered bands)
+  gradientBase: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#7B3FBF',
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerIcon: {
-    width: 30, height: 30, borderRadius: 10,
-    backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+  gradientBand1: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: '50%',
+    backgroundColor: '#9B6BD4', opacity: 0.5,
   },
-  headerTitle: { ...TYPE.h3, color: COLORS.text },
-  callBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: COLORS.accent, borderRadius: RADII.full,
-    paddingHorizontal: 16, paddingVertical: 9,
-    ...SHADOWS.button,
+  gradientBand2: {
+    position: 'absolute', top: '25%', left: 0, right: 0, height: '30%',
+    backgroundColor: '#8B55C8', opacity: 0.3,
   },
-  callText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  gradientBand3: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%',
+    backgroundColor: '#6B2FAF', opacity: 0.3,
+  },
 
   // Content area
-  answerScroll: { flex: 1, width: '100%' },
-  answerArea: { justifyContent: 'flex-end', paddingHorizontal: 24, flexGrow: 1, paddingBottom: 8 },
+  answerScroll: { flex: 1, width: '100%', zIndex: 1 },
+  answerArea: { justifyContent: 'flex-end', paddingHorizontal: 24, flexGrow: 1, paddingBottom: 8, paddingTop: 16 },
 
   // Idle state
-  idleWrap: { alignItems: 'center' },
-  idleTitle: { ...TYPE.h2, color: COLORS.text, marginBottom: 4 },
-  idleText: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 12 },
+  idleWrap: { alignItems: 'center', zIndex: 1 },
+  idleTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 4 },
+  idleText: { fontSize: 15, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 22, marginBottom: 12 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: COLORS.accentLighter, borderRadius: RADII.full,
+    backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: RADII.full,
     paddingHorizontal: 14, paddingVertical: 8,
-    borderWidth: 1, borderColor: COLORS.accentLight,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
   },
-  chipText: { fontSize: 13, fontWeight: '600', color: COLORS.accent },
+  chipText: { fontSize: 13, fontWeight: '600', color: '#fff' },
 
-  // Question bubble
+  // Question bubble (on purple bg)
   questionBubble: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
     alignSelf: 'center',
-    backgroundColor: COLORS.bg,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: RADII.md,
     paddingHorizontal: 14, paddingVertical: 10,
     marginBottom: 14, maxWidth: '95%',
   },
-  qText: { fontSize: 14, color: COLORS.textSecondary, fontStyle: 'italic', flex: 1 },
+  qText: { fontSize: 14, color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', flex: 1 },
 
-  // Answer card
+  // Answer card (white card on purple bg)
   answerCard: {
-    backgroundColor: COLORS.accentLighter,
+    backgroundColor: '#FFFFFF',
     borderRadius: RADII.lg,
     padding: 18,
     paddingLeft: 22,
@@ -869,14 +857,14 @@ const s = StyleSheet.create({
   // Thinking state
   thinkingWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: COLORS.accentLighter,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: RADII.md,
     paddingHorizontal: 20, paddingVertical: 14,
   },
-  thinkingText: { fontSize: 15, color: COLORS.accent, fontWeight: '600' },
+  thinkingText: { fontSize: 15, color: '#fff', fontWeight: '600' },
 
   // Listening
-  listenText: { fontSize: 20, color: COLORS.accent, fontWeight: '600', textAlign: 'center', lineHeight: 30 },
+  listenText: { fontSize: 20, color: '#fff', fontWeight: '600', textAlign: 'center', lineHeight: 30 },
 
   // Speaker button
   speakerBtn: {
@@ -889,41 +877,45 @@ const s = StyleSheet.create({
   newQuestionBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: 16, paddingVertical: 8,
-    backgroundColor: COLORS.bg, borderRadius: RADII.full,
-    borderWidth: 1, borderColor: COLORS.borderLight,
+    backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: RADII.full,
   },
-  newQuestionText: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+  newQuestionText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.8)' },
 
-  // Mic button
-  micWrap: { width: 100, height: 100, justifyContent: 'center', alignItems: 'center', alignSelf: 'center', marginTop: 4 },
+  // Mic section (centered)
+  micSection: { alignItems: 'center', zIndex: 1, paddingBottom: 8 },
+  micWrap: { width: 120, height: 120, justifyContent: 'center', alignItems: 'center' },
   ring: { position: 'absolute' },
   mic: {
-    width: 82, height: 82, borderRadius: 41, backgroundColor: COLORS.accent,
+    width: 66, height: 66, borderRadius: 33, backgroundColor: '#FFFFFF',
     justifyContent: 'center', alignItems: 'center',
-    ...SHADOWS.glow,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2, shadowRadius: 12, elevation: 6,
   },
-  micActive: { backgroundColor: COLORS.accentDark, transform: [{ scale: 1.06 }] },
-  status: { fontSize: 17, fontWeight: '600', color: COLORS.textSecondary, marginTop: 10, marginBottom: 4, textAlign: 'center' },
+  micActive: { backgroundColor: '#F0E8F8', transform: [{ scale: 1.08 }] },
+  status: {
+    fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.85)',
+    marginTop: 8, marginBottom: 4, textAlign: 'center', lineHeight: 22, paddingHorizontal: 30,
+  },
 
-  // Input bar
+  // Bottom bar: text input left, Need help? + Call Us right
   inputBar: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderTopWidth: 1, borderTopColor: COLORS.borderLight,
-    backgroundColor: COLORS.white,
+    paddingHorizontal: 14, paddingVertical: 10,
+    zIndex: 1,
   },
   textInput: {
-    flex: 1, backgroundColor: COLORS.bg, borderRadius: RADII.full,
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: RADII.full,
     paddingHorizontal: 18, paddingVertical: 12,
-    fontSize: 15, color: COLORS.text,
-    borderWidth: 1, borderColor: COLORS.borderLight,
+    fontSize: 15, color: '#fff',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
     maxHeight: 80,
   },
-  sendBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center',
-    marginLeft: 10,
-    ...SHADOWS.button,
+  bottomRight: { alignItems: 'center', marginLeft: 12 },
+  needHelpLabel: { fontSize: 11, fontWeight: '500', color: 'rgba(255,255,255,0.6)', marginBottom: 4 },
+  callBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#FFFFFF', borderRadius: RADII.full,
+    paddingHorizontal: 14, paddingVertical: 8,
   },
-  sendBtnDisabled: { backgroundColor: COLORS.border, shadowOpacity: 0 },
+  callText: { color: COLORS.accent, fontSize: 13, fontWeight: '600' },
 });
