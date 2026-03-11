@@ -2303,13 +2303,17 @@ def _my_drugs_impl(member: dict):
             ded_applies = True
 
         # Build engine input for simulation
+        # Engine treats all costs as monthly — normalize per-fill values
+        months_per_fill = actual_days / 30.0
+        engine_copay = copay_amount / months_per_fill if copay_amount is not None else None
+        engine_full_cost = estimated_full_cost / months_per_fill if estimated_full_cost is not None else None
         engine_drugs.append({
             "name": name,
             "tier": tier,
             "cost_type": cost_type,
-            "copay_amount": copay_amount,
+            "copay_amount": engine_copay,
             "coinsurance_pct": coinsurance_pct,
-            "estimated_full_cost": estimated_full_cost,
+            "estimated_full_cost": engine_full_cost,
             "is_insulin": is_insulin,
             "deductible_applies": ded_applies,
         })
