@@ -777,10 +777,13 @@ def health():
     # 4. Critical API keys configured
     checks["anthropic_key"] = "configured" if ANTHROPIC_API_KEY else "missing"
 
+    # CMS is optional (only used for benefits gap-fill, not auth).
+    # Don't let it drag the health check to 503 and trigger Render restarts.
+    _critical_keys = ("persistent_store", "anthropic_key")
     healthy = all(
-        v == "ok" or v == "configured" or (isinstance(v, int) and v > 0)
-        for v in checks.values()
-    )
+        checks.get(k) in ("ok", "configured")
+        for k in _critical_keys
+    ) and checks.get("extracted_plans", 0) > 0
 
     return JSONResponse(
         content={"status": "ok" if healthy else "degraded", "checks": checks},
