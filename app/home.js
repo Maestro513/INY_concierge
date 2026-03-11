@@ -116,8 +116,14 @@ export default function HomeScreen() {
           .catch((err) => { if (__DEV__) console.warn('Benefits fetch error:', err); return null; }),
         sessionId
           ? authFetch(`${API_URL}/cms/my-drugs-session/${sessionId}`)
-              .then(r => {
-                if (!r.ok) { if (__DEV__) console.warn('Drugs fetch failed'); return null; }
+              .then(async (r) => {
+                if (!r.ok) {
+                  if (__DEV__) {
+                    const errBody = await r.text().catch(() => '');
+                    console.warn(`Drugs fetch failed: ${r.status} ${errBody}`);
+                  }
+                  return null;
+                }
                 return r.json();
               })
               .catch((err) => { if (__DEV__) console.warn('Drugs fetch error:', err); return null; })
