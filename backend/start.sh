@@ -21,11 +21,25 @@ else
     fi
 fi
 
-# 2. Run database migrations (PR14: replaces fragile CREATE IF NOT EXISTS)
+# 2. Build CMS benefits DB if missing
+CMS_DB="${CMS_DB_PATH:-cms_benefits.db}"
+if [ ! -f "$CMS_DB" ]; then
+    CMS_DIR="${CMS_DIR:-pdfs/CMS}"
+    if [ -d "$CMS_DIR" ]; then
+        echo "Building CMS benefits database from $CMS_DIR ..."
+        python cms_import.py --cms-dir "$CMS_DIR" --db "$CMS_DB"
+    else
+        echo "WARNING: CMS directory $CMS_DIR not found — benefits lookup will be unavailable."
+    fi
+else
+    echo "CMS benefits database present — skipping import."
+fi
+
+# 3. Run database migrations (PR14: replaces fragile CREATE IF NOT EXISTS)
 echo "Running database migrations ..."
 python -m app.db_migrate
 
-# 3. Start the server
+# 4. Start the server
 echo "Starting uvicorn ..."
 WORKERS="${WEB_CONCURRENCY:-4}"
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers "$WORKERS" \

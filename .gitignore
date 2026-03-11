@@ -65,3 +65,8 @@ persistent_store.db
 
 # Claude Code
 .claude/
+preview/
+scripts/stitch-mcp-server.js
+
+# MCP config (contains API keys)
+.mcp.json
