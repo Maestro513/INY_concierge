@@ -1,7 +1,11 @@
-import { View, Text, Pressable, TouchableOpacity, Modal, ScrollView, Linking, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { useState } from 'react';
+import { View, Text, Pressable, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
-import { API_URL } from '../constants/api';
+import { API_URL, getAccessToken } from '../constants/api';
+import { File, Paths } from 'expo-file-system/next';
+import { StorageAccessFramework } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 export default function SOBModal({ visible, onClose, member, sobData, loading, onRetry }) {
   if (!visible) return null;
@@ -15,19 +19,63 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
   const isPPO = (sobData?.plan_type || planName || '').toUpperCase().includes('PPO');
   const hasOutOfNetwork = isPPO || medical.some(b => b.out_of_network && b.out_of_network !== b.in_network);
 
+  const [downloading, setDownloading] = useState(false);
+
   const handleDownload = async () => {
-    if (!planNumber) return;
+    if (!planNumber || downloading) return;
+    setDownloading(true);
     const url = `${API_URL}/sob/pdf/${encodeURIComponent(planNumber)}`;
+    const fileName = `SOB_${planNumber.replace(/[^a-zA-Z0-9-]/g, '')}.pdf`;
     try {
-      const { authFetch } = require('../constants/api');
-      const check = await authFetch(url, { method: 'HEAD' }, 10000);
-      if (!check.ok) {
+      const token = getAccessToken();
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
         Alert.alert('Not Available', 'Summary of Benefits PDF is not available for this plan.');
         return;
       }
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert('Error', 'Could not open the document. Please try again.');
+      const blob = await res.blob();
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      // Save to cache for sharing
+      const file = new File(Paths.cache, fileName);
+      if (file.exists) file.delete();
+      file.create();
+      file.write(base64, { encoding: 'base64' });
+
+      // Show options: Save to device or Share
+      Alert.alert('PDF Ready', 'Summary of Benefits downloaded.', [
+        {
+          text: 'Save to Device',
+          onPress: async () => {
+            try {
+              const perms = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+              if (perms.granted) {
+                const safUri = await StorageAccessFramework.createFileAsync(perms.directoryUri, fileName, 'application/pdf');
+                await StorageAccessFramework.writeAsStringAsync(safUri, base64, { encoding: 'base64' });
+                Alert.alert('Saved', 'PDF saved successfully.');
+              }
+            } catch {
+              Alert.alert('Error', 'Could not save to device.');
+            }
+          },
+        },
+        {
+          text: 'Share',
+          onPress: () => Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: 'Summary of Benefits' }),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    } catch (err) {
+      if (__DEV__) console.log('SOB download error:', err);
+      Alert.alert('Error', 'Could not download the document. Please try again.');
+    } finally {
+      setDownloading(false);
     }
   };
 
