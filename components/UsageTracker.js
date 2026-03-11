@@ -94,7 +94,7 @@ function LogUsageModal({ visible, onClose, onSave, categories }) {
 
   const handleSave = async () => {
     const parsedAmt = parseFloat(amount);
-    if (!category || !amount || parsedAmt <= 0 || parsedAmt > 10000) return;
+    if (!category || !amount || isNaN(parsedAmt) || parsedAmt <= 0 || parsedAmt > 10000) return;
     setSaving(true);
     await onSave({
       category,

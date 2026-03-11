@@ -471,6 +471,12 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
   const pulseOp = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
 
+  // Refs to avoid stale closures in speech recognition event handlers
+  const modeRef = useRef(mode);
+  const liveTextRef = useRef(liveText);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { liveTextRef.current = liveText; }, [liveText]);
+
   // --- Keyboard tracking ---
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -501,8 +507,9 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
   });
 
   useSpeechRecognitionEvent('end', () => {
-    if (mode === 'listening') {
-      if (liveText.trim().length > 0) processQuestion(liveText.trim());
+    if (modeRef.current === 'listening') {
+      const text = liveTextRef.current.trim();
+      if (text.length > 0) processQuestion(text);
       else { setMode('idle'); setLiveText(''); }
     }
   });
@@ -510,7 +517,7 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
   useSpeechRecognitionEvent('error', (event) => {
     if (__DEV__) console.log('Speech error:', event.error, event.message);
     if (event.error === 'aborted') return;
-    if (mode === 'listening') { setMode('idle'); setLiveText(''); }
+    if (modeRef.current === 'listening') { setMode('idle'); setLiveText(''); }
   });
 
   // --- Pulse animation (3-ring ripple) ---
@@ -651,7 +658,26 @@ export default function VoiceHelp({ planNumber, planName, zipCode, sessionId, on
 
       {/* Answer / Status Area */}
       <ScrollView style={s.answerScroll} contentContainerStyle={s.answerArea}>
-        {mode === 'idle' && null}
+        {mode === 'idle' && (
+          <View style={s.idleWrap}>
+            <Text style={s.idleTitle}>How can I help?</Text>
+            <Text style={s.idleText}>Ask about your benefits, find a doctor, or look up drug costs</Text>
+            <View style={s.chipRow}>
+              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What is my specialist copay?')} activeOpacity={0.7}>
+                <Ionicons name="medical-outline" size={14} color={COLORS.accent} />
+                <Text style={s.chipText}>Specialist copay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.chip} onPress={() => processQuestion('Find a pharmacy near me')} activeOpacity={0.7}>
+                <Ionicons name="storefront-outline" size={14} color={COLORS.accent} />
+                <Text style={s.chipText}>Find pharmacy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.chip} onPress={() => processQuestion('What dental benefits do I have?')} activeOpacity={0.7}>
+                <Ionicons name="heart-outline" size={14} color={COLORS.accent} />
+                <Text style={s.chipText}>Dental benefits</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
         {mode === 'answer' && (
           <Animated.View style={{ opacity: fade }}>
             <View style={s.questionBubble}>
