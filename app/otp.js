@@ -49,54 +49,67 @@ export default function OTPScreen() {
     setLoading(true);
     setError('');
 
-    try {
-      const code = otp.join('');
-      const res = await fetchWithTimeout(`${API_URL}/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code }),
-      });
+    const url = `${API_URL}/auth/verify-otp`;
+    const MAX_RETRIES = 2;
 
-      if (res.status === 401) {
-        setError('Invalid or expired code. Please try again.');
-        setOtp(['', '', '', '', '', '']);
-        refs.current[0]?.focus();
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const code = otp.join('');
+        const res = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, code }),
+        });
+
+        if (res.status === 401) {
+          setError('Invalid or expired code. Please try again.');
+          setOtp(['', '', '', '', '', '']);
+          refs.current[0]?.focus();
+          setLoading(false);
+          return;
+        }
+
+        const data = await res.json();
+
+        if (data.access_token) {
+          await setTokens(data.access_token, data.refresh_token);
+
+          setMemberSession(
+            {
+              firstName: data.first_name,
+              lastName: data.last_name,
+              planName: data.plan_name,
+              planNumber: data.plan_number,
+              agent: data.agent || '',
+              zipCode: data.zip_code || '',
+            },
+            data.session_id || '',
+          );
+
+          clearPendingOtp();
+          router.replace('/home');
+        } else {
+          setError('Verification failed. Please try again.');
+        }
+        setLoading(false);
         return;
-      }
-
-      const data = await res.json();
-
-      if (data.access_token) {
-        // Store JWT tokens
-        await setTokens(data.access_token, data.refresh_token);
-
-        // Store member data in memory (not URL params) to avoid PHI in URLs
-        setMemberSession(
-          {
-            firstName: data.first_name,
-            lastName: data.last_name,
-            planName: data.plan_name,
-            planNumber: data.plan_number,
-            agent: data.agent || '',
-            zipCode: data.zip_code || '',
-          },
-          data.session_id || '',
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          setError('Request timed out. Please try again.');
+          setLoading(false);
+          return;
+        }
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
+          continue;
+        }
+        setError(
+          `Can't reach server (${err.message}). URL: ${url}\n` +
+          "Check that your phone can reach this address in a browser."
         );
-
-        clearPendingOtp();
-        router.replace('/home');
-      } else {
-        setError('Verification failed. Please try again.');
       }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        setError('Request timed out. Please try again.');
-      } else {
-        setError(`Can't connect: ${err.name}: ${err.message}`);
-      }
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   const handleResend = async () => {

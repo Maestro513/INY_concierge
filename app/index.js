@@ -75,31 +75,46 @@ export default function PhoneScreen() {
     setLoading(true);
     setError('');
 
-    try {
-      const res = await fetchWithTimeout(`${API_URL}/auth/lookup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: rawDigits }),
-      });
-      const data = await res.json();
+    const url = `${API_URL}/auth/lookup`;
+    const MAX_RETRIES = 2;
 
-      if (res.status === 429) {
-        setError("Too many attempts. Please wait a few minutes and try again.");
-      } else if (data.found) {
-        setPendingOtp(rawDigits, data.first_name);
-        router.push('/otp');
-      } else {
-        setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const res = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: rawDigits }),
+        });
+        const data = await res.json();
+
+        if (res.status === 429) {
+          setError("Too many attempts. Please wait a few minutes and try again.");
+        } else if (data.found) {
+          setPendingOtp(rawDigits, data.first_name);
+          router.push('/otp');
+        } else {
+          setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
+        }
+        setLoading(false);
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          setError("Request timed out. Please check your connection and try again.");
+          setLoading(false);
+          return;
+        }
+        // Retry on network errors
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
+          continue;
+        }
+        setError(
+          `Can't reach server (${err.message}). URL: ${url}\n` +
+          "Check that your phone can reach this address in a browser."
+        );
       }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        setError("Request timed out. Please check your connection and try again.");
-      } else {
-        setError(`Can't connect: ${err.name}: ${err.message}`);
-      }
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (
