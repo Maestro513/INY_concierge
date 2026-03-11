@@ -2126,7 +2126,13 @@ def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user
     phone = session["phone"]
     if _user and _user.get("sub") not in (None, "dev") and _user["sub"] != phone:
         raise HTTPException(status_code=403, detail="Not authorized for this session")
-    return _my_drugs_impl(session["data"])
+    try:
+        return _my_drugs_impl(session["data"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("Drug lookup failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=500, detail=f"Drug lookup error: {type(e).__name__}: {e}")
 
 
 @app.get("/cms/my-drugs/{phone}")
