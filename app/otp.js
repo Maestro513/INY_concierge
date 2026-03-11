@@ -92,7 +92,7 @@ export default function OTPScreen() {
       if (err.name === 'AbortError') {
         setError('Request timed out. Please try again.');
       } else {
-        setError("Can't connect right now. Please try again.");
+        setError(`Can't connect: ${err.name}: ${err.message}`);
       }
     } finally {
       setLoading(false);
