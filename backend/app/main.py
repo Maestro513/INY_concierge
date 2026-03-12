@@ -2905,6 +2905,48 @@ async def save_health_screenings(request: Request, auth: dict = Depends(require_
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  SDOH SCREENING (Social Determinants of Health)
+# ════════════════════════════════════════════════════════════════════════════
+
+VALID_SDOH_YN = {"yes", "no"}
+VALID_ISOLATION = {"never", "rarely", "sometimes", "often", "always"}
+
+
+class SDoHScreening(BaseModel):
+    transportation: str = Field("no", pattern=r"^(yes|no)$")
+    food_insecurity: str = Field("no", pattern=r"^(yes|no)$")
+    social_isolation: str = Field("never", pattern=r"^(never|rarely|sometimes|often|always)$")
+    housing_stability: str = Field("no", pattern=r"^(yes|no)$")
+
+
+@app.post("/sdoh-screening")
+async def save_sdoh_screening(body: SDoHScreening, auth: dict = Depends(require_auth)):
+    """Save a member's SDoH screening answers."""
+    session_id = auth.get("session_id") or auth.get("sub", "")
+    store = get_store()
+    session = store.get_session(session_id, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired.")
+    phone = session.get("phone", "")
+    udb = get_user_db()
+    result = udb.save_sdoh_screening(phone, body.model_dump())
+    get_audit_log().record(
+        actor=phone, action="create", resource="sdoh_screening",
+        detail="sdoh_submit",
+    )
+    return {"success": True}
+
+
+@app.get("/sdoh-screening/{session_id}")
+def get_sdoh_screening(session_id: str, _user: dict = Depends(get_current_user)):
+    """Get a member's most recent SDoH screening."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    result = db.get_sdoh_screening(phone)
+    return {"screening": result}
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  APPOINTMENT REQUESTS (member creates, admin/agent handles)
 # ════════════════════════════════════════════════════════════════════════════
 

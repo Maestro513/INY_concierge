@@ -11,6 +11,7 @@ import PlansPage from '@/pages/plans/PlansPage';
 import SystemPage from '@/pages/system/SystemPage';
 import SettingsPage from '@/pages/settings/SettingsPage';
 import ScreeningGapsPage from '@/pages/screening-gaps/ScreeningGapsPage';
+import SDoHReportPage from '@/pages/sdoh-report/SDoHReportPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +40,7 @@ export default function App() {
                 <Route path="/admin/members/:id" element={<MemberDetailPage />} />
                 <Route path="/admin/plans" element={<PlansPage />} />
                 <Route path="/admin/screening-gaps" element={<ScreeningGapsPage />} />
+                <Route path="/admin/sdoh-report" element={<SDoHReportPage />} />
                 <Route path="/admin/system" element={<SystemPage />} />
                 <Route path="/admin/settings" element={<SettingsPage />} />
               </Route>

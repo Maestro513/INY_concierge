@@ -179,6 +179,19 @@ class UserDataDB:
                 ON adherence_logs(phone_hash);
             CREATE INDEX IF NOT EXISTS idx_adherence_reminder
                 ON adherence_logs(phone_hash, reminder_id, log_date);
+
+            CREATE TABLE IF NOT EXISTS sdoh_screenings (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL DEFAULT '',
+                transportation  TEXT NOT NULL DEFAULT 'no',
+                food_insecurity TEXT NOT NULL DEFAULT 'no',
+                social_isolation TEXT NOT NULL DEFAULT 'never',
+                housing_stability TEXT NOT NULL DEFAULT 'no',
+                created_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sdoh_phone_hash
+                ON sdoh_screenings(phone_hash);
         """)
         # Add phone_hash column if upgrading from old schema
         try:
@@ -587,6 +600,74 @@ class UserDataDB:
                 r["days_until_refill"] = None
             result.append(r)
         return result
+
+    # ── SDoH Screening ────────────────────────────────────────────
+
+    def save_sdoh_screening(self, phone: str, data: dict) -> dict:
+        """Save a member's SDoH screening answers."""
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        sid = self._execute(
+            """INSERT INTO sdoh_screenings
+               (phone, phone_hash, transportation, food_insecurity,
+                social_isolation, housing_stability)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (enc_phone, ph,
+             data.get("transportation", "no"),
+             data.get("food_insecurity", "no"),
+             data.get("social_isolation", "never"),
+             data.get("housing_stability", "no")),
+        )
+        row = self._query_one("SELECT * FROM sdoh_screenings WHERE id = ?", (sid,))
+        if row:
+            row["phone"] = phone
+        return row
+
+    def get_sdoh_screening(self, phone: str) -> dict | None:
+        """Get most recent SDoH screening for a member."""
+        ph = self._hash_phone(phone)
+        row = self._query_one(
+            "SELECT * FROM sdoh_screenings WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 1",
+            (ph,),
+        )
+        if not row:
+            return None
+        row = dict(row)
+        row["phone"] = self._decrypt_phone(row["phone"])
+        return row
+
+    def get_all_sdoh_results(self) -> list[dict]:
+        """Get all SDoH submissions for admin reporting (latest per member)."""
+        rows = self._query_all(
+            "SELECT * FROM sdoh_screenings ORDER BY created_at DESC"
+        )
+        seen = set()
+        results = []
+        for r in rows:
+            ph = r["phone_hash"]
+            if ph in seen:
+                continue
+            seen.add(ph)
+            flags = []
+            if r["transportation"] == "yes":
+                flags.append("transportation")
+            if r["food_insecurity"] == "yes":
+                flags.append("food_insecurity")
+            if r["social_isolation"] in ("sometimes", "often", "always"):
+                flags.append("social_isolation")
+            if r["housing_stability"] == "yes":
+                flags.append("housing_stability")
+            results.append({
+                "phone_last4": self._decrypt_phone(r["phone"])[-4:],
+                "transportation": r["transportation"],
+                "food_insecurity": r["food_insecurity"],
+                "social_isolation": r["social_isolation"],
+                "housing_stability": r["housing_stability"],
+                "flags": flags,
+                "flag_count": len(flags),
+                "created_at": r["created_at"],
+            })
+        return results
 
     # ── Health Screening Gap Report (Admin) ─────────────────────────
 

@@ -131,7 +131,7 @@ export default function HealthScreeningScreen() {
 
       // Mark as complete so we don't show again
       await AsyncStorage.setItem(SCREENING_KEY, 'true');
-      router.replace('/home');
+      router.replace('/sdoh-screening');
     } catch {
       Alert.alert('Error', 'Could not save your responses. Please try again.');
     } finally {

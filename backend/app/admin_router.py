@@ -918,6 +918,90 @@ async def screening_gap_report(payload: dict = Depends(require_admin)):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  SDOH REPORT (admin views social determinants flags for outreach)
+# ════════════════════════════════════════════════════════════════════════════
+
+SDOH_BENEFIT_MAP = {
+    "transportation": {
+        "label": "Transportation Barrier",
+        "benefit": "Non-Emergency Medical Transportation (NEMT)",
+        "action": "Help member schedule free rides to appointments",
+    },
+    "food_insecurity": {
+        "label": "Food Insecurity",
+        "benefit": "Grocery/Meal Allowance (OTC Card)",
+        "action": "Walk member through OTC grocery benefit usage",
+    },
+    "social_isolation": {
+        "label": "Social Isolation",
+        "benefit": "SilverSneakers / Community Programs",
+        "action": "Connect member with fitness & social programs",
+    },
+    "housing_stability": {
+        "label": "Housing Instability",
+        "benefit": "Case Management / Utility Assistance",
+        "action": "Refer to plan case manager for housing support",
+    },
+}
+
+
+@router.get("/sdoh-report")
+async def sdoh_report(payload: dict = Depends(require_admin)):
+    """Get aggregated SDoH screening data for all members."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    results = udb.get_all_sdoh_results()
+
+    if not results:
+        return {
+            "total_screened": 0,
+            "flag_summary": [],
+            "members": [],
+            "benefit_recommendations": list(SDOH_BENEFIT_MAP.values()),
+        }
+
+    # Aggregate flag counts
+    flag_counts = {
+        "transportation": 0,
+        "food_insecurity": 0,
+        "social_isolation": 0,
+        "housing_stability": 0,
+    }
+    for m in results:
+        for flag in m["flags"]:
+            if flag in flag_counts:
+                flag_counts[flag] += 1
+
+    total = len(results)
+    flag_summary = []
+    for key, count in flag_counts.items():
+        info = SDOH_BENEFIT_MAP.get(key, {})
+        pct = round((count / total) * 100, 1) if total > 0 else 0
+        flag_summary.append({
+            "flag": key,
+            "label": info.get("label", key),
+            "count": count,
+            "total": total,
+            "pct": pct,
+            "benefit": info.get("benefit", ""),
+            "action": info.get("action", ""),
+        })
+    flag_summary.sort(key=lambda x: -x["count"])
+
+    # Members with any flags, sorted by most flags
+    flagged_members = [m for m in results if m["flag_count"] > 0]
+    flagged_members.sort(key=lambda x: -x["flag_count"])
+
+    return {
+        "total_screened": total,
+        "total_with_flags": len(flagged_members),
+        "flag_summary": flag_summary,
+        "members": flagged_members[:100],
+        "benefit_recommendations": list(SDOH_BENEFIT_MAP.values()),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  APPOINTMENT REQUESTS (agent views and manages member requests)
 # ════════════════════════════════════════════════════════════════════════════
 
