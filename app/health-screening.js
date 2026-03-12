@@ -13,7 +13,6 @@ const SCREENING_KEY = '@health_screening_complete';
 const SHARED_SCREENINGS = [
   { id: 'awv', label: 'Annual Wellness Visit', timeframe: 'in the past year', frequency: 'yearly' },
   { id: 'flu', label: 'Flu Shot', timeframe: 'this season', frequency: 'yearly' },
-  { id: 'covid', label: 'COVID Booster', timeframe: 'in the past year', frequency: 'yearly' },
   {
     id: 'colonoscopy',
     label: 'Colonoscopy',
@@ -21,32 +20,11 @@ const SHARED_SCREENINGS = [
     frequency: '5 years',
   },
   {
-    id: 'lung',
-    label: 'Lung Cancer Screening (Low-Dose CT)',
-    timeframe: 'in the past year',
-    frequency: 'yearly',
-  },
-  { id: 'skin', label: 'Skin Cancer Check', timeframe: 'in the past year', frequency: 'yearly' },
-  {
-    id: 'diabetic_eye',
-    label: 'Diabetic Eye Exam',
-    timeframe: 'in the past year',
-    frequency: 'yearly',
-  },
-  {
     id: 'cholesterol',
     label: 'Cholesterol / Blood Work',
     timeframe: 'in the past year',
     frequency: 'yearly',
   },
-  { id: 'hearing', label: 'Hearing Test', timeframe: 'in the past year', frequency: 'yearly' },
-  {
-    id: 'dental',
-    label: 'Dental Cleaning',
-    timeframe: 'in the past 6 months',
-    frequency: '6 months',
-  },
-  { id: 'vision', label: 'Eye Exam', timeframe: 'in the past year', frequency: 'yearly' },
 ];
 
 const MALE_SCREENINGS = [
@@ -60,18 +38,6 @@ const MALE_SCREENINGS = [
 
 const FEMALE_SCREENINGS = [
   { id: 'mammogram', label: 'Mammogram', timeframe: 'in the past 1-2 years', frequency: 'yearly' },
-  {
-    id: 'cervical',
-    label: 'Cervical Cancer (Pap Smear)',
-    timeframe: 'in the past 3 years',
-    frequency: '3 years',
-  },
-  {
-    id: 'bone_density',
-    label: 'Bone Density Scan (DEXA)',
-    timeframe: 'in the past 2 years',
-    frequency: '2 years',
-  },
 ];
 
 export default function HealthScreeningScreen() {
