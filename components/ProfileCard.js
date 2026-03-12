@@ -330,6 +330,7 @@ export default function ProfileCard({
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showMedsModal, setShowMedsModal] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
 
   // Greeting entrance animation
   const greetFade = useRef(new Animated.Value(0)).current;
@@ -364,15 +365,14 @@ export default function ProfileCard({
       >
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {onLogout && (
-              <TouchableOpacity
-                onPress={onLogout}
-                accessibilityLabel="Log out"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              onPress={() => setShowSettingsMenu(true)}
+              accessibilityLabel="Settings"
+              accessibilityRole="button"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="settings-outline" size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
             <Text style={styles.greeting}>{greeting()}</Text>
           </View>
           <Text style={styles.name}>
@@ -405,6 +405,53 @@ export default function ProfileCard({
         onClose={() => setShowAddModal(false)}
         onSave={onAddReminder}
       />
+
+      {/* Settings menu */}
+      <Modal
+        visible={showSettingsMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSettingsMenu(false)}
+      >
+        <TouchableOpacity
+          style={styles.settingsOverlay}
+          activeOpacity={1}
+          onPress={() => setShowSettingsMenu(false)}
+        >
+          <View style={styles.settingsMenu}>
+            <TouchableOpacity
+              style={styles.settingsItem}
+              onPress={() => {
+                setShowSettingsMenu(false);
+                // TODO: navigate to Family Access screen
+              }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Family Access"
+            >
+              <Ionicons name="people-outline" size={20} color={COLORS.accent} />
+              <Text style={styles.settingsItemText}>Family Access</Text>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.textTertiary} />
+            </TouchableOpacity>
+            <View style={styles.settingsDivider} />
+            {onLogout && (
+              <TouchableOpacity
+                style={styles.settingsItem}
+                onPress={() => {
+                  setShowSettingsMenu(false);
+                  onLogout();
+                }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Log out"
+              >
+                <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
+                <Text style={[styles.settingsItemText, { color: COLORS.error }]}>Log Out</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Medications detail modal */}
       <Modal
@@ -1035,4 +1082,37 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { opacity: 0.4 },
   saveBtnText: { fontSize: 16, fontWeight: '600', color: COLORS.white },
+
+  // Settings menu
+  settingsOverlay: {
+    flex: 1,
+    backgroundColor: COLORS.overlay,
+    justifyContent: 'flex-start',
+    paddingTop: 80,
+    paddingHorizontal: 24,
+  },
+  settingsMenu: {
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.lg,
+    paddingVertical: 6,
+    ...SHADOWS.modal,
+  },
+  settingsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  settingsItemText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  settingsDivider: {
+    height: 1,
+    backgroundColor: COLORS.borderLight,
+    marginHorizontal: 18,
+  },
 });
