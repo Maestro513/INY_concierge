@@ -145,7 +145,7 @@ export default function HealthScreeningScreen() {
       <SafeAreaView style={s.safe}>
         <View style={s.genderContainer}>
           <View style={s.iconWrap}>
-            <Ionicons name="heart-circle" size={56} color={COLORS.accent} />
+            <Ionicons name="heart-circle" size={72} color={COLORS.accent} />
           </View>
           <Text style={s.genderTitle}>Preventive Health Check</Text>
           <Text style={s.genderSubtitle}>
@@ -160,7 +160,7 @@ export default function HealthScreeningScreen() {
             }}
             activeOpacity={0.7}
           >
-            <Ionicons name="man" size={24} color={COLORS.accent} />
+            <Ionicons name="man" size={32} color={COLORS.accent} />
             <Text style={s.genderBtnText}>Male</Text>
           </TouchableOpacity>
 
@@ -172,7 +172,7 @@ export default function HealthScreeningScreen() {
             }}
             activeOpacity={0.7}
           >
-            <Ionicons name="woman" size={24} color={COLORS.accent} />
+            <Ionicons name="woman" size={32} color={COLORS.accent} />
             <Text style={s.genderBtnText}>Female</Text>
           </TouchableOpacity>
 
@@ -271,32 +271,38 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
-  iconWrap: { marginBottom: 16 },
-  genderTitle: { ...TYPE.h1, color: COLORS.text, textAlign: 'center', marginBottom: 8 },
+  iconWrap: { marginBottom: 20 },
+  genderTitle: {
+    ...TYPE.h1,
+    fontSize: 28,
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
   genderSubtitle: {
-    fontSize: 15,
+    fontSize: 18,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 32,
+    lineHeight: 26,
+    marginBottom: 36,
   },
   genderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
     width: '100%',
     backgroundColor: COLORS.white,
     borderRadius: RADII.md,
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    marginBottom: 12,
+    paddingVertical: 22,
+    paddingHorizontal: 28,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     ...SHADOWS.card,
   },
-  genderBtnText: { fontSize: 17, fontWeight: '600', color: COLORS.text },
-  skipBtn: { marginTop: 20 },
-  skipText: { fontSize: 14, color: COLORS.textTertiary, fontWeight: '500' },
+  genderBtnText: { fontSize: 22, fontWeight: '600', color: COLORS.text },
+  skipBtn: { marginTop: 24 },
+  skipText: { fontSize: 17, color: COLORS.textTertiary, fontWeight: '500' },
 
   // Header
   header: {
