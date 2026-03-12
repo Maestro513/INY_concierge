@@ -26,8 +26,8 @@ describe('Token Management', () => {
 
   test('setTokens stores tokens in SecureStore', async () => {
     await setTokens('access-123', 'refresh-456');
-    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('@iny_access_token', 'access-123');
-    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('@iny_refresh_token', 'refresh-456');
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('iny_access_token', 'access-123');
+    expect(mockSecureStore.setItemAsync).toHaveBeenCalledWith('iny_refresh_token', 'refresh-456');
   });
 
   test('loadTokens retrieves tokens from SecureStore', async () => {
@@ -49,8 +49,8 @@ describe('Token Management', () => {
   test('clearTokens removes tokens from SecureStore', async () => {
     await setTokens('access-123', 'refresh-456');
     await clearTokens();
-    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('@iny_access_token');
-    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('@iny_refresh_token');
+    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('iny_access_token');
+    expect(mockSecureStore.deleteItemAsync).toHaveBeenCalledWith('iny_refresh_token');
     expect(getAccessToken()).toBeNull();
   });
 
