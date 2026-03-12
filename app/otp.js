@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 import { setMemberSession, getPendingOtp, clearPendingOtp } from '../constants/session';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function OTPScreen() {
   const pending = getPendingOtp();
@@ -91,7 +92,8 @@ export default function OTPScreen() {
           );
 
           clearPendingOtp();
-          router.replace('/home');
+          const screeningDone = await AsyncStorage.getItem('@health_screening_complete');
+          router.replace(screeningDone ? '/home' : '/health-screening');
         } else {
           setError('Verification failed. Please try again.');
         }

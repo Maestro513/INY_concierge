@@ -12,7 +12,7 @@ import { getMemberSession } from '../constants/session';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 16;
-const CARD_HEIGHT = CARD_WIDTH / 1.25; // Extra tall for bigger content
+const CARD_HEIGHT = CARD_WIDTH / 1.05; // Slightly taller than standard card ratio
 
 // Carrier logo map (same as ProfileCard)
 const CARRIER_LOGOS = {
@@ -205,36 +205,6 @@ export default function DigitalIDScreen() {
                   <Text style={s.phoneLabel}>TTY</Text>
                   <Text style={s.phoneNumber}>{cardData?.customer_service_tty || '711'}</Text>
                 </View>
-              </View>
-
-              {/* Copays section */}
-              <View style={s.backDivider} />
-              <Text style={s.backSectionTitle}>Your Copays</Text>
-              <View style={s.copayGrid}>
-                {cardData?.pcp_copay ? (
-                  <View style={s.copayItem}>
-                    <Text style={s.copayValue}>{cardData.pcp_copay}</Text>
-                    <Text style={s.copayLabel}>PCP</Text>
-                  </View>
-                ) : null}
-                {cardData?.specialist_copay ? (
-                  <View style={s.copayItem}>
-                    <Text style={s.copayValue}>{cardData.specialist_copay}</Text>
-                    <Text style={s.copayLabel}>Specialist</Text>
-                  </View>
-                ) : null}
-                {cardData?.urgent_care_copay ? (
-                  <View style={s.copayItem}>
-                    <Text style={s.copayValue}>{cardData.urgent_care_copay}</Text>
-                    <Text style={s.copayLabel}>Urgent</Text>
-                  </View>
-                ) : null}
-                {cardData?.er_copay ? (
-                  <View style={s.copayItem}>
-                    <Text style={s.copayValue}>{cardData.er_copay}</Text>
-                    <Text style={s.copayLabel}>ER</Text>
-                  </View>
-                ) : null}
               </View>
 
               {cardData?.website ? (
