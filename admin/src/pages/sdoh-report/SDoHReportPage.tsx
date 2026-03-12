@@ -242,12 +242,11 @@ export default function SDoHReportPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {flag_summary.map((f, idx) => {
+            {flag_summary.map((f) => {
               const Icon = FLAG_ICONS[f.flag] || ShieldAlert;
               const colors = FLAG_COLORS[f.flag] || { bg: 'bg-gray-100', text: 'text-gray-600' };
-              const isHighest = idx === 0 && f.count > 0;
               return (
-                <div key={f.flag} className={`flex items-start gap-3 p-3 rounded-lg ${isHighest ? 'bg-orange-50 ring-1 ring-orange-200' : 'bg-muted/30'}`}>
+                <div key={f.flag} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
                   <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${colors.bg}`}>
                     <Icon className={`h-4 w-4 ${colors.text}`} />
                   </div>
@@ -257,11 +256,6 @@ export default function SDoHReportPage() {
                       <Badge variant="secondary" className="text-[10px]">
                         {f.count}/{f.total}
                       </Badge>
-                      {isHighest && (
-                        <Badge className="text-[10px] bg-orange-500 hover:bg-orange-600">
-                          Highest in Area
-                        </Badge>
-                      )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       <span className="font-medium">Benefit:</span> {f.benefit}
