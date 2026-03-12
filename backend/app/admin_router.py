@@ -751,3 +751,48 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
     finally:
         if os.path.exists(tmp.name):
             os.unlink(tmp.name)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  HEALTH SCREENING CONFIG (admin manages which screenings members see)
+# ════════════════════════════════════════════════════════════════════════════
+
+class ScreeningItem(BaseModel):
+    id: str = Field(..., min_length=1, max_length=50)
+    label: str = Field(..., min_length=1, max_length=200)
+    timeframe: str = Field(..., min_length=1, max_length=200)
+    frequency: str = Field(..., min_length=1, max_length=50)
+
+
+class ScreeningConfigRequest(BaseModel):
+    shared: list[ScreeningItem] = Field(default_factory=list)
+    male: list[ScreeningItem] = Field(default_factory=list)
+    female: list[ScreeningItem] = Field(default_factory=list)
+
+
+@router.get("/screening-config")
+async def get_screening_config(payload: dict = Depends(require_admin)):
+    """Get the current screening questionnaire configuration."""
+    config = _get_store().get_screening_config()
+    return config or {"shared": [], "male": [], "female": []}
+
+
+@router.put("/screening-config")
+async def set_screening_config(body: ScreeningConfigRequest,
+                               request: Request,
+                               payload: dict = Depends(require_admin)):
+    """Set the screening questionnaire configuration (replaces all)."""
+    config = body.model_dump()
+    _get_store().set_screening_config(config)
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="update",
+        resource="screening_config",
+        resource_id="global",
+        ip_address=request.client.host if request.client else "",
+        detail=f"shared={len(config['shared'])} male={len(config['male'])} female={len(config['female'])}",
+    )
+    log.info("Admin %s updated screening config: %d shared, %d male, %d female",
+             payload.get("sub"), len(config["shared"]), len(config["male"]), len(config["female"]))
+    return {"success": True, "config": config}

@@ -1,5 +1,13 @@
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +18,8 @@ import { API_URL, authFetch } from '../constants/api';
 
 const SCREENING_KEY = '@health_screening_complete';
 
-const SHARED_SCREENINGS = [
+// Default screenings — overridden by backend if admin has configured them
+const DEFAULT_SHARED = [
   { id: 'awv', label: 'Annual Wellness Visit', timeframe: 'in the past year', frequency: 'yearly' },
   { id: 'flu', label: 'Flu Shot', timeframe: 'this season', frequency: 'yearly' },
   {
@@ -25,9 +34,15 @@ const SHARED_SCREENINGS = [
     timeframe: 'in the past year',
     frequency: 'yearly',
   },
+  {
+    id: 'a1c',
+    label: 'Diabetes Screening (A1C)',
+    timeframe: 'in the past year',
+    frequency: 'yearly',
+  },
 ];
 
-const MALE_SCREENINGS = [
+const DEFAULT_MALE = [
   {
     id: 'prostate',
     label: 'Prostate (PSA) Screening',
@@ -36,8 +51,14 @@ const MALE_SCREENINGS = [
   },
 ];
 
-const FEMALE_SCREENINGS = [
+const DEFAULT_FEMALE = [
   { id: 'mammogram', label: 'Mammogram', timeframe: 'in the past 1-2 years', frequency: 'yearly' },
+  {
+    id: 'bone_density',
+    label: 'Bone Density Scan (DEXA)',
+    timeframe: 'in the past 2 years',
+    frequency: '2 years',
+  },
 ];
 
 export default function HealthScreeningScreen() {
@@ -47,15 +68,34 @@ export default function HealthScreeningScreen() {
   const [gender, setGender] = useState(null);
   const [answers, setAnswers] = useState({});
   const [saving, setSaving] = useState(false);
+  const [sharedScreenings, setSharedScreenings] = useState(DEFAULT_SHARED);
+  const [maleScreenings, setMaleScreenings] = useState(DEFAULT_MALE);
+  const [femaleScreenings, setFemaleScreenings] = useState(DEFAULT_FEMALE);
+  const [loadingScreenings, setLoadingScreenings] = useState(true);
+
+  // Fetch admin-configured screenings (fall back to defaults)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch(`${API_URL}/health-screenings/config`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.shared?.length) setSharedScreenings(data.shared);
+          if (data.male?.length) setMaleScreenings(data.male);
+          if (data.female?.length) setFemaleScreenings(data.female);
+        }
+      } catch {
+        // Use defaults silently
+      } finally {
+        setLoadingScreenings(false);
+      }
+    })();
+  }, []);
 
   const screenings =
     gender === 'male'
-      ? [...SHARED_SCREENINGS, ...MALE_SCREENINGS]
-      : [...SHARED_SCREENINGS, ...FEMALE_SCREENINGS];
-
-  const _toggleAnswer = (id) => {
-    setAnswers((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
+      ? [...sharedScreenings, ...maleScreenings]
+      : [...sharedScreenings, ...femaleScreenings];
 
   const handleSubmit = async () => {
     setSaving(true);

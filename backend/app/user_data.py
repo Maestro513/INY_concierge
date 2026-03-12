@@ -135,6 +135,18 @@ class UserDataDB:
                 ON benefits_usage(phone_hash);
             CREATE INDEX IF NOT EXISTS idx_usage_phone_hash_cat
                 ON benefits_usage(phone_hash, category);
+
+            CREATE TABLE IF NOT EXISTS health_screenings (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL DEFAULT '',
+                gender          TEXT,
+                answers_json    TEXT NOT NULL DEFAULT '{}',
+                reminders_json  TEXT NOT NULL DEFAULT '[]',
+                created_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_screenings_phone_hash
+                ON health_screenings(phone_hash);
         """)
         # Add phone_hash column if upgrading from old schema
         try:
@@ -359,3 +371,35 @@ class UserDataDB:
             return f"{dt.year}-Q{q}"
         else:  # yearly or anything else
             return str(dt.year)
+
+    # ── Health Screenings ──────────────────────────────────────────────
+
+    def save_health_screenings(self, phone: str, data: dict):
+        """Save a member's screening answers and generated reminders."""
+        import json
+        ph = self._hash_phone(phone)
+        enc_phone = self._encrypt_phone(phone)
+        self._execute(
+            """INSERT INTO health_screenings (phone, phone_hash, gender, answers_json, reminders_json)
+               VALUES (?, ?, ?, ?, ?)""",
+            (enc_phone, ph, data.get("gender", ""),
+             json.dumps(data.get("answers", {})),
+             json.dumps(data.get("reminders", []))),
+        )
+
+    def get_health_screenings(self, phone: str) -> dict | None:
+        """Get most recent screening submission for a member."""
+        import json
+        ph = self._hash_phone(phone)
+        row = self._query_one(
+            "SELECT * FROM health_screenings WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 1",
+            (ph,),
+        )
+        if not row:
+            return None
+        return {
+            "gender": row["gender"],
+            "answers": json.loads(row["answers_json"]),
+            "reminders": json.loads(row["reminders_json"]),
+            "created_at": row["created_at"],
+        }

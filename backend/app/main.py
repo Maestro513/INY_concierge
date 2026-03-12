@@ -2784,3 +2784,35 @@ def get_id_card_data(plan_number: ValidPlanNumber, request: Request, _user: dict
     }
     return _cached_json_response(result, request)
 
+
+# ════════════════════════════════════════════════════════════════════════════
+#  HEALTH SCREENING CONFIG (mobile reads, admin writes)
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.get("/health-screenings/config")
+def get_screening_config(auth: dict = Depends(require_auth)):
+    """Return admin-configured screening questions (or empty so frontend uses defaults)."""
+    config = get_store().get_screening_config()
+    if config:
+        return config
+    return {}
+
+
+@app.post("/health-screenings")
+async def save_health_screenings(request: Request, auth: dict = Depends(require_auth)):
+    """Save a member's screening answers + generate reminders."""
+    body = await request.json()
+    session_id = auth.get("session_id") or auth.get("sub", "")
+    store = get_store()
+    session = store.get_session(session_id, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired.")
+    # Store answers in user data DB
+    try:
+        udb = UserDataDB()
+        phone = session.get("phone", "")
+        udb.save_health_screenings(phone, body)
+    except Exception as e:
+        log.warning("Failed to save health screenings: %s", e)
+    return {"success": True}
+
