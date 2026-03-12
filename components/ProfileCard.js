@@ -326,6 +326,7 @@ export default function ProfileCard({
   onAddReminder,
   drugsData,
   onLogout,
+  onFamilyAccess,
 }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -423,7 +424,7 @@ export default function ProfileCard({
               style={styles.settingsItem}
               onPress={() => {
                 setShowSettingsMenu(false);
-                // TODO: navigate to Family Access screen
+                if (onFamilyAccess) onFamilyAccess();
               }}
               activeOpacity={0.7}
               accessibilityRole="button"

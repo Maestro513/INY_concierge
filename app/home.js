@@ -124,6 +124,10 @@ export default function HomeScreen() {
     router.push('/digital-id');
   };
 
+  const handleFamilyAccess = () => {
+    router.push('/family-access');
+  };
+
   const _handleFindPharmacy = () => {
     router.push('/pharmacy-results');
   };
@@ -426,6 +430,7 @@ export default function HomeScreen() {
           onAddReminder={handleAddReminder}
           drugsData={drugsData}
           onLogout={handleLogout}
+          onFamilyAccess={handleFamilyAccess}
         />
         <MedAdherence
           summary={adherenceSummary}

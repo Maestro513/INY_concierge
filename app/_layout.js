@@ -157,6 +157,10 @@ export default function RootLayout() {
             name="sdoh-screening"
             options={{ animation: 'slide_from_right', gestureEnabled: false }}
           />
+          <Stack.Screen
+            name="family-access"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
         </Stack>
       </SafeAreaProvider>
     </Sentry.ErrorBoundary>
