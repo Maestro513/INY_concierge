@@ -85,6 +85,43 @@ export async function hasNotificationPermission() {
   }
 }
 
+// ── Push token registration ─────────────────────────────────────
+
+/**
+ * Request notification permission and register the Expo push token
+ * with the backend. Call this on login so the server can send push
+ * notifications (benefit updates, refill alerts, etc.) even without
+ * any reminders set.
+ *
+ * Returns the push token string or null.
+ */
+export async function registerPushToken(sessionId, authFetchFn, apiUrl) {
+  if (!notifAvailable()) return null;
+  const granted = await requestNotificationPermissions();
+  if (!granted) return null;
+  try {
+    const { Platform } = require('react-native');
+    const tokenData = await Notifications.getExpoPushTokenAsync({
+      projectId: '0b4b999b-025c-49c5-bd6f-75a82722f4c4',
+    });
+    const token = tokenData.data;
+    if (!token || !sessionId) return token;
+    // Send token to backend
+    await authFetchFn(`${apiUrl}/push-token/${sessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        platform: Platform.OS,
+      }),
+    });
+    return token;
+  } catch (e) {
+    if (__DEV__) console.log('[Notifications] Push token registration failed:', e.message);
+    return null;
+  }
+}
+
 // ── Schedule / Cancel ───────────────────────────────────────────
 
 export async function scheduleReminder(reminder) {

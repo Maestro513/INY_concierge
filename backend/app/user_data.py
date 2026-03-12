@@ -192,6 +192,35 @@ class UserDataDB:
             );
             CREATE INDEX IF NOT EXISTS idx_sdoh_phone_hash
                 ON sdoh_screenings(phone_hash);
+
+            CREATE TABLE IF NOT EXISTS family_access (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone               TEXT NOT NULL,
+                phone_hash          TEXT NOT NULL DEFAULT '',
+                family_phone        TEXT NOT NULL,
+                family_phone_hash   TEXT NOT NULL DEFAULT '',
+                family_name         TEXT NOT NULL DEFAULT '',
+                role                TEXT NOT NULL DEFAULT 'monitor',
+                created_at          TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_family_phone_hash
+                ON family_access(phone_hash);
+            CREATE INDEX IF NOT EXISTS idx_family_member_hash
+                ON family_access(family_phone_hash);
+
+            CREATE TABLE IF NOT EXISTS push_tokens (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL DEFAULT '',
+                token           TEXT NOT NULL,
+                platform        TEXT NOT NULL DEFAULT 'ios',
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_push_phone_hash
+                ON push_tokens(phone_hash);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_push_token_unique
+                ON push_tokens(token);
         """)
         # Add phone_hash column if upgrading from old schema
         try:
@@ -715,3 +744,101 @@ class UserDataDB:
         else:
             row = self._query_one("SELECT COUNT(*) as cnt FROM appointment_requests")
         return row["cnt"] if row else 0
+
+    # ── Family Access ──────────────────────────────────────────────
+
+    def grant_family_access(self, phone: str, family_phone: str,
+                            family_name: str, role: str = "monitor") -> dict:
+        """Grant a family member read-only access. Returns the new record."""
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        enc_family = self._encrypt_phone(family_phone)
+        fph = self._hash_phone(family_phone)
+        # Prevent duplicates
+        existing = self._query_one(
+            "SELECT id FROM family_access WHERE phone_hash = ? AND family_phone_hash = ?",
+            (ph, fph),
+        )
+        if existing:
+            return self.get_family_member(phone, existing["id"])
+        fid = self._execute(
+            """INSERT INTO family_access
+               (phone, phone_hash, family_phone, family_phone_hash, family_name, role)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (enc_phone, ph, enc_family, fph, family_name, role),
+        )
+        row = self._query_one("SELECT * FROM family_access WHERE id = ?", (fid,))
+        if row:
+            row["phone"] = phone
+            row["family_phone"] = family_phone
+        return row
+
+    def get_family_members(self, phone: str) -> list[dict]:
+        """Get all family members granted access by this member."""
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            "SELECT * FROM family_access WHERE phone_hash = ? ORDER BY created_at DESC",
+            (ph,),
+        )
+        for r in rows:
+            r["phone"] = self._decrypt_phone(r["phone"])
+            r["family_phone"] = self._decrypt_phone(r["family_phone"])
+        return rows
+
+    def get_family_member(self, phone: str, access_id: int) -> dict | None:
+        """Get a single family access record."""
+        ph = self._hash_phone(phone)
+        row = self._query_one(
+            "SELECT * FROM family_access WHERE id = ? AND phone_hash = ?",
+            (access_id, ph),
+        )
+        if row:
+            row["phone"] = self._decrypt_phone(row["phone"])
+            row["family_phone"] = self._decrypt_phone(row["family_phone"])
+        return row
+
+    def revoke_family_access(self, phone: str, access_id: int) -> bool:
+        """Revoke a family member's access. Returns True if deleted."""
+        ph = self._hash_phone(phone)
+        count = self._execute_delete(
+            "DELETE FROM family_access WHERE id = ? AND phone_hash = ?",
+            (access_id, ph),
+        )
+        return count > 0
+
+    # ── Push Tokens ────────────────────────────────────────────────
+
+    def upsert_push_token(self, phone: str, token: str, platform: str = "ios") -> dict:
+        """Store or update a push token for a member. Upserts by token."""
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        existing = self._query_one("SELECT id FROM push_tokens WHERE token = ?", (token,))
+        if existing:
+            self._execute(
+                "UPDATE push_tokens SET phone = ?, phone_hash = ?, platform = ?, updated_at = datetime('now') WHERE token = ?",
+                (enc_phone, ph, platform, token),
+            )
+            return self._query_one("SELECT * FROM push_tokens WHERE token = ?", (token,))
+        tid = self._execute(
+            "INSERT INTO push_tokens (phone, phone_hash, token, platform) VALUES (?, ?, ?, ?)",
+            (enc_phone, ph, token, platform),
+        )
+        return self._query_one("SELECT * FROM push_tokens WHERE id = ?", (tid,))
+
+    def get_push_tokens(self, phone: str) -> list[dict]:
+        """Get all push tokens for a member."""
+        ph = self._hash_phone(phone)
+        return self._query_all(
+            "SELECT * FROM push_tokens WHERE phone_hash = ? ORDER BY updated_at DESC",
+            (ph,),
+        )
+
+    def get_all_push_tokens(self) -> list[dict]:
+        """Get all push tokens (for broadcast notifications)."""
+        rows = self._query_all("SELECT token, platform FROM push_tokens ORDER BY updated_at DESC")
+        return rows
+
+    def delete_push_token(self, token: str) -> bool:
+        """Remove a push token (e.g. on logout or token expiry)."""
+        count = self._execute_delete("DELETE FROM push_tokens WHERE token = ?", (token,))
+        return count > 0

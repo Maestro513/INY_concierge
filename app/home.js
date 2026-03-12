@@ -20,6 +20,7 @@ import {
   cacheUsageSummary,
   getCachedUsageSummary,
   requestNotificationPermissions,
+  registerPushToken,
 } from '../utils/notifications';
 
 export default function HomeScreen() {
@@ -86,6 +87,8 @@ export default function HomeScreen() {
       loadUsageSummary();
       loadAdherenceData();
       loadMTMCheck();
+      // Register for push notifications on every login
+      registerPushToken(sessionId, authFetch, API_URL);
     }
   }, [planNumber]);
 
@@ -122,6 +125,10 @@ export default function HomeScreen() {
 
   const handleViewIDCard = () => {
     router.push('/digital-id');
+  };
+
+  const handleFamilyAccess = () => {
+    router.push('/family-access');
   };
 
   const _handleFindPharmacy = () => {
@@ -426,6 +433,7 @@ export default function HomeScreen() {
           onAddReminder={handleAddReminder}
           drugsData={drugsData}
           onLogout={handleLogout}
+          onFamilyAccess={handleFamilyAccess}
         />
         <MedAdherence
           summary={adherenceSummary}

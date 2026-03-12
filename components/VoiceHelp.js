@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   ActivityIndicator,
+  Vibration,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
@@ -19,9 +20,12 @@ import * as Speech from 'expo-speech';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, RADII, SHADOWS, MOTION } from '../constants/theme';
 import { CALL_NUMBER } from '../constants/data';
 import { API_URL, authFetch } from '../constants/api';
+
+const ONBOARDING_KEY = 'iny_voice_onboarding_seen';
 
 // --- Pharmacy search detection ---
 
@@ -804,9 +808,11 @@ export default function VoiceHelp({
   const [typedText, setTypedText] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const pulse = useRef(new Animated.Value(1)).current;
   const pulseOp = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
+  const onboardFade = useRef(new Animated.Value(0)).current;
 
   // Refs to avoid stale closures in speech recognition event handlers
   const modeRef = useRef(mode);
@@ -827,6 +833,23 @@ export default function VoiceHelp({
       hideSub.remove();
     };
   }, []);
+
+  // --- First-launch onboarding tooltip ---
+  useEffect(() => {
+    AsyncStorage.getItem(ONBOARDING_KEY).then((val) => {
+      if (!val) {
+        setShowOnboarding(true);
+        Animated.timing(onboardFade, { toValue: 1, duration: 600, delay: 800, useNativeDriver: true }).start();
+      }
+    });
+  }, []);
+
+  const dismissOnboarding = () => {
+    Animated.timing(onboardFade, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+      setShowOnboarding(false);
+      AsyncStorage.setItem(ONBOARDING_KEY, '1').catch(() => {});
+    });
+  };
 
   // --- Track speech ending ---
   useEffect(() => {
@@ -1037,6 +1060,8 @@ export default function VoiceHelp({
   const stopListening = () => ExpoSpeechRecognitionModule.stop();
 
   const handleMic = () => {
+    Vibration.vibrate(50);
+    if (showOnboarding) dismissOnboarding();
     if (mode === 'listening') stopListening();
     else startListening();
   };
@@ -1185,7 +1210,7 @@ export default function VoiceHelp({
           </View>
           <Text style={s.status}>
             {mode === 'idle'
-              ? 'Tap the mic to ask about plan benefits, find doctors, book transportation and set reminders'
+              ? 'Just say what you need — I can look up benefits, find doctors, set medication reminders, and more'
               : mode === 'listening'
                 ? 'Listening...'
                 : mode === 'thinking'
@@ -1193,6 +1218,28 @@ export default function VoiceHelp({
                   : 'Tap mic to ask another'}
           </Text>
         </View>
+      )}
+
+      {/* First-launch onboarding tooltip */}
+      {showOnboarding && mode === 'idle' && (
+        <Animated.View style={[s.onboardOverlay, { opacity: onboardFade }]}>
+          <TouchableOpacity
+            style={s.onboardCard}
+            onPress={dismissOnboarding}
+            activeOpacity={0.95}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss voice help tip"
+          >
+            <View style={s.onboardArrow} />
+            <Ionicons name="mic" size={22} color={COLORS.accent} style={{ marginBottom: 6 }} />
+            <Text style={s.onboardTitle}>Tap here to talk to me!</Text>
+            <Text style={s.onboardBody}>Try saying:</Text>
+            <Text style={s.onboardExample}>"What's my copay for a specialist?"</Text>
+            <Text style={s.onboardExample}>"Find me a dentist nearby"</Text>
+            <Text style={s.onboardExample}>"Remind me to take my medicine at 8 AM"</Text>
+            <Text style={s.onboardDismiss}>Tap to dismiss</Text>
+          </TouchableOpacity>
+        </Animated.View>
       )}
 
       {/* Bottom bar: text input left, Need help? + Call Us right */}
@@ -1302,7 +1349,7 @@ const s = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: COLORS.accent,
   },
-  aText: { fontSize: 16, color: COLORS.text, lineHeight: 25, fontWeight: '500' },
+  aText: { fontSize: 18, color: COLORS.text, lineHeight: 28, fontWeight: '500' },
   answerActions: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -1324,11 +1371,11 @@ const s = StyleSheet.create({
 
   // Listening
   listenText: {
-    fontSize: 20,
+    fontSize: 26,
     color: '#fff',
     fontWeight: '600',
     textAlign: 'center',
-    lineHeight: 30,
+    lineHeight: 36,
   },
 
   // Speaker button
@@ -1421,4 +1468,66 @@ const s = StyleSheet.create({
     paddingVertical: 12,
   },
   callText: { color: COLORS.accent, fontSize: 17, fontWeight: '700' },
+
+  // Onboarding tooltip
+  onboardOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 140,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  onboardCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADII.lg,
+    paddingHorizontal: 22,
+    paddingVertical: 18,
+    width: 280,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  onboardArrow: {
+    position: 'absolute',
+    bottom: -10,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 12,
+    borderRightWidth: 12,
+    borderTopWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#FFFFFF',
+  },
+  onboardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  onboardBody: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: 6,
+  },
+  onboardExample: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.accent,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginBottom: 3,
+  },
+  onboardDismiss: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: COLORS.textTertiary,
+    marginTop: 10,
+  },
 });

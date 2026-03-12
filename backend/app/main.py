@@ -2569,6 +2569,104 @@ def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FAMILY ACCESS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class FamilyAccessGrant(BaseModel):
+    family_phone: str = Field(..., min_length=10, max_length=10)
+    family_name: str = Field(..., min_length=1, max_length=100)
+    role: str = Field("monitor", max_length=20)
+
+
+@app.get("/family-access/{session_id}")
+def list_family_access(session_id: str, _user: dict = Depends(get_current_user)):
+    """List all family members with access."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    members = db.get_family_members(phone)
+    # Strip full phone from response — only return last 4
+    for m in members:
+        m["family_phone_display"] = m["family_phone"][-4:]
+        del m["phone"]
+        del m["family_phone"]
+    return {"family_members": members}
+
+
+@app.post("/family-access/{session_id}")
+def grant_family_access(session_id: str, req: FamilyAccessGrant,
+                        _user: dict = Depends(get_current_user)):
+    """Grant read-only access to a family member."""
+    phone = _session_phone(session_id, _user)
+    # Cannot grant access to yourself
+    if req.family_phone == phone:
+        raise HTTPException(status_code=400, detail="Cannot grant access to yourself")
+    db = get_user_db()
+    record = db.grant_family_access(
+        phone=phone,
+        family_phone=req.family_phone,
+        family_name=req.family_name,
+        role=req.role,
+    )
+    get_audit_log().record(
+        actor=phone, action="create", resource="family_access",
+        detail=f"granted:{req.family_phone[-4:]}",
+    )
+    record["family_phone_display"] = req.family_phone[-4:]
+    record.pop("phone", None)
+    record.pop("family_phone", None)
+    return {"family_member": record}
+
+
+@app.delete("/family-access/{session_id}/{access_id}")
+def revoke_family_access(session_id: str, access_id: int,
+                         _user: dict = Depends(get_current_user)):
+    """Revoke a family member's access."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    deleted = db.revoke_family_access(phone, access_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Family access record not found")
+    get_audit_log().record(
+        actor=phone, action="delete", resource="family_access",
+        resource_id=str(access_id), detail="access_revoked",
+    )
+    return {"revoked": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUSH NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PushTokenRegister(BaseModel):
+    token: str = Field(..., min_length=1, max_length=500)
+    platform: str = Field("ios", max_length=20)
+
+
+@app.post("/push-token/{session_id}")
+def register_push_token(session_id: str, req: PushTokenRegister,
+                        _user: dict = Depends(get_current_user)):
+    """Register an Expo push token for this member."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    db.upsert_push_token(phone=phone, token=req.token, platform=req.platform)
+    get_audit_log().record(
+        actor=phone, action="create", resource="push_token",
+        detail=f"platform:{req.platform}",
+    )
+    return {"registered": True}
+
+
+@app.delete("/push-token/{session_id}")
+def unregister_push_token(session_id: str, req: PushTokenRegister,
+                          _user: dict = Depends(get_current_user)):
+    """Remove a push token (e.g. on logout)."""
+    _session_phone(session_id, _user)
+    db = get_user_db()
+    db.delete_push_token(req.token)
+    return {"unregistered": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MEDICATION ADHERENCE TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 
