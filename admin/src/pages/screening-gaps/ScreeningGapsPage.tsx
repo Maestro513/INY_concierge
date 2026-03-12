@@ -219,7 +219,7 @@ export default function ScreeningGapsPage() {
                 <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} stroke="#7A7585" />
                 <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} stroke="#7A7585" width={130} />
                 <Tooltip
-                  formatter={(value: number) => `${value}%`}
+                  formatter={(value) => `${value}%`}
                   contentStyle={{
                     borderRadius: '10px', border: '1px solid #E4E2E8',
                     boxShadow: '0 4px 12px rgba(123,63,191,0.08)',

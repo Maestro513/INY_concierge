@@ -124,7 +124,7 @@ export default function SDoHReportPage() {
     );
   }
 
-  const { total_screened, total_with_flags, flag_summary, members, benefit_recommendations } = data;
+  const { total_screened, total_with_flags, flag_summary, members } = data;
   const flaggedPct = total_screened > 0 ? Math.round((total_with_flags / total_screened) * 100) : 0;
 
   const chartData = flag_summary.map((f) => ({
@@ -219,9 +219,7 @@ export default function SDoHReportPage() {
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#7A7585" />
                 <YAxis tick={{ fontSize: 11 }} stroke="#7A7585" domain={[0, 100]} />
                 <Tooltip
-                  formatter={(value: number, name: string) =>
-                    name === 'pct' ? `${value}%` : value
-                  }
+                  formatter={(value) => `${value}%`}
                   contentStyle={{
                     borderRadius: '10px', border: '1px solid #E4E2E8',
                     boxShadow: '0 4px 12px rgba(123,63,191,0.08)',
