@@ -153,6 +153,10 @@ export default function RootLayout() {
             name="pharmacy-results"
             options={{ animation: 'slide_from_right', gestureEnabled: true }}
           />
+          <Stack.Screen
+            name="sdoh-screening"
+            options={{ animation: 'slide_from_right', gestureEnabled: false }}
+          />
         </Stack>
       </SafeAreaProvider>
     </Sentry.ErrorBoundary>

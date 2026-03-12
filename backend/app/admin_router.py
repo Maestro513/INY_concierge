@@ -799,6 +799,209 @@ async def set_screening_config(body: ScreeningConfigRequest,
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  HEALTH SCREENING GAP REPORT (admin views screening completion data)
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/screening-gap-report")
+async def screening_gap_report(payload: dict = Depends(require_admin)):
+    """
+    Get aggregated screening gap data for all members who completed the checklist.
+    Shows per-screening completion rates and identifies members with gaps.
+    """
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    results = udb.get_all_screening_results()
+
+    if not results:
+        return {
+            "total_members": 0,
+            "screenings": [],
+            "members_with_gaps": [],
+            "summary": {"completed_rate": 0, "avg_gaps_per_member": 0,
+                        "members_all_complete": 0, "members_with_gaps_count": 0},
+        }
+
+    # Get screening config for labels
+    config = _get_store().get_screening_config() or {}
+    shared = config.get("shared", [])
+    male_screenings = config.get("male", [])
+    female_screenings = config.get("female", [])
+
+    # Fall back to default screening IDs if no admin config
+    if not shared:
+        shared = [
+            {"id": "awv", "label": "Annual Wellness Visit"},
+            {"id": "flu", "label": "Flu Shot"},
+            {"id": "colonoscopy", "label": "Colonoscopy"},
+            {"id": "cholesterol", "label": "Cholesterol / Blood Work"},
+            {"id": "a1c", "label": "Diabetes Screening (A1C)"},
+            {"id": "fall_risk", "label": "Fall Risk Assessment"},
+        ]
+    if not male_screenings:
+        male_screenings = [{"id": "prostate", "label": "Prostate (PSA) Screening"}]
+    if not female_screenings:
+        female_screenings = [
+            {"id": "mammogram", "label": "Mammogram"},
+            {"id": "bone_density", "label": "Bone Density Scan (DEXA)"},
+        ]
+
+    # Aggregate per-screening stats
+    screening_stats = {}
+    members_with_gaps = []
+
+    for member in results:
+        answers = member.get("answers", {})
+        gender = member.get("gender", "")
+
+        applicable = list(shared)
+        if gender == "male":
+            applicable += male_screenings
+        elif gender == "female":
+            applicable += female_screenings
+
+        gap_count = 0
+        gap_labels = []
+        for screening in applicable:
+            sid = screening.get("id", "") if isinstance(screening, dict) else ""
+            label = screening.get("label", sid) if isinstance(screening, dict) else str(screening)
+            if sid not in screening_stats:
+                screening_stats[sid] = {"id": sid, "label": label, "yes": 0, "no": 0, "total": 0}
+            screening_stats[sid]["total"] += 1
+            if answers.get(sid) is True:
+                screening_stats[sid]["yes"] += 1
+            else:
+                screening_stats[sid]["no"] += 1
+                gap_count += 1
+                gap_labels.append(label)
+
+        if gap_count > 0:
+            members_with_gaps.append({
+                "phone_last4": member.get("phone_last4", "****"),
+                "gender": gender,
+                "gap_count": gap_count,
+                "gaps": gap_labels,
+                "screened_at": member.get("created_at", ""),
+            })
+
+    screenings_list = []
+    for _sid, stats in screening_stats.items():
+        pct = round((stats["yes"] / stats["total"]) * 100, 1) if stats["total"] > 0 else 0
+        screenings_list.append({
+            "id": stats["id"],
+            "label": stats["label"],
+            "completed": stats["yes"],
+            "not_completed": stats["no"],
+            "total": stats["total"],
+            "completion_pct": pct,
+        })
+    screenings_list.sort(key=lambda x: x["completion_pct"])
+
+    members_with_gaps.sort(key=lambda x: -x["gap_count"])
+
+    total_members = len(results)
+    total_gaps = sum(m["gap_count"] for m in members_with_gaps)
+    avg_gaps = round(total_gaps / total_members, 1) if total_members > 0 else 0
+    members_all_done = total_members - len(members_with_gaps)
+    completed_rate = round((members_all_done / total_members) * 100, 1) if total_members > 0 else 0
+
+    return {
+        "total_members": total_members,
+        "screenings": screenings_list,
+        "members_with_gaps": members_with_gaps[:100],
+        "summary": {
+            "completed_rate": completed_rate,
+            "avg_gaps_per_member": avg_gaps,
+            "members_all_complete": members_all_done,
+            "members_with_gaps_count": len(members_with_gaps),
+        },
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  SDOH REPORT (admin views social determinants flags for outreach)
+# ════════════════════════════════════════════════════════════════════════════
+
+SDOH_BENEFIT_MAP = {
+    "transportation": {
+        "label": "Transportation Barrier",
+        "benefit": "Non-Emergency Medical Transportation (NEMT)",
+        "action": "Help member schedule free rides to appointments",
+    },
+    "food_insecurity": {
+        "label": "Food Insecurity",
+        "benefit": "Grocery/Meal Allowance (OTC Card)",
+        "action": "Walk member through OTC grocery benefit usage",
+    },
+    "social_isolation": {
+        "label": "Social Isolation",
+        "benefit": "SilverSneakers / Community Programs",
+        "action": "Connect member with fitness & social programs",
+    },
+    "housing_stability": {
+        "label": "Housing Instability",
+        "benefit": "Case Management / Utility Assistance",
+        "action": "Refer to plan case manager for housing support",
+    },
+}
+
+
+@router.get("/sdoh-report")
+async def sdoh_report(payload: dict = Depends(require_admin)):
+    """Get aggregated SDoH screening data for all members."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    results = udb.get_all_sdoh_results()
+
+    if not results:
+        return {
+            "total_screened": 0,
+            "flag_summary": [],
+            "members": [],
+            "benefit_recommendations": list(SDOH_BENEFIT_MAP.values()),
+        }
+
+    # Aggregate flag counts
+    flag_counts = {
+        "transportation": 0,
+        "food_insecurity": 0,
+        "social_isolation": 0,
+        "housing_stability": 0,
+    }
+    for m in results:
+        for flag in m["flags"]:
+            if flag in flag_counts:
+                flag_counts[flag] += 1
+
+    total = len(results)
+    flag_summary = []
+    for key, count in flag_counts.items():
+        info = SDOH_BENEFIT_MAP.get(key, {})
+        pct = round((count / total) * 100, 1) if total > 0 else 0
+        flag_summary.append({
+            "flag": key,
+            "label": info.get("label", key),
+            "count": count,
+            "total": total,
+            "pct": pct,
+            "benefit": info.get("benefit", ""),
+            "action": info.get("action", ""),
+        })
+    flag_summary.sort(key=lambda x: -x["count"])
+
+    # Members with any flags, sorted by most flags
+    flagged_members = [m for m in results if m["flag_count"] > 0]
+    flagged_members.sort(key=lambda x: -x["flag_count"])
+
+    return {
+        "total_screened": total,
+        "total_with_flags": len(flagged_members),
+        "flag_summary": flag_summary,
+        "members": flagged_members[:100],
+        "benefit_recommendations": list(SDOH_BENEFIT_MAP.values()),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  APPOINTMENT REQUESTS (agent views and manages member requests)
 # ════════════════════════════════════════════════════════════════════════════
 
