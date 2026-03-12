@@ -145,7 +145,7 @@ export default function HealthScreeningScreen() {
       <SafeAreaView style={s.safe}>
         <View style={s.genderContainer}>
           <View style={s.iconWrap}>
-            <Ionicons name="heart-circle" size={56} color={COLORS.accent} />
+            <Ionicons name="heart-circle" size={72} color={COLORS.accent} />
           </View>
           <Text style={s.genderTitle}>Preventive Health Check</Text>
           <Text style={s.genderSubtitle}>
@@ -160,7 +160,7 @@ export default function HealthScreeningScreen() {
             }}
             activeOpacity={0.7}
           >
-            <Ionicons name="man" size={24} color={COLORS.accent} />
+            <Ionicons name="man" size={32} color={COLORS.accent} />
             <Text style={s.genderBtnText}>Male</Text>
           </TouchableOpacity>
 
@@ -172,7 +172,7 @@ export default function HealthScreeningScreen() {
             }}
             activeOpacity={0.7}
           >
-            <Ionicons name="woman" size={24} color={COLORS.accent} />
+            <Ionicons name="woman" size={32} color={COLORS.accent} />
             <Text style={s.genderBtnText}>Female</Text>
           </TouchableOpacity>
 
@@ -271,32 +271,38 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
-  iconWrap: { marginBottom: 16 },
-  genderTitle: { ...TYPE.h1, color: COLORS.text, textAlign: 'center', marginBottom: 8 },
+  iconWrap: { marginBottom: 20 },
+  genderTitle: {
+    ...TYPE.h1,
+    fontSize: 28,
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
   genderSubtitle: {
-    fontSize: 15,
+    fontSize: 18,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 32,
+    lineHeight: 26,
+    marginBottom: 36,
   },
   genderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
     width: '100%',
     backgroundColor: COLORS.white,
     borderRadius: RADII.md,
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    marginBottom: 12,
+    paddingVertical: 22,
+    paddingHorizontal: 28,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     ...SHADOWS.card,
   },
-  genderBtnText: { fontSize: 17, fontWeight: '600', color: COLORS.text },
-  skipBtn: { marginTop: 20 },
-  skipText: { fontSize: 14, color: COLORS.textTertiary, fontWeight: '500' },
+  genderBtnText: { fontSize: 22, fontWeight: '600', color: COLORS.text },
+  skipBtn: { marginTop: 24 },
+  skipText: { fontSize: 17, color: COLORS.textTertiary, fontWeight: '500' },
 
   // Header
   header: {
@@ -307,18 +313,18 @@ const s = StyleSheet.create({
     paddingVertical: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { ...TYPE.h2, color: COLORS.text },
+  headerTitle: { ...TYPE.h2, fontSize: 22, color: COLORS.text },
 
   // Instructions
   instructions: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.text,
     paddingHorizontal: 20,
     marginBottom: 16,
-    lineHeight: 24,
+    lineHeight: 26,
   },
-  instructionsSub: { fontSize: 14, fontWeight: '400', color: COLORS.textSecondary },
+  instructionsSub: { fontSize: 16, fontWeight: '400', color: COLORS.textSecondary },
 
   // List
   list: { flex: 1 },
@@ -337,20 +343,20 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
   },
   screeningInfo: { flex: 1, marginRight: 12 },
-  screeningLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
-  screeningTime: { fontSize: 13, color: COLORS.textTertiary },
+  screeningLabel: { fontSize: 17, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
+  screeningTime: { fontSize: 15, color: COLORS.textTertiary },
 
   // Yes/No buttons
   btnRow: { flexDirection: 'row', gap: 8 },
   yesNoBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: RADII.full,
     borderWidth: 1.5,
     borderColor: COLORS.border,
     backgroundColor: COLORS.bg,
   },
-  yesNoText: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
+  yesNoText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
   yesActive: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
   yesNoTextActive: { color: '#2E7D32' },
   noActive: { backgroundColor: '#FFF3E0', borderColor: '#FF9800' },
@@ -380,5 +386,5 @@ const s = StyleSheet.create({
     ...SHADOWS.button,
   },
   submitBtnDisabled: { opacity: 0.6 },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  submitText: { color: '#fff', fontSize: 18, fontWeight: '700' },
 });
