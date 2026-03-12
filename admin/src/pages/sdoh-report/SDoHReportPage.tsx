@@ -73,7 +73,6 @@ export default function SDoHReportPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setLoading(true);
     api.get('/api/admin/sdoh-report')
       .then((res) => {
         setData(res.data);

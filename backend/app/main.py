@@ -2929,7 +2929,7 @@ async def save_sdoh_screening(body: SDoHScreening, auth: dict = Depends(require_
         raise HTTPException(status_code=401, detail="Session expired.")
     phone = session.get("phone", "")
     udb = get_user_db()
-    result = udb.save_sdoh_screening(phone, body.model_dump())
+    udb.save_sdoh_screening(phone, body.model_dump())
     get_audit_log().record(
         actor=phone, action="create", resource="sdoh_screening",
         detail="sdoh_submit",

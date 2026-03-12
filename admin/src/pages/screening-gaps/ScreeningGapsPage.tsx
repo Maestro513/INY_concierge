@@ -74,7 +74,6 @@ export default function ScreeningGapsPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setLoading(true);
     api.get('/api/admin/screening-gap-report')
       .then((res) => {
         setData(res.data);
