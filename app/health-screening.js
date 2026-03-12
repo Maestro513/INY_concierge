@@ -40,6 +40,12 @@ const DEFAULT_SHARED = [
     timeframe: 'in the past year',
     frequency: 'yearly',
   },
+  {
+    id: 'fall_risk',
+    label: 'Fall Risk Assessment',
+    timeframe: 'in the past year',
+    frequency: 'yearly',
+  },
 ];
 
 const DEFAULT_MALE = [
