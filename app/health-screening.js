@@ -313,18 +313,18 @@ const s = StyleSheet.create({
     paddingVertical: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { ...TYPE.h2, color: COLORS.text },
+  headerTitle: { ...TYPE.h2, fontSize: 22, color: COLORS.text },
 
   // Instructions
   instructions: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.text,
     paddingHorizontal: 20,
     marginBottom: 16,
-    lineHeight: 24,
+    lineHeight: 26,
   },
-  instructionsSub: { fontSize: 14, fontWeight: '400', color: COLORS.textSecondary },
+  instructionsSub: { fontSize: 16, fontWeight: '400', color: COLORS.textSecondary },
 
   // List
   list: { flex: 1 },
@@ -343,20 +343,20 @@ const s = StyleSheet.create({
     justifyContent: 'space-between',
   },
   screeningInfo: { flex: 1, marginRight: 12 },
-  screeningLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
-  screeningTime: { fontSize: 13, color: COLORS.textTertiary },
+  screeningLabel: { fontSize: 17, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
+  screeningTime: { fontSize: 15, color: COLORS.textTertiary },
 
   // Yes/No buttons
   btnRow: { flexDirection: 'row', gap: 8 },
   yesNoBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: RADII.full,
     borderWidth: 1.5,
     borderColor: COLORS.border,
     backgroundColor: COLORS.bg,
   },
-  yesNoText: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
+  yesNoText: { fontSize: 16, fontWeight: '600', color: COLORS.textSecondary },
   yesActive: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
   yesNoTextActive: { color: '#2E7D32' },
   noActive: { backgroundColor: '#FFF3E0', borderColor: '#FF9800' },
@@ -386,5 +386,5 @@ const s = StyleSheet.create({
     ...SHADOWS.button,
   },
   submitBtnDisabled: { opacity: 0.6 },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  submitText: { color: '#fff', fontSize: 18, fontWeight: '700' },
 });
