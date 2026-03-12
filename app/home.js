@@ -20,6 +20,7 @@ import {
   cacheUsageSummary,
   getCachedUsageSummary,
   requestNotificationPermissions,
+  registerPushToken,
 } from '../utils/notifications';
 
 export default function HomeScreen() {
@@ -86,6 +87,8 @@ export default function HomeScreen() {
       loadUsageSummary();
       loadAdherenceData();
       loadMTMCheck();
+      // Register for push notifications on every login
+      registerPushToken(sessionId, authFetch, API_URL);
     }
   }, [planNumber]);
 

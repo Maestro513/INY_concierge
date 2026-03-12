@@ -207,6 +207,20 @@ class UserDataDB:
                 ON family_access(phone_hash);
             CREATE INDEX IF NOT EXISTS idx_family_member_hash
                 ON family_access(family_phone_hash);
+
+            CREATE TABLE IF NOT EXISTS push_tokens (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL DEFAULT '',
+                token           TEXT NOT NULL,
+                platform        TEXT NOT NULL DEFAULT 'ios',
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_push_phone_hash
+                ON push_tokens(phone_hash);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_push_token_unique
+                ON push_tokens(token);
         """)
         # Add phone_hash column if upgrading from old schema
         try:
@@ -790,4 +804,41 @@ class UserDataDB:
             "DELETE FROM family_access WHERE id = ? AND phone_hash = ?",
             (access_id, ph),
         )
+        return count > 0
+
+    # ── Push Tokens ────────────────────────────────────────────────
+
+    def upsert_push_token(self, phone: str, token: str, platform: str = "ios") -> dict:
+        """Store or update a push token for a member. Upserts by token."""
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        existing = self._query_one("SELECT id FROM push_tokens WHERE token = ?", (token,))
+        if existing:
+            self._execute(
+                "UPDATE push_tokens SET phone = ?, phone_hash = ?, platform = ?, updated_at = datetime('now') WHERE token = ?",
+                (enc_phone, ph, platform, token),
+            )
+            return self._query_one("SELECT * FROM push_tokens WHERE token = ?", (token,))
+        tid = self._execute(
+            "INSERT INTO push_tokens (phone, phone_hash, token, platform) VALUES (?, ?, ?, ?)",
+            (enc_phone, ph, token, platform),
+        )
+        return self._query_one("SELECT * FROM push_tokens WHERE id = ?", (tid,))
+
+    def get_push_tokens(self, phone: str) -> list[dict]:
+        """Get all push tokens for a member."""
+        ph = self._hash_phone(phone)
+        return self._query_all(
+            "SELECT * FROM push_tokens WHERE phone_hash = ? ORDER BY updated_at DESC",
+            (ph,),
+        )
+
+    def get_all_push_tokens(self) -> list[dict]:
+        """Get all push tokens (for broadcast notifications)."""
+        rows = self._query_all("SELECT token, platform FROM push_tokens ORDER BY updated_at DESC")
+        return rows
+
+    def delete_push_token(self, token: str) -> bool:
+        """Remove a push token (e.g. on logout or token expiry)."""
+        count = self._execute_delete("DELETE FROM push_tokens WHERE token = ?", (token,))
         return count > 0

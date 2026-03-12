@@ -2634,6 +2634,39 @@ def revoke_family_access(session_id: str, access_id: int,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PUSH NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PushTokenRegister(BaseModel):
+    token: str = Field(..., min_length=1, max_length=500)
+    platform: str = Field("ios", max_length=20)
+
+
+@app.post("/push-token/{session_id}")
+def register_push_token(session_id: str, req: PushTokenRegister,
+                        _user: dict = Depends(get_current_user)):
+    """Register an Expo push token for this member."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    db.upsert_push_token(phone=phone, token=req.token, platform=req.platform)
+    get_audit_log().record(
+        actor=phone, action="create", resource="push_token",
+        detail=f"platform:{req.platform}",
+    )
+    return {"registered": True}
+
+
+@app.delete("/push-token/{session_id}")
+def unregister_push_token(session_id: str, req: PushTokenRegister,
+                          _user: dict = Depends(get_current_user)):
+    """Remove a push token (e.g. on logout)."""
+    _session_phone(session_id, _user)
+    db = get_user_db()
+    db.delete_push_token(req.token)
+    return {"unregistered": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MEDICATION ADHERENCE TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 
