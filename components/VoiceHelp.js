@@ -49,6 +49,70 @@ function detectPharmacySearch(text) {
   return PHARMACY_TRIGGERS.some((t) => lower.includes(t));
 }
 
+// --- Appointment request detection ---
+
+const APPOINTMENT_TRIGGERS = [
+  'make an appointment',
+  'schedule an appointment',
+  'book an appointment',
+  'set up an appointment',
+  'set an appointment',
+  'need an appointment',
+  'want an appointment',
+  'schedule a visit',
+  'book a visit',
+  'make a visit',
+  'see my doctor',
+  'see dr',
+  'visit dr',
+  'appointment with dr',
+  'appointment with doctor',
+  'schedule with dr',
+  'schedule with doctor',
+  'book with dr',
+  'book with doctor',
+];
+
+function detectAppointmentRequest(text) {
+  const lower = text.toLowerCase();
+  return APPOINTMENT_TRIGGERS.some((t) => lower.includes(t));
+}
+
+function extractDoctorName(text) {
+  const lower = text.toLowerCase();
+  // Match "Dr. Smith", "Dr Smith", "Doctor Smith", "doctor johnson"
+  const drMatch = text.match(/\b(?:dr\.?\s+|doctor\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  if (drMatch) return 'Dr. ' + drMatch[1];
+  // Check for "my doctor" / "my pcp" — no specific name
+  if (lower.includes('my doctor') || lower.includes('my pcp') || lower.includes('my physician'))
+    return 'Primary Care Doctor';
+  return null;
+}
+
+function extractAppointmentReason(text) {
+  const lower = text.toLowerCase();
+  const reasons = [
+    'check up',
+    'checkup',
+    'follow up',
+    'follow-up',
+    'annual visit',
+    'physical',
+    'sick',
+    'pain',
+    'refill',
+    'prescription',
+    'lab work',
+    'blood work',
+    'test results',
+    'screening',
+  ];
+  for (const r of reasons) {
+    if (lower.includes(r)) return r;
+  }
+  return '';
+}
+
 // --- Doctor search keywords and specialty extraction ---
 
 const DOCTOR_TRIGGERS = [
@@ -727,6 +791,7 @@ export default function VoiceHelp({
   planName,
   zipCode,
   sessionId,
+  memberName,
   onReminderCreated,
   onUsageLogged,
 }) {
@@ -859,6 +924,41 @@ export default function VoiceHelp({
           },
         });
       }, 800);
+      return;
+    }
+
+    // Appointment request (check before doctor search)
+    if (detectAppointmentRequest(q)) {
+      const drName = extractDoctorName(q) || 'Doctor';
+      const reason = extractAppointmentReason(q);
+      setMode('thinking');
+      try {
+        const res = await authFetch(`${API_URL}/appointment-request`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            doctor_name: drName,
+            member_name: memberName || '',
+            reason,
+          }),
+        });
+        if (res.ok) {
+          const msg = `I've submitted your appointment request with ${drName}. Our team will call you to confirm the details.`;
+          setMode('answer');
+          setAnswer(msg);
+          speakResponse(msg);
+          setIsSpeaking(true);
+        } else {
+          throw new Error('Request failed');
+        }
+      } catch {
+        const msg =
+          "I wasn't able to submit your appointment request right now. Please try again or call us for help.";
+        setMode('answer');
+        setAnswer(msg);
+        speakResponse(msg);
+        setIsSpeaking(true);
+      }
       return;
     }
 

@@ -147,6 +147,23 @@ class UserDataDB:
             );
             CREATE INDEX IF NOT EXISTS idx_screenings_phone_hash
                 ON health_screenings(phone_hash);
+
+            CREATE TABLE IF NOT EXISTS appointment_requests (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL DEFAULT '',
+                member_name     TEXT NOT NULL DEFAULT '',
+                doctor_name     TEXT NOT NULL DEFAULT '',
+                reason          TEXT DEFAULT '',
+                status          TEXT NOT NULL DEFAULT 'pending',
+                agent_notes     TEXT DEFAULT '',
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_appt_phone_hash
+                ON appointment_requests(phone_hash);
+            CREATE INDEX IF NOT EXISTS idx_appt_status
+                ON appointment_requests(status);
         """)
         # Add phone_hash column if upgrading from old schema
         try:
@@ -403,3 +420,78 @@ class UserDataDB:
             "reminders": json.loads(row["reminders_json"]),
             "created_at": row["created_at"],
         }
+
+    # ── Appointment Requests ───────────────────────────────────────────
+
+    def create_appointment_request(self, phone: str, member_name: str,
+                                   doctor_name: str, reason: str = "") -> int:
+        """Create a new appointment request and return its ID."""
+        ph = self._hash_phone(phone)
+        enc_phone = self._encrypt_phone(phone)
+        return self._execute(
+            """INSERT INTO appointment_requests
+               (phone, phone_hash, member_name, doctor_name, reason)
+               VALUES (?, ?, ?, ?, ?)""",
+            (enc_phone, ph, member_name, doctor_name, reason),
+        )
+
+    def list_appointment_requests(self, status: str = None,
+                                  limit: int = 50, offset: int = 0) -> list[dict]:
+        """List appointment requests, optionally filtered by status."""
+        if status:
+            rows = self._query_all(
+                """SELECT id, phone, member_name, doctor_name, reason, status,
+                          agent_notes, created_at, updated_at
+                   FROM appointment_requests WHERE status = ?
+                   ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+                (status, limit, offset),
+            )
+        else:
+            rows = self._query_all(
+                """SELECT id, phone, member_name, doctor_name, reason, status,
+                          agent_notes, created_at, updated_at
+                   FROM appointment_requests
+                   ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+                (limit, offset),
+            )
+        # Decrypt phone for admin display
+        for r in rows:
+            r["phone"] = self._decrypt_phone(r["phone"])
+        return rows
+
+    def update_appointment_request(self, request_id: int, status: str = None,
+                                   agent_notes: str = None) -> dict | None:
+        """Update an appointment request status and/or notes."""
+        fields = []
+        params = []
+        if status:
+            fields.append("status = ?")
+            params.append(status)
+        if agent_notes is not None:
+            fields.append("agent_notes = ?")
+            params.append(agent_notes)
+        if not fields:
+            return None
+        fields.append("updated_at = datetime('now')")
+        params.append(request_id)
+        self._execute(
+            f"UPDATE appointment_requests SET {', '.join(fields)} WHERE id = ?",
+            tuple(params),
+        )
+        row = self._query_one("SELECT * FROM appointment_requests WHERE id = ?", (request_id,))
+        if not row:
+            return None
+        row = dict(row)
+        row["phone"] = self._decrypt_phone(row["phone"])
+        return row
+
+    def count_appointment_requests(self, status: str = None) -> int:
+        """Count appointment requests, optionally by status."""
+        if status:
+            row = self._query_one(
+                "SELECT COUNT(*) as cnt FROM appointment_requests WHERE status = ?",
+                (status,),
+            )
+        else:
+            row = self._query_one("SELECT COUNT(*) as cnt FROM appointment_requests")
+        return row["cnt"] if row else 0

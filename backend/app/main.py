@@ -2816,3 +2816,35 @@ async def save_health_screenings(request: Request, auth: dict = Depends(require_
         log.warning("Failed to save health screenings: %s", e)
     return {"success": True}
 
+
+# ════════════════════════════════════════════════════════════════════════════
+#  APPOINTMENT REQUESTS (member creates, admin/agent handles)
+# ════════════════════════════════════════════════════════════════════════════
+
+class AppointmentRequest(BaseModel):
+    doctor_name: str = Field(..., min_length=1, max_length=200)
+    member_name: str = Field("", max_length=200)
+    reason: str = Field("", max_length=500)
+
+
+@app.post("/appointment-request")
+async def create_appointment_request(body: AppointmentRequest,
+                                     auth: dict = Depends(require_auth)):
+    """Member requests a doctor appointment — creates alert for admin/agent."""
+    session_id = auth.get("session_id") or auth.get("sub", "")
+    store = get_store()
+    session = store.get_session(session_id, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired.")
+    phone = session.get("phone", "")
+    udb = UserDataDB()
+    req_id = udb.create_appointment_request(
+        phone=phone,
+        member_name=body.member_name or session.get("first_name", ""),
+        doctor_name=body.doctor_name,
+        reason=body.reason,
+    )
+    log.info("Appointment request #%d created for ***%s — doctor: %s",
+             req_id, phone[-4:], body.doctor_name)
+    return {"success": True, "request_id": req_id}
+

@@ -355,6 +355,7 @@ export default function HomeScreen() {
           planName={planName || ''}
           zipCode={zipCode || ''}
           sessionId={sessionId || ''}
+          memberName={`${firstName || ''} ${lastName || ''}`.trim()}
           onReminderCreated={loadReminders}
           onUsageLogged={loadUsageSummary}
         />

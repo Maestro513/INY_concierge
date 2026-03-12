@@ -796,3 +796,63 @@ async def set_screening_config(body: ScreeningConfigRequest,
     log.info("Admin %s updated screening config: %d shared, %d male, %d female",
              payload.get("sub"), len(config["shared"]), len(config["male"]), len(config["female"]))
     return {"success": True, "config": config}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  APPOINTMENT REQUESTS (agent views and manages member requests)
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/appointment-requests")
+async def list_appointment_requests(
+    status: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 50,
+    payload: dict = Depends(require_admin),
+):
+    """List appointment requests with optional status filter."""
+    from .user_data import UserDataDB
+    per_page = max(1, min(per_page, 200))
+    page = max(1, page)
+    udb = UserDataDB()
+    total = udb.count_appointment_requests(status)
+    requests = udb.list_appointment_requests(
+        status=status, limit=per_page, offset=(page - 1) * per_page,
+    )
+    return {
+        "data": requests,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pending_count": udb.count_appointment_requests("pending"),
+    }
+
+
+class UpdateAppointmentRequest(BaseModel):
+    status: Optional[str] = Field(None, pattern=r"^(pending|in_progress|completed|cancelled)$")
+    agent_notes: Optional[str] = Field(None, max_length=1000)
+
+
+@router.patch("/appointment-requests/{request_id}")
+async def update_appointment_request(
+    request_id: int,
+    body: UpdateAppointmentRequest,
+    request: Request,
+    payload: dict = Depends(require_admin),
+):
+    """Update appointment request status or add agent notes."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    updated = udb.update_appointment_request(
+        request_id, status=body.status, agent_notes=body.agent_notes,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Appointment request not found.")
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="update",
+        resource="appointment_request",
+        resource_id=str(request_id),
+        ip_address=request.client.host if request.client else "",
+        detail=f"status={body.status or 'unchanged'}",
+    )
+    return {"success": True, "request": updated}
