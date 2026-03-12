@@ -7,6 +7,7 @@ import {
   Settings,
   LogOut,
   Shield,
+  HeartPulse,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/admin/members', icon: Users, label: 'Members' },
   { to: '/admin/plans', icon: FileText, label: 'Plans' },
+  { to: '/admin/screening-gaps', icon: HeartPulse, label: 'Screening Gaps' },
   { to: '/admin/system', icon: Activity, label: 'System' },
   { to: '/admin/settings', icon: Settings, label: 'Settings' },
 ];

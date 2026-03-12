@@ -2569,6 +2569,93 @@ def delete_reminder(session_id: str, reminder_id: int, _user: dict = Depends(get
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# MEDICATION ADHERENCE TRACKING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AdherenceLog(BaseModel):
+    reminder_id: int
+    drug_name: str = Field(..., min_length=1, max_length=200)
+    taken: bool = True
+    log_date: Optional[str] = Field(None, max_length=20)
+
+
+@app.post("/adherence/{session_id}")
+def log_adherence(session_id: str, req: AdherenceLog, _user: dict = Depends(get_current_user)):
+    """Log that a member took or missed a medication dose."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    entry = db.log_adherence(
+        phone=phone,
+        reminder_id=req.reminder_id,
+        drug_name=req.drug_name,
+        taken=req.taken,
+        log_date=req.log_date,
+    )
+    get_audit_log().record(
+        actor=phone, action="create", resource="adherence",
+        detail=f"reminder:{req.reminder_id},taken:{req.taken}",
+    )
+    return {"adherence": entry}
+
+
+@app.get("/adherence/{session_id}/summary")
+def adherence_summary(session_id: str, days: int = 30, _user: dict = Depends(get_current_user)):
+    """Get medication adherence summary for the last N days."""
+    phone = _session_phone(session_id, _user)
+    days = max(1, min(days, 365))
+    db = get_user_db()
+    summary = db.get_adherence_summary(phone, days)
+    return {"summary": summary, "days": days}
+
+
+@app.get("/adherence/{session_id}/today")
+def adherence_today(session_id: str, _user: dict = Depends(get_current_user)):
+    """Get today's adherence logs to show which meds have been taken."""
+    from datetime import date as _date
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    logs = db.get_adherence_for_date(phone, _date.today().isoformat())
+    return {"logs": logs, "date": _date.today().isoformat()}
+
+
+@app.get("/refill-alerts/{session_id}")
+def refill_alerts(session_id: str, _user: dict = Depends(get_current_user)):
+    """Get medications due for refill within 3 days."""
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    alerts = db.get_refill_alerts(phone)
+    return {"alerts": alerts}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MTM ELIGIBILITY CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MTM_THRESHOLD = 5  # CMS: members on 5+ medications may qualify
+
+
+@app.get("/mtm-check/{session_id}")
+def mtm_eligibility_check(session_id: str, _user: dict = Depends(get_current_user)):
+    """
+    Check if a member qualifies for Medication Therapy Management.
+    CMS criteria: typically 5+ chronic medications.
+    """
+    phone = _session_phone(session_id, _user)
+    db = get_user_db()
+    med_count = db.get_reminder_count(phone)
+    eligible = med_count >= MTM_THRESHOLD
+    return {
+        "eligible": eligible,
+        "medication_count": med_count,
+        "threshold": MTM_THRESHOLD,
+        "message": (
+            "You may qualify for a free Medication Therapy Management review with your pharmacist. "
+            "This is a covered benefit — ask your plan about scheduling an MTM consultation."
+        ) if eligible else "",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # BENEFITS USAGE TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 

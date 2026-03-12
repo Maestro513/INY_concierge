@@ -799,6 +799,125 @@ async def set_screening_config(body: ScreeningConfigRequest,
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  HEALTH SCREENING GAP REPORT (admin views screening completion data)
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/screening-gap-report")
+async def screening_gap_report(payload: dict = Depends(require_admin)):
+    """
+    Get aggregated screening gap data for all members who completed the checklist.
+    Shows per-screening completion rates and identifies members with gaps.
+    """
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    results = udb.get_all_screening_results()
+
+    if not results:
+        return {
+            "total_members": 0,
+            "screenings": [],
+            "members_with_gaps": [],
+            "summary": {"completed_rate": 0, "avg_gaps_per_member": 0,
+                        "members_all_complete": 0, "members_with_gaps_count": 0},
+        }
+
+    # Get screening config for labels
+    config = _get_store().get_screening_config() or {}
+    shared = config.get("shared", [])
+    male_screenings = config.get("male", [])
+    female_screenings = config.get("female", [])
+
+    # Fall back to default screening IDs if no admin config
+    if not shared:
+        shared = [
+            {"id": "awv", "label": "Annual Wellness Visit"},
+            {"id": "flu", "label": "Flu Shot"},
+            {"id": "colonoscopy", "label": "Colonoscopy"},
+            {"id": "cholesterol", "label": "Cholesterol / Blood Work"},
+            {"id": "a1c", "label": "Diabetes Screening (A1C)"},
+            {"id": "fall_risk", "label": "Fall Risk Assessment"},
+        ]
+    if not male_screenings:
+        male_screenings = [{"id": "prostate", "label": "Prostate (PSA) Screening"}]
+    if not female_screenings:
+        female_screenings = [
+            {"id": "mammogram", "label": "Mammogram"},
+            {"id": "bone_density", "label": "Bone Density Scan (DEXA)"},
+        ]
+
+    # Aggregate per-screening stats
+    screening_stats = {}
+    members_with_gaps = []
+
+    for member in results:
+        answers = member.get("answers", {})
+        gender = member.get("gender", "")
+
+        applicable = list(shared)
+        if gender == "male":
+            applicable += male_screenings
+        elif gender == "female":
+            applicable += female_screenings
+
+        gap_count = 0
+        gap_labels = []
+        for screening in applicable:
+            sid = screening.get("id", "") if isinstance(screening, dict) else ""
+            label = screening.get("label", sid) if isinstance(screening, dict) else str(screening)
+            if sid not in screening_stats:
+                screening_stats[sid] = {"id": sid, "label": label, "yes": 0, "no": 0, "total": 0}
+            screening_stats[sid]["total"] += 1
+            if answers.get(sid) is True:
+                screening_stats[sid]["yes"] += 1
+            else:
+                screening_stats[sid]["no"] += 1
+                gap_count += 1
+                gap_labels.append(label)
+
+        if gap_count > 0:
+            members_with_gaps.append({
+                "phone_last4": member.get("phone_last4", "****"),
+                "gender": gender,
+                "gap_count": gap_count,
+                "gaps": gap_labels,
+                "screened_at": member.get("created_at", ""),
+            })
+
+    screenings_list = []
+    for _sid, stats in screening_stats.items():
+        pct = round((stats["yes"] / stats["total"]) * 100, 1) if stats["total"] > 0 else 0
+        screenings_list.append({
+            "id": stats["id"],
+            "label": stats["label"],
+            "completed": stats["yes"],
+            "not_completed": stats["no"],
+            "total": stats["total"],
+            "completion_pct": pct,
+        })
+    screenings_list.sort(key=lambda x: x["completion_pct"])
+
+    members_with_gaps.sort(key=lambda x: -x["gap_count"])
+
+    total_members = len(results)
+    total_gaps = sum(m["gap_count"] for m in members_with_gaps)
+    avg_gaps = round(total_gaps / total_members, 1) if total_members > 0 else 0
+    members_all_done = total_members - len(members_with_gaps)
+    completed_rate = round((members_all_done / total_members) * 100, 1) if total_members > 0 else 0
+
+    return {
+        "total_members": total_members,
+        "screenings": screenings_list,
+        "members_with_gaps": members_with_gaps[:100],
+        "summary": {
+            "completed_rate": completed_rate,
+            "avg_gaps_per_member": avg_gaps,
+            "members_all_complete": members_all_done,
+            "members_with_gaps_count": len(members_with_gaps),
+        },
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  APPOINTMENT REQUESTS (agent views and manages member requests)
 # ════════════════════════════════════════════════════════════════════════════
 

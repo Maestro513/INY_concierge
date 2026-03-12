@@ -9,6 +9,8 @@ import { getMemberSession, logout } from '../constants/session';
 import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
+import MedAdherence from '../components/MedAdherence';
+import MTMPrompt from '../components/MTMPrompt';
 import {
   syncAllReminders,
   scheduleReminder,
@@ -43,6 +45,15 @@ export default function HomeScreen() {
   const [_usageSummary, setUsageSummary] = useState([]);
   const [_usageLoading, setUsageLoading] = useState(true);
 
+  // Adherence tracking state
+  const [adherenceSummary, setAdherenceSummary] = useState([]);
+  const [refillAlerts, setRefillAlerts] = useState([]);
+  const [adherenceLoading, setAdherenceLoading] = useState(true);
+
+  // MTM eligibility state
+  const [mtmData, setMtmData] = useState(null);
+  const [mtmDismissed, setMtmDismissed] = useState(false);
+
   const member = {
     firstName: firstName || '',
     lastName: lastName || '',
@@ -59,16 +70,22 @@ export default function HomeScreen() {
     setSobData(null);
     setReminders([]);
     setUsageSummary([]);
+    setAdherenceSummary([]);
+    setRefillAlerts([]);
+    setMtmData(null);
     if (!planNumber) {
       setLoading(false);
       setRemindersLoading(false);
       setUsageLoading(false);
+      setAdherenceLoading(false);
       return;
     }
     loadAllBenefits();
     if (sessionId) {
       loadReminders();
       loadUsageSummary();
+      loadAdherenceData();
+      loadMTMCheck();
     }
   }, [planNumber]);
 
@@ -314,6 +331,66 @@ export default function HomeScreen() {
     [sessionId],
   );
 
+  // ── Adherence Tracking ─────────────────────────────────────────
+
+  const loadAdherenceData = async () => {
+    setAdherenceLoading(true);
+    try {
+      const [summaryRes, alertsRes] = await Promise.all([
+        authFetch(`${API_URL}/adherence/${sessionId}/summary?days=30`).catch(() => null),
+        authFetch(`${API_URL}/refill-alerts/${sessionId}`).catch(() => null),
+      ]);
+      if (summaryRes && summaryRes.ok) {
+        const data = await summaryRes.json();
+        setAdherenceSummary(data.summary || []);
+      }
+      if (alertsRes && alertsRes.ok) {
+        const data = await alertsRes.json();
+        setRefillAlerts(data.alerts || []);
+      }
+    } catch (err) {
+      if (__DEV__) console.log('Adherence data error:', err);
+    } finally {
+      setAdherenceLoading(false);
+    }
+  };
+
+  const handleLogDose = useCallback(async () => {
+    // Log a dose for all enabled reminders for today
+    if (!reminders.length) return;
+    try {
+      for (const r of reminders.filter((rem) => rem.enabled)) {
+        await authFetch(`${API_URL}/adherence/${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reminder_id: r.id,
+            drug_name: r.drug_name,
+            taken: true,
+          }),
+        });
+      }
+      // Refresh adherence data
+      loadAdherenceData();
+    } catch (err) {
+      if (__DEV__) console.log('Log dose error:', err);
+    }
+  }, [sessionId, reminders]);
+
+  // ── MTM Check ────────────────────────────────────────────────
+
+  const loadMTMCheck = async () => {
+    try {
+      const res = await authFetch(`${API_URL}/mtm-check/${sessionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMtmData(data);
+      }
+    } catch (err) {
+      if (__DEV__) console.log('MTM check error:', err);
+    }
+  };
+
   // ── Logout ─────────────────────────────────────────────────────
 
   const handleLogout = useCallback(() => {
@@ -350,6 +427,20 @@ export default function HomeScreen() {
           drugsData={drugsData}
           onLogout={handleLogout}
         />
+        <MedAdherence
+          summary={adherenceSummary}
+          refillAlerts={refillAlerts}
+          loading={adherenceLoading}
+          onLogDose={handleLogDose}
+        />
+        {mtmData && !mtmDismissed && (
+          <MTMPrompt
+            eligible={mtmData.eligible}
+            medicationCount={mtmData.medication_count}
+            message={mtmData.message}
+            onDismiss={() => setMtmDismissed(true)}
+          />
+        )}
         <VoiceHelp
           planNumber={planNumber || ''}
           planName={planName || ''}

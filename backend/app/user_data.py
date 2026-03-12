@@ -164,6 +164,21 @@ class UserDataDB:
                 ON appointment_requests(phone_hash);
             CREATE INDEX IF NOT EXISTS idx_appt_status
                 ON appointment_requests(status);
+
+            CREATE TABLE IF NOT EXISTS adherence_logs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL DEFAULT '',
+                reminder_id     INTEGER NOT NULL,
+                drug_name       TEXT NOT NULL,
+                taken           INTEGER NOT NULL DEFAULT 1,
+                logged_at       TEXT DEFAULT (datetime('now')),
+                log_date        TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_adherence_phone_hash
+                ON adherence_logs(phone_hash);
+            CREATE INDEX IF NOT EXISTS idx_adherence_reminder
+                ON adherence_logs(phone_hash, reminder_id, log_date);
         """)
         # Add phone_hash column if upgrading from old schema
         try:
@@ -484,6 +499,130 @@ class UserDataDB:
         row = dict(row)
         row["phone"] = self._decrypt_phone(row["phone"])
         return row
+
+    # ── Adherence Tracking ──────────────────────────────────────────
+
+    def log_adherence(self, phone: str, reminder_id: int, drug_name: str,
+                      taken: bool = True, log_date: str = None) -> dict:
+        """Log that a member took (or missed) a medication dose."""
+        if log_date is None:
+            log_date = date.today().isoformat()
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        aid = self._execute(
+            """INSERT INTO adherence_logs
+               (phone, phone_hash, reminder_id, drug_name, taken, log_date)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (enc_phone, ph, reminder_id, drug_name, int(taken), log_date),
+        )
+        row = self._query_one("SELECT * FROM adherence_logs WHERE id = ?", (aid,))
+        if row:
+            row["phone"] = phone
+        return row
+
+    def get_adherence_summary(self, phone: str, days: int = 30) -> list[dict]:
+        """
+        Get adherence summary per medication for the last N days.
+        Returns: [{reminder_id, drug_name, doses_taken, doses_missed, total_days, adherence_pct}]
+        """
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            """SELECT reminder_id, drug_name,
+                      SUM(CASE WHEN taken = 1 THEN 1 ELSE 0 END) as doses_taken,
+                      SUM(CASE WHEN taken = 0 THEN 1 ELSE 0 END) as doses_missed,
+                      COUNT(*) as total_days
+               FROM adherence_logs
+               WHERE phone_hash = ? AND log_date >= date('now', ?)
+               GROUP BY reminder_id, drug_name
+               ORDER BY drug_name""",
+            (ph, f"-{days} days"),
+        )
+        result = []
+        for r in rows:
+            total = r["total_days"]
+            pct = round((r["doses_taken"] / total) * 100, 1) if total > 0 else 0
+            result.append({
+                "reminder_id": r["reminder_id"],
+                "drug_name": r["drug_name"],
+                "doses_taken": r["doses_taken"],
+                "doses_missed": r["doses_missed"],
+                "total_days": total,
+                "adherence_pct": pct,
+            })
+        return result
+
+    def get_adherence_for_date(self, phone: str, log_date: str) -> list[dict]:
+        """Get all adherence logs for a specific date."""
+        ph = self._hash_phone(phone)
+        return self._query_all(
+            "SELECT * FROM adherence_logs WHERE phone_hash = ? AND log_date = ?",
+            (ph, log_date),
+        )
+
+    def get_refill_alerts(self, phone: str) -> list[dict]:
+        """
+        Get reminders where refill_reminder is enabled and the refill is due
+        (last_refill_date + days_supply <= today + 3 days).
+        """
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            """SELECT * FROM medication_reminders
+               WHERE phone_hash = ? AND enabled = 1 AND refill_reminder = 1
+                     AND last_refill_date IS NOT NULL
+                     AND date(last_refill_date, '+' || days_supply || ' days') <= date('now', '+3 days')
+               ORDER BY date(last_refill_date, '+' || days_supply || ' days')""",
+            (ph,),
+        )
+        today = date.today()
+        result = []
+        for r in rows:
+            r["phone"] = self._decrypt_phone(r["phone"])
+            try:
+                refill_date = datetime.strptime(r["last_refill_date"], "%Y-%m-%d").date()
+                due_date = refill_date + __import__("datetime").timedelta(days=r["days_supply"])
+                r["refill_due_date"] = due_date.isoformat()
+                r["days_until_refill"] = (due_date - today).days
+            except (ValueError, TypeError):
+                r["refill_due_date"] = None
+                r["days_until_refill"] = None
+            result.append(r)
+        return result
+
+    # ── Health Screening Gap Report (Admin) ─────────────────────────
+
+    def get_all_screening_results(self) -> list[dict]:
+        """Get all screening submissions for gap analysis."""
+        import json
+        rows = self._query_all(
+            """SELECT phone, phone_hash, gender, answers_json, reminders_json, created_at
+               FROM health_screenings ORDER BY created_at DESC"""
+        )
+        seen = set()
+        results = []
+        for r in rows:
+            ph = r["phone_hash"]
+            if ph in seen:
+                continue  # Only latest per member
+            seen.add(ph)
+            results.append({
+                "phone_last4": self._decrypt_phone(r["phone"])[-4:],
+                "gender": r["gender"],
+                "answers": json.loads(r["answers_json"]),
+                "reminders": json.loads(r["reminders_json"]),
+                "created_at": r["created_at"],
+            })
+        return results
+
+    # ── MTM Eligibility ─────────────────────────────────────────────
+
+    def get_reminder_count(self, phone: str) -> int:
+        """Get count of active medication reminders for a member."""
+        ph = self._hash_phone(phone)
+        row = self._query_one(
+            "SELECT COUNT(*) as cnt FROM medication_reminders WHERE phone_hash = ? AND enabled = 1",
+            (ph,),
+        )
+        return row["cnt"] if row else 0
 
     def count_appointment_requests(self, status: str = None) -> int:
         """Count appointment requests, optionally by status."""
