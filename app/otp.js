@@ -1,5 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Animated, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  Animated,
+  ActivityIndicator,
+} from 'react-native';
 import GradientBg from '../components/GradientBg';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export default function OTPScreen() {
   const pending = getPendingOtp();
   const phone = pending?.phone || '';
-  const firstName = pending?.firstName || '';
+  const _firstName = pending?.firstName || '';
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,17 +43,19 @@ export default function OTPScreen() {
 
   const handleChange = (i, v) => {
     if (!/^\d?$/.test(v)) return;
-    const n = [...otp]; n[i] = v; setOtp(n);
+    const n = [...otp];
+    n[i] = v;
+    setOtp(n);
     if (v && i < 5) refs.current[i + 1]?.focus();
     setError('');
   };
-  const handleKey = (i, k) => { if (k === 'Backspace' && !otp[i] && i > 0) refs.current[i - 1]?.focus(); };
+  const handleKey = (i, k) => {
+    if (k === 'Backspace' && !otp[i] && i > 0) refs.current[i - 1]?.focus();
+  };
   const filled = otp.every((d) => d !== '');
 
   // Format phone for display
-  const displayPhone = phone
-    ? `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`
-    : '';
+  const displayPhone = phone ? `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}` : '';
 
   const handleVerify = async () => {
     if (!filled) return;
@@ -111,7 +123,7 @@ export default function OTPScreen() {
         }
         setError(
           `Can't reach server (${err.message}). URL: ${url}\n` +
-          "Check that your phone can reach this address in a browser."
+            'Check that your phone can reach this address in a browser.',
         );
       }
     }
@@ -143,9 +155,23 @@ export default function OTPScreen() {
   return (
     <GradientBg style={s.gradient}>
       <SafeAreaView style={s.container}>
-        <KeyboardAvoidingView style={s.inner} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <Animated.View style={[s.content, { opacity: contentOpacity, transform: [{ translateY: contentSlide }] }]}>
-            <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
+        <KeyboardAvoidingView
+          style={s.inner}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <Animated.View
+            style={[
+              s.content,
+              { opacity: contentOpacity, transform: [{ translateY: contentSlide }] },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={s.backBtn}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
               <View style={s.backIconWrap}>
                 <Ionicons name="chevron-back" size={18} color={COLORS.accent} />
               </View>
@@ -185,7 +211,9 @@ export default function OTPScreen() {
             {error ? (
               <View style={s.errorWrap} accessibilityLiveRegion="assertive">
                 <Ionicons name="alert-circle-outline" size={16} color={COLORS.error} />
-                <Text style={s.errorText} accessibilityRole="alert">{error}</Text>
+                <Text style={s.errorText} accessibilityRole="alert">
+                  {error}
+                </Text>
               </View>
             ) : null}
 
@@ -203,14 +231,28 @@ export default function OTPScreen() {
               ) : (
                 <>
                   <Text style={s.buttonText}>Verify</Text>
-                  <Ionicons name="checkmark" size={18} color={COLORS.white} style={{ marginLeft: 6 }} />
+                  <Ionicons
+                    name="checkmark"
+                    size={18}
+                    color={COLORS.white}
+                    style={{ marginLeft: 6 }}
+                  />
                 </>
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={s.resendWrap} activeOpacity={0.7} onPress={handleResend} disabled={resending} accessibilityRole="button" accessibilityLabel={resending ? 'Sending new code' : 'Resend verification code'} accessibilityState={{ disabled: resending }}>
+            <TouchableOpacity
+              style={s.resendWrap}
+              activeOpacity={0.7}
+              onPress={handleResend}
+              disabled={resending}
+              accessibilityRole="button"
+              accessibilityLabel={resending ? 'Sending new code' : 'Resend verification code'}
+              accessibilityState={{ disabled: resending }}
+            >
               <Text style={s.resendText}>
-                Didn't get it? <Text style={s.resendLink}>{resending ? 'Sending...' : 'Resend code'}</Text>
+                Didn't get it?{' '}
+                <Text style={s.resendLink}>{resending ? 'Sending...' : 'Resend code'}</Text>
               </Text>
             </TouchableOpacity>
           </Animated.View>
@@ -229,35 +271,58 @@ const s = StyleSheet.create({
   // Back button
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SPACING.xl },
   backIconWrap: {
-    width: 32, height: 32, borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   back: { ...TYPE.label, fontSize: 15, color: COLORS.accent },
 
   // Icon
   iconCircle: {
-    width: 64, height: 64, borderRadius: 20,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
     backgroundColor: COLORS.accentLighter,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: SPACING.md,
   },
 
   // Typography
   title: { ...TYPE.h1, color: COLORS.text, marginBottom: SPACING.sm },
-  subtitle: { ...TYPE.body, fontSize: 17, color: COLORS.textSecondary, lineHeight: 26, marginBottom: 28 },
+  subtitle: {
+    ...TYPE.body,
+    fontSize: 17,
+    color: COLORS.textSecondary,
+    lineHeight: 26,
+    marginBottom: 28,
+  },
 
   // OTP card
   otpCard: {
-    backgroundColor: COLORS.white, borderRadius: RADII.lg,
-    paddingHorizontal: 12, paddingVertical: 20, marginBottom: 24,
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 20,
+    marginBottom: 24,
     ...SHADOWS.card,
   },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between' },
   otpInput: {
-    flex: 1, marginHorizontal: 4, height: 56, borderWidth: 2, borderColor: COLORS.border,
-    borderRadius: 12, backgroundColor: COLORS.bg, textAlign: 'center',
-    fontSize: 24, fontWeight: '600', color: COLORS.text,
+    flex: 1,
+    marginHorizontal: 4,
+    height: 56,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.bg,
+    textAlign: 'center',
+    fontSize: 24,
+    fontWeight: '600',
+    color: COLORS.text,
   },
   otpInputFilled: {
     borderColor: COLORS.accent,
@@ -266,18 +331,24 @@ const s = StyleSheet.create({
 
   // Error
   errorWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     backgroundColor: COLORS.errorBg,
     borderRadius: RADII.sm,
-    paddingHorizontal: 14, paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     marginBottom: 16,
   },
   errorText: { fontSize: 14, color: COLORS.error, flex: 1, lineHeight: 20 },
 
   // Button
   button: {
-    backgroundColor: COLORS.accent, borderRadius: RADII.md,
-    paddingVertical: 18, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: COLORS.accent,
+    borderRadius: RADII.md,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
     flexDirection: 'row',
     ...SHADOWS.button,
   },

@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 // Prefer expo-secure-store (encrypted keychain/keystore) for token storage.
 // Falls back to encrypted AsyncStorage via secureCache on web or if SecureStore is unavailable.
 let SecureStore = null;
@@ -147,7 +145,5 @@ async function _tryRefresh() {
 export function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
-    clearTimeout(id)
-  );
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(id));
 }

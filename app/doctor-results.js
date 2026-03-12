@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
+import { COLORS, RADII, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 import { getMemberSession } from '../constants/session';
 
@@ -123,7 +123,7 @@ export default function DoctorResults() {
     return (parts[0] || '?')[0].toUpperCase();
   };
 
-  const renderProvider = ({ item, index }) => (
+  const renderProvider = ({ item, _index }) => (
     <View style={s.card}>
       <View style={s.cardHeader}>
         {/* Avatar with initials */}

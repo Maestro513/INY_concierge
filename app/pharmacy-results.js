@@ -1,38 +1,52 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, FlatList,
-  ActivityIndicator, Linking, Platform,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADII, SPACING, SHADOWS, TYPE } from '../constants/theme';
+import { COLORS, RADII, SHADOWS, TYPE } from '../constants/theme';
 import { API_URL, authFetch } from '../constants/api';
 import { getMemberSession } from '../constants/session';
 
 export default function PharmacyResults() {
   const router = useRouter();
   const { member: _mem } = getMemberSession();
-  const { zipCode, planNumber, planName } = _mem || {};
+  const { zipCode, planNumber, planName: _planName } = _mem || {};
   const [pharmacies, setPharmacies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [meta, setMeta] = useState({});
 
-  useEffect(() => { searchPharmacies(); }, []);
+  useEffect(() => {
+    searchPharmacies();
+  }, []);
 
   const searchPharmacies = async () => {
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
-      const res = await authFetch(`${API_URL}/pharmacies/search`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plan_number: planNumber || '',
-          zip_code: zipCode || '',
-          radius_miles: 10,
-          limit: 30,
-        }),
-      }, 30000);
+      const res = await authFetch(
+        `${API_URL}/pharmacies/search`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            plan_number: planNumber || '',
+            zip_code: zipCode || '',
+            radius_miles: 10,
+            limit: 30,
+          }),
+        },
+        30000,
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Search failed');
       setPharmacies(data.pharmacies || []);
@@ -43,8 +57,12 @@ export default function PharmacyResults() {
         setError('Search is taking too long. Check your connection and try again.');
       } else if (err.message === 'Network request failed' || err.name === 'TypeError') {
         setError("Can't connect to the server right now. Check your connection and try again.");
-      } else { setError('Search failed. Please try again or call us at (844) 463-2931.'); }
-    } finally { setLoading(false); }
+      } else {
+        setError('Search failed. Please try again or call us at (844) 463-2931.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const callPharmacy = (phone) => {
@@ -73,7 +91,8 @@ export default function PharmacyResults() {
     const full = Math.floor(rating);
     const half = rating - full >= 0.5;
     const stars = [];
-    for (let i = 0; i < full; i++) stars.push(<Ionicons key={'f'+i} name="star" size={13} color={COLORS.warning} />);
+    for (let i = 0; i < full; i++)
+      stars.push(<Ionicons key={'f' + i} name="star" size={13} color={COLORS.warning} />);
     if (half) stars.push(<Ionicons key="h" name="star-half" size={13} color={COLORS.warning} />);
     return stars;
   };
@@ -83,14 +102,12 @@ export default function PharmacyResults() {
       <View style={s.cardHeader}>
         {/* Pharmacy icon */}
         <View style={[s.avatar, item.preferred && s.avatarPreferred]}>
-          <Ionicons
-            name="storefront"
-            size={20}
-            color={item.preferred ? '#fff' : COLORS.accent}
-          />
+          <Ionicons name="storefront" size={20} color={item.preferred ? '#fff' : COLORS.accent} />
         </View>
         <View style={s.nameWrap}>
-          <Text style={s.name} numberOfLines={2}>{item.name}</Text>
+          <Text style={s.name} numberOfLines={2}>
+            {item.name}
+          </Text>
           {item.open_now != null && (
             <Text style={[s.openStatus, item.open_now ? s.openNow : s.closedNow]}>
               {item.open_now ? 'Open now' : 'Closed'}
@@ -169,7 +186,13 @@ export default function PharmacyResults() {
     <SafeAreaView style={s.container} edges={['top']}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Go back">
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={s.backBtn}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="chevron-back" size={22} color={COLORS.accent} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
@@ -194,7 +217,13 @@ export default function PharmacyResults() {
             <Ionicons name="cloud-offline-outline" size={36} color={COLORS.textTertiary} />
           </View>
           <Text style={s.errorText}>{error}</Text>
-          <TouchableOpacity style={s.retryBtn} onPress={searchPharmacies} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Try search again">
+          <TouchableOpacity
+            style={s.retryBtn}
+            onPress={searchPharmacies}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Try search again"
+          >
             <Text style={s.retryBtnText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -242,15 +271,21 @@ const s = StyleSheet.create({
 
   // Header
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: COLORS.white,
-    borderBottomWidth: 1, borderBottomColor: COLORS.borderLight,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: { ...TYPE.h3, color: COLORS.text },
@@ -260,15 +295,26 @@ const s = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText: { ...TYPE.body, color: COLORS.textSecondary, marginTop: 16 },
   errorIcon: {
-    width: 72, height: 72, borderRadius: 22,
+    width: 72,
+    height: 72,
+    borderRadius: 22,
     backgroundColor: COLORS.bg,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 16,
   },
-  errorText: { ...TYPE.body, color: COLORS.textSecondary, textAlign: 'center', marginBottom: 20, lineHeight: 24 },
+  errorText: {
+    ...TYPE.body,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 24,
+  },
   retryBtn: {
-    backgroundColor: COLORS.accent, borderRadius: RADII.md,
-    paddingHorizontal: 28, paddingVertical: 12,
+    backgroundColor: COLORS.accent,
+    borderRadius: RADII.md,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
     ...SHADOWS.button,
   },
   retryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
@@ -276,12 +322,18 @@ const s = StyleSheet.create({
 
   // Results
   countRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 4,
   },
   countBadge: {
-    backgroundColor: COLORS.accentLight, borderRadius: RADII.xs,
-    paddingHorizontal: 8, paddingVertical: 3,
+    backgroundColor: COLORS.accentLight,
+    borderRadius: RADII.xs,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   countBadgeText: { ...TYPE.label, color: COLORS.accent, fontSize: 12 },
   resultCount: { ...TYPE.label, color: COLORS.textSecondary },
@@ -289,20 +341,28 @@ const s = StyleSheet.create({
 
   // Card
   card: {
-    backgroundColor: COLORS.white, borderRadius: RADII.lg,
-    padding: 18, marginTop: 12,
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.lg,
+    padding: 18,
+    marginTop: 12,
     ...SHADOWS.card,
-    borderWidth: 1, borderColor: COLORS.borderLight,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   cardHeader: {
-    flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
 
   // Avatar
   avatar: {
-    width: 42, height: 42, borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 12,
   },
   avatarPreferred: {
@@ -316,17 +376,23 @@ const s = StyleSheet.create({
 
   // Badges
   preferredBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: COLORS.accent,
     borderRadius: RADII.full,
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   preferredText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   networkBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: COLORS.successBg,
     borderRadius: RADII.full,
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   networkText: { fontSize: 11, fontWeight: '600', color: COLORS.success },
 
@@ -340,29 +406,48 @@ const s = StyleSheet.create({
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 },
   address: { fontSize: 14, color: COLORS.text, lineHeight: 20, flex: 1 },
   distanceBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: COLORS.accentLighter, borderRadius: RADII.xs,
-    paddingHorizontal: 8, paddingVertical: 4,
-    alignSelf: 'flex-start', marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.accentLighter,
+    borderRadius: RADII.xs,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
   },
   distanceText: { fontSize: 12, fontWeight: '600', color: COLORS.accent },
 
   // Action buttons
   actionsRow: {
-    flexDirection: 'row', gap: 10, marginTop: 10,
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
   },
   directionsBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    backgroundColor: COLORS.accentLighter, borderRadius: RADII.md,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accentLighter,
+    borderRadius: RADII.md,
     paddingVertical: 11,
-    borderWidth: 1.5, borderColor: COLORS.accentLight,
+    borderWidth: 1.5,
+    borderColor: COLORS.accentLight,
   },
   directionsBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.accent },
   callBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    backgroundColor: COLORS.accentLighter, borderRadius: RADII.md,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accentLighter,
+    borderRadius: RADII.md,
     paddingVertical: 11,
-    borderWidth: 1.5, borderColor: COLORS.accentLight,
+    borderWidth: 1.5,
+    borderColor: COLORS.accentLight,
   },
   callBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.accent },
 });

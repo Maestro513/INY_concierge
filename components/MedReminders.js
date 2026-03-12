@@ -1,10 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Switch, TextInput,
-  Modal, Animated, ActivityIndicator, Platform, ScrollView,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Switch,
+  TextInput,
+  Modal,
+  Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
+import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 
 // ── Time formatting helper ──────────────────────────────────────
 function formatTime(hour, minute) {
@@ -24,9 +31,13 @@ function ReminderRow({ reminder, onToggle, onDelete }) {
       <View style={styles.reminderInfo}>
         <Text style={styles.reminderDrug} numberOfLines={1}>
           {reminder.drug_name}
-          {reminder.dose_label ? <Text style={styles.reminderDose}> {reminder.dose_label}</Text> : null}
+          {reminder.dose_label ? (
+            <Text style={styles.reminderDose}> {reminder.dose_label}</Text>
+          ) : null}
         </Text>
-        <Text style={styles.reminderTime}>{formatTime(reminder.time_hour, reminder.time_minute)}</Text>
+        <Text style={styles.reminderTime}>
+          {formatTime(reminder.time_hour, reminder.time_minute)}
+        </Text>
       </View>
       <Switch
         value={!!reminder.enabled}
@@ -47,7 +58,7 @@ function ReminderRow({ reminder, onToggle, onDelete }) {
 }
 
 // ── Add reminder modal ──────────────────────────────────────────
-function AddReminderModal({ visible, onClose, onSave, existingMeds }) {
+function AddReminderModal({ visible, onClose, onSave, _existingMeds }) {
   const [drugName, setDrugName] = useState('');
   const [doseLabel, setDoseLabel] = useState('');
   const [hour, setHour] = useState(8);
@@ -67,7 +78,7 @@ function AddReminderModal({ visible, onClose, onSave, existingMeds }) {
   const handleSave = async () => {
     if (!drugName.trim()) return;
     setSaving(true);
-    const h24 = ampm === 'PM' ? (hour === 12 ? 12 : hour + 12) : (hour === 12 ? 0 : hour);
+    const h24 = ampm === 'PM' ? (hour === 12 ? 12 : hour + 12) : hour === 12 ? 0 : hour;
     await onSave({
       drug_name: drugName.trim(),
       dose_label: doseLabel.trim(),
@@ -78,19 +89,21 @@ function AddReminderModal({ visible, onClose, onSave, existingMeds }) {
     onClose();
   };
 
-  const adjustHour = (delta) => setHour((prev) => {
-    const next = prev + delta;
-    if (next > 12) return 1;
-    if (next < 1) return 12;
-    return next;
-  });
+  const adjustHour = (delta) =>
+    setHour((prev) => {
+      const next = prev + delta;
+      if (next > 12) return 1;
+      if (next < 1) return 12;
+      return next;
+    });
 
-  const adjustMinute = (delta) => setMinute((prev) => {
-    const next = prev + delta;
-    if (next >= 60) return 0;
-    if (next < 0) return 45;
-    return next;
-  });
+  const adjustMinute = (delta) =>
+    setMinute((prev) => {
+      const next = prev + delta;
+      if (next >= 60) return 0;
+      if (next < 0) return 45;
+      return next;
+    });
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -98,7 +111,12 @@ function AddReminderModal({ visible, onClose, onSave, existingMeds }) {
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add Reminder</Text>
-            <TouchableOpacity onPress={() => { reset(); onClose(); }}>
+            <TouchableOpacity
+              onPress={() => {
+                reset();
+                onClose();
+              }}
+            >
               <Ionicons name="close" size={24} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -255,11 +273,7 @@ export default function MedReminders({ reminders, loading, onToggle, onDelete, o
         </View>
       ) : null}
 
-      <AddReminderModal
-        visible={showAdd}
-        onClose={() => setShowAdd(false)}
-        onSave={onAdd}
-      />
+      <AddReminderModal visible={showAdd} onClose={() => setShowAdd(false)} onSave={onAdd} />
     </Animated.View>
   );
 }
@@ -287,16 +301,21 @@ const styles = StyleSheet.create({
   },
   sectionLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionIcon: {
-    width: 28, height: 28, borderRadius: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sectionTitle: { ...TYPE.label, fontSize: 14, color: COLORS.text },
   badge: {
     backgroundColor: COLORS.accent,
     borderRadius: 10,
-    minWidth: 20, height: 20,
-    justifyContent: 'center', alignItems: 'center',
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 6,
   },
   badgeText: { fontSize: 11, fontWeight: '700', color: COLORS.white },
@@ -314,9 +333,12 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.borderLight,
   },
   reminderIcon: {
-    width: 32, height: 32, borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     backgroundColor: COLORS.rxDrugBg,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   reminderInfo: { flex: 1 },
   reminderDrug: { fontSize: 15, fontWeight: '600', color: COLORS.text },
@@ -324,12 +346,22 @@ const styles = StyleSheet.create({
   reminderTime: { fontSize: 13, fontWeight: '500', color: COLORS.textSecondary, marginTop: 2 },
 
   // Empty state
-  emptyText: { ...TYPE.caption, color: COLORS.textTertiary, textAlign: 'center', paddingVertical: 12, lineHeight: 18 },
+  emptyText: {
+    ...TYPE.caption,
+    color: COLORS.textTertiary,
+    textAlign: 'center',
+    paddingVertical: 12,
+    lineHeight: 18,
+  },
 
   // Add button
   addBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 10, marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 6,
   },
   addBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.accent },
 
@@ -360,9 +392,13 @@ const styles = StyleSheet.create({
   textInput: {
     backgroundColor: COLORS.bg,
     borderRadius: RADII.md,
-    borderWidth: 1, borderColor: COLORS.borderLight,
-    paddingHorizontal: 14, paddingVertical: 14,
-    fontSize: 16, fontWeight: '500', color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontWeight: '500',
+    color: COLORS.text,
   },
 
   // Time picker
@@ -370,18 +406,25 @@ const styles = StyleSheet.create({
   timeSpinner: { alignItems: 'center' },
   spinBtn: { padding: 6 },
   timeValue: {
-    fontSize: 28, fontWeight: '700', color: COLORS.text,
-    minWidth: 48, textAlign: 'center',
+    fontSize: 28,
+    fontWeight: '700',
+    color: COLORS.text,
+    minWidth: 48,
+    textAlign: 'center',
   },
   timeColon: { fontSize: 28, fontWeight: '700', color: COLORS.textTertiary, marginBottom: 4 },
   ampmToggle: {
-    flexDirection: 'column', gap: 4, marginLeft: 10,
+    flexDirection: 'column',
+    gap: 4,
+    marginLeft: 10,
   },
   ampmBtn: {
-    paddingHorizontal: 14, paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: RADII.sm,
     backgroundColor: COLORS.bg,
-    borderWidth: 1, borderColor: COLORS.borderLight,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   ampmActive: {
     backgroundColor: COLORS.accentLight,

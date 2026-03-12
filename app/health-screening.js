@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,24 +14,64 @@ const SHARED_SCREENINGS = [
   { id: 'awv', label: 'Annual Wellness Visit', timeframe: 'in the past year', frequency: 'yearly' },
   { id: 'flu', label: 'Flu Shot', timeframe: 'this season', frequency: 'yearly' },
   { id: 'covid', label: 'COVID Booster', timeframe: 'in the past year', frequency: 'yearly' },
-  { id: 'colonoscopy', label: 'Colonoscopy', timeframe: 'in the past 5 years', frequency: '5 years' },
-  { id: 'lung', label: 'Lung Cancer Screening (Low-Dose CT)', timeframe: 'in the past year', frequency: 'yearly' },
+  {
+    id: 'colonoscopy',
+    label: 'Colonoscopy',
+    timeframe: 'in the past 5 years',
+    frequency: '5 years',
+  },
+  {
+    id: 'lung',
+    label: 'Lung Cancer Screening (Low-Dose CT)',
+    timeframe: 'in the past year',
+    frequency: 'yearly',
+  },
   { id: 'skin', label: 'Skin Cancer Check', timeframe: 'in the past year', frequency: 'yearly' },
-  { id: 'diabetic_eye', label: 'Diabetic Eye Exam', timeframe: 'in the past year', frequency: 'yearly' },
-  { id: 'cholesterol', label: 'Cholesterol / Blood Work', timeframe: 'in the past year', frequency: 'yearly' },
+  {
+    id: 'diabetic_eye',
+    label: 'Diabetic Eye Exam',
+    timeframe: 'in the past year',
+    frequency: 'yearly',
+  },
+  {
+    id: 'cholesterol',
+    label: 'Cholesterol / Blood Work',
+    timeframe: 'in the past year',
+    frequency: 'yearly',
+  },
   { id: 'hearing', label: 'Hearing Test', timeframe: 'in the past year', frequency: 'yearly' },
-  { id: 'dental', label: 'Dental Cleaning', timeframe: 'in the past 6 months', frequency: '6 months' },
+  {
+    id: 'dental',
+    label: 'Dental Cleaning',
+    timeframe: 'in the past 6 months',
+    frequency: '6 months',
+  },
   { id: 'vision', label: 'Eye Exam', timeframe: 'in the past year', frequency: 'yearly' },
 ];
 
 const MALE_SCREENINGS = [
-  { id: 'prostate', label: 'Prostate (PSA) Screening', timeframe: 'in the past year', frequency: 'yearly' },
+  {
+    id: 'prostate',
+    label: 'Prostate (PSA) Screening',
+    timeframe: 'in the past year',
+    frequency: 'yearly',
+  },
 ];
 
 const FEMALE_SCREENINGS = [
   { id: 'mammogram', label: 'Mammogram', timeframe: 'in the past 1-2 years', frequency: 'yearly' },
-  { id: 'cervical', label: 'Cervical Cancer (Pap Smear)', timeframe: 'in the past 3 years', frequency: '3 years' },
-  { id: 'bone_density', label: 'Bone Density Scan (DEXA)', timeframe: 'in the past 2 years', frequency: '2 years' },
+  {
+    id: 'cervical',
+    label: 'Cervical Cancer (Pap Smear)',
+    timeframe: 'in the past 3 years',
+    frequency: '3 years',
+  },
+  {
+    id: 'bone_density',
+    label: 'Bone Density Scan (DEXA)',
+    timeframe: 'in the past 2 years',
+    frequency: '2 years',
+  },
 ];
 
 export default function HealthScreeningScreen() {
@@ -44,12 +82,13 @@ export default function HealthScreeningScreen() {
   const [answers, setAnswers] = useState({});
   const [saving, setSaving] = useState(false);
 
-  const screenings = gender === 'male'
-    ? [...SHARED_SCREENINGS, ...MALE_SCREENINGS]
-    : [...SHARED_SCREENINGS, ...FEMALE_SCREENINGS];
+  const screenings =
+    gender === 'male'
+      ? [...SHARED_SCREENINGS, ...MALE_SCREENINGS]
+      : [...SHARED_SCREENINGS, ...FEMALE_SCREENINGS];
 
-  const toggleAnswer = (id) => {
-    setAnswers(prev => ({ ...prev, [id]: !prev[id] }));
+  const _toggleAnswer = (id) => {
+    setAnswers((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   const handleSubmit = async () => {
@@ -57,8 +96,8 @@ export default function HealthScreeningScreen() {
     try {
       // Build reminders from "no" answers
       const reminders = screenings
-        .filter(s => !answers[s.id])
-        .map(s => ({
+        .filter((s) => !answers[s.id])
+        .map((s) => ({
           screening_id: s.id,
           label: s.label,
           frequency: s.frequency,
@@ -103,7 +142,10 @@ export default function HealthScreeningScreen() {
 
           <TouchableOpacity
             style={s.genderBtn}
-            onPress={() => { setGender('male'); setStep('screenings'); }}
+            onPress={() => {
+              setGender('male');
+              setStep('screenings');
+            }}
             activeOpacity={0.7}
           >
             <Ionicons name="man" size={24} color={COLORS.accent} />
@@ -112,14 +154,21 @@ export default function HealthScreeningScreen() {
 
           <TouchableOpacity
             style={s.genderBtn}
-            onPress={() => { setGender('female'); setStep('screenings'); }}
+            onPress={() => {
+              setGender('female');
+              setStep('screenings');
+            }}
             activeOpacity={0.7}
           >
             <Ionicons name="woman" size={24} color={COLORS.accent} />
             <Text style={s.genderBtnText}>Female</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => router.replace('/home')} style={s.skipBtn} activeOpacity={0.7}>
+          <TouchableOpacity
+            onPress={() => router.replace('/home')}
+            style={s.skipBtn}
+            activeOpacity={0.7}
+          >
             <Text style={s.skipText}>Skip for now</Text>
           </TouchableOpacity>
         </View>
@@ -128,7 +177,7 @@ export default function HealthScreeningScreen() {
   }
 
   // ── Screenings checklist ──
-  const answeredCount = Object.keys(answers).length;
+  const _answeredCount = Object.keys(answers).length;
 
   return (
     <SafeAreaView style={s.safe}>
@@ -145,13 +194,17 @@ export default function HealthScreeningScreen() {
         <Text style={s.instructionsSub}>Select Yes or No for each screening.</Text>
       </Text>
 
-      <ScrollView style={s.list} contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={s.list}
+        contentContainerStyle={s.listContent}
+        showsVerticalScrollIndicator={false}
+      >
         {screenings.map((item) => {
           const answered = answers[item.id];
           const isYes = answered === true;
           const isNo = answered === false;
           // undefined means not answered yet — treat visually as unanswered
-          const notAnswered = answered === undefined;
+          const _notAnswered = answered === undefined;
 
           return (
             <View key={item.id} style={s.screeningCard}>
@@ -162,14 +215,14 @@ export default function HealthScreeningScreen() {
               <View style={s.btnRow}>
                 <TouchableOpacity
                   style={[s.yesNoBtn, isYes && s.yesActive]}
-                  onPress={() => setAnswers(prev => ({ ...prev, [item.id]: true }))}
+                  onPress={() => setAnswers((prev) => ({ ...prev, [item.id]: true }))}
                   activeOpacity={0.7}
                 >
                   <Text style={[s.yesNoText, isYes && s.yesNoTextActive]}>Yes</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[s.yesNoBtn, isNo && s.noActive]}
-                  onPress={() => setAnswers(prev => ({ ...prev, [item.id]: false }))}
+                  onPress={() => setAnswers((prev) => ({ ...prev, [item.id]: false }))}
                   activeOpacity={0.7}
                 >
                   <Text style={[s.yesNoText, isNo && s.noTextActive]}>No</Text>
@@ -200,15 +253,34 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
 
   // Gender step
-  genderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
+  genderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
   iconWrap: { marginBottom: 16 },
   genderTitle: { ...TYPE.h1, color: COLORS.text, textAlign: 'center', marginBottom: 8 },
-  genderSubtitle: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 32 },
+  genderSubtitle: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 32,
+  },
   genderBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    width: '100%', backgroundColor: COLORS.white, borderRadius: RADII.md,
-    paddingVertical: 18, paddingHorizontal: 24, marginBottom: 12,
-    borderWidth: 1, borderColor: COLORS.borderLight, ...SHADOWS.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.md,
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    ...SHADOWS.card,
   },
   genderBtnText: { fontSize: 17, fontWeight: '600', color: COLORS.text },
   skipBtn: { marginTop: 20 },
@@ -216,16 +288,23 @@ const s = StyleSheet.create({
 
   // Header
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { ...TYPE.h2, color: COLORS.text },
 
   // Instructions
   instructions: {
-    fontSize: 16, fontWeight: '600', color: COLORS.text,
-    paddingHorizontal: 20, marginBottom: 16, lineHeight: 24,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    lineHeight: 24,
   },
   instructionsSub: { fontSize: 14, fontWeight: '400', color: COLORS.textSecondary },
 
@@ -235,10 +314,15 @@ const s = StyleSheet.create({
 
   // Screening card
   screeningCard: {
-    backgroundColor: COLORS.white, borderRadius: RADII.md,
-    padding: 16, marginBottom: 10,
-    borderWidth: 1, borderColor: COLORS.borderLight,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: COLORS.white,
+    borderRadius: RADII.md,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   screeningInfo: { flex: 1, marginRight: 12 },
   screeningLabel: { fontSize: 15, fontWeight: '600', color: COLORS.text, marginBottom: 2 },
@@ -247,8 +331,12 @@ const s = StyleSheet.create({
   // Yes/No buttons
   btnRow: { flexDirection: 'row', gap: 8 },
   yesNoBtn: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: RADII.full,
-    borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.bg,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: RADII.full,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
   },
   yesNoText: { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
   yesActive: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
@@ -258,15 +346,26 @@ const s = StyleSheet.create({
 
   // Footer
   footer: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 20, paddingVertical: 16, paddingBottom: 32,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingBottom: 32,
     backgroundColor: COLORS.bg,
-    borderTopWidth: 1, borderTopColor: COLORS.borderLight,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
   },
   submitBtn: {
-    backgroundColor: COLORS.accent, borderRadius: RADII.full,
-    paddingVertical: 16, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: 8, ...SHADOWS.button,
+    backgroundColor: COLORS.accent,
+    borderRadius: RADII.full,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    ...SHADOWS.button,
   },
   submitBtnDisabled: { opacity: 0.6 },
   submitText: { color: '#fff', fontSize: 16, fontWeight: '700' },
