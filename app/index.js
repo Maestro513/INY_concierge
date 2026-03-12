@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, RADII, MOTION } from '../constants/theme';
+import { RADII, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
 import { setPendingOtp } from '../constants/session';
@@ -60,11 +60,11 @@ export default function PhoneScreen() {
       useNativeDriver: false,
     }).start();
   }, [focused]);
-  const inputBorderColor = borderColor.interpolate({
+  const _inputBorderColor = borderColor.interpolate({
     inputRange: [0, 1],
     outputRange: ['#F0EDF4', '#7B3FBF'],
   });
-  const inputBgColor = borderColor.interpolate({
+  const _inputBgColor = borderColor.interpolate({
     inputRange: [0, 1],
     outputRange: ['#F7F5FA', '#FAF5FF'],
   });
@@ -204,7 +204,11 @@ export default function PhoneScreen() {
             </View>
           ) : null}
           <TouchableOpacity
-            style={[styles.btn, isValid && !loading && styles.btnActive, (!isValid || loading) && styles.btnDisabled]}
+            style={[
+              styles.btn,
+              isValid && !loading && styles.btnActive,
+              (!isValid || loading) && styles.btnDisabled,
+            ]}
             onPress={handleSubmit}
             disabled={!isValid || loading}
             activeOpacity={0.8}

@@ -1,18 +1,34 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, TextInput,
-  Modal, Animated, ActivityIndicator,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  TextInput,
+  Modal,
+  Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADII, SPACING, SHADOWS, TYPE, MOTION } from '../constants/theme';
+import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
 
 // ── Category config ─────────────────────────────────────────────
 const CATEGORY_CONFIG = {
-  otc:     { label: 'OTC Allowance', icon: 'cart-outline',  color: COLORS.clinical,  bg: COLORS.clinicalBg },
-  dental:  { label: 'Dental',        icon: 'medical-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
-  flex:    { label: 'Flex Card',     icon: 'card-outline',   color: COLORS.clinical,  bg: COLORS.clinicalBg },
-  vision:  { label: 'Vision',        icon: 'eye-outline',    color: COLORS.clinical,  bg: COLORS.clinicalBg },
-  hearing: { label: 'Hearing',       icon: 'ear-outline',    color: COLORS.clinical,  bg: COLORS.clinicalBg },
+  otc: {
+    label: 'OTC Allowance',
+    icon: 'cart-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  dental: {
+    label: 'Dental',
+    icon: 'medical-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  flex: { label: 'Flex Card', icon: 'card-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
+  vision: { label: 'Vision', icon: 'eye-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
+  hearing: { label: 'Hearing', icon: 'ear-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
 };
 
 const PERIOD_LABELS = {
@@ -69,9 +85,7 @@ function UsageRow({ item }) {
             ${item.spent.toFixed(0)} / ${item.cap.toFixed(0)} {periodLabel}
           </Text>
         </View>
-        <Text style={styles.usageRemaining}>
-          ${item.remaining.toFixed(0)} left
-        </Text>
+        <Text style={styles.usageRemaining}>${item.remaining.toFixed(0)} left</Text>
       </View>
       <ProgressBar pct={item.pct_used} color={config.color} />
     </View>
@@ -100,7 +114,7 @@ function LogUsageModal({ visible, onClose, onSave, categories }) {
       category,
       amount: parseFloat(amount),
       description: description.trim(),
-      benefit_period: categories.find(c => c.category === category)?.period || 'Monthly',
+      benefit_period: categories.find((c) => c.category === category)?.period || 'Monthly',
     });
     reset();
     onClose();
@@ -112,7 +126,12 @@ function LogUsageModal({ visible, onClose, onSave, categories }) {
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Log Spending</Text>
-            <TouchableOpacity onPress={() => { reset(); onClose(); }}>
+            <TouchableOpacity
+              onPress={() => {
+                reset();
+                onClose();
+              }}
+            >
               <Ionicons name="close" size={24} color={COLORS.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -130,8 +149,14 @@ function LogUsageModal({ visible, onClose, onSave, categories }) {
                   onPress={() => setCategory(c.category)}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name={config.icon} size={16} color={selected ? COLORS.accent : COLORS.textSecondary} />
-                  <Text style={[styles.categoryChipText, selected && styles.categoryChipTextActive]}>
+                  <Ionicons
+                    name={config.icon}
+                    size={16}
+                    color={selected ? COLORS.accent : COLORS.textSecondary}
+                  />
+                  <Text
+                    style={[styles.categoryChipText, selected && styles.categoryChipTextActive]}
+                  >
                     {c.label || config.label}
                   </Text>
                 </TouchableOpacity>
@@ -275,9 +300,12 @@ const styles = StyleSheet.create({
   },
   sectionLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionIcon: {
-    width: 28, height: 28, borderRadius: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     backgroundColor: COLORS.accentLight,
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   sectionTitle: { ...TYPE.label, fontSize: 14, color: COLORS.text },
 
@@ -288,8 +316,11 @@ const styles = StyleSheet.create({
   usageRow: { marginBottom: 14 },
   usageTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   usageIcon: {
-    width: 28, height: 28, borderRadius: 8,
-    justifyContent: 'center', alignItems: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   usageInfo: { flex: 1 },
   usageLabel: { fontSize: 14, fontWeight: '600', color: COLORS.text },
@@ -298,18 +329,24 @@ const styles = StyleSheet.create({
 
   // Progress bar
   progressTrack: {
-    height: 6, borderRadius: 3,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: COLORS.borderLight,
     overflow: 'hidden',
   },
   progressFill: {
-    height: '100%', borderRadius: 3,
+    height: '100%',
+    borderRadius: 3,
   },
 
   // Add button
   addBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 6, paddingVertical: 10, marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginTop: 2,
   },
   addBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.accent },
 
@@ -340,19 +377,27 @@ const styles = StyleSheet.create({
   textInput: {
     backgroundColor: COLORS.bg,
     borderRadius: RADII.md,
-    borderWidth: 1, borderColor: COLORS.borderLight,
-    paddingHorizontal: 14, paddingVertical: 14,
-    fontSize: 16, fontWeight: '500', color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontWeight: '500',
+    color: COLORS.text,
   },
 
   // Category chips
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   categoryChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: RADII.full,
     backgroundColor: COLORS.bg,
-    borderWidth: 1, borderColor: COLORS.borderLight,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   categoryChipActive: {
     backgroundColor: COLORS.accentLight,
@@ -364,16 +409,22 @@ const styles = StyleSheet.create({
   // Amount input
   amountRow: { flexDirection: 'row', alignItems: 'center' },
   dollarSign: {
-    fontSize: 24, fontWeight: '700', color: COLORS.text,
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
     marginRight: 4,
   },
   amountInput: {
     flex: 1,
     backgroundColor: COLORS.bg,
     borderRadius: RADII.md,
-    borderWidth: 1, borderColor: COLORS.borderLight,
-    paddingHorizontal: 14, paddingVertical: 14,
-    fontSize: 24, fontWeight: '700', color: COLORS.text,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.text,
   },
 
   // Save button

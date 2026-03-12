@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Platform, Alert } from 'react-native';
+import { View, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS } from '../constants/theme';
@@ -10,15 +10,19 @@ import ProfileCard from '../components/ProfileCard';
 import VoiceHelp from '../components/VoiceHelp';
 import SOBModal from '../components/SOBModal';
 import {
-  syncAllReminders, scheduleReminder, cancelReminder,
-  cacheReminders, getCachedReminders,
-  cacheUsageSummary, getCachedUsageSummary,
+  syncAllReminders,
+  scheduleReminder,
+  cancelReminder,
+  cacheReminders,
+  getCachedReminders,
+  cacheUsageSummary,
+  getCachedUsageSummary,
   requestNotificationPermissions,
 } from '../utils/notifications';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const _insets = useSafeAreaInsets();
   const { member: _mem, sessionId } = getMemberSession();
   const { firstName, lastName, planName, planNumber, agent, medicareNumber, zipCode } = _mem || {};
   const [showSOB, setShowSOB] = useState(false);
@@ -30,14 +34,14 @@ export default function HomeScreen() {
 
   // Reminders state
   const [reminders, setReminders] = useState([]);
-  const [remindersLoading, setRemindersLoading] = useState(true);
+  const [_remindersLoading, setRemindersLoading] = useState(true);
 
   // Drug data (for Rx card tap detail)
   const [drugsData, setDrugsData] = useState(null);
 
   // Usage tracking state
-  const [usageSummary, setUsageSummary] = useState([]);
-  const [usageLoading, setUsageLoading] = useState(true);
+  const [_usageSummary, setUsageSummary] = useState([]);
+  const [_usageLoading, setUsageLoading] = useState(true);
 
   const member = {
     firstName: firstName || '',
@@ -74,11 +78,15 @@ export default function HomeScreen() {
     if (!planNumber) return;
     setSobLoading(true);
     try {
-      const res = await authFetch(`${API_URL}/sob/summary`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_number: planNumber }),
-      }, 30000);
+      const res = await authFetch(
+        `${API_URL}/sob/summary`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_number: planNumber }),
+        },
+        30000,
+      );
       if (!res.ok) throw new Error('SOB fetch failed');
       const data = await res.json();
       setSobData(data);
@@ -99,7 +107,7 @@ export default function HomeScreen() {
     router.push('/digital-id');
   };
 
-  const handleFindPharmacy = () => {
+  const _handleFindPharmacy = () => {
     router.push('/pharmacy-results');
   };
 
@@ -112,8 +120,11 @@ export default function HomeScreen() {
       const benefitsUrl = `${API_URL}/benefits/${planNumber}`;
       const [benefitsResult, drugsRes] = await Promise.all([
         cachedFetch(authFetch, benefitsUrl)
-          .then(r => r.data)
-          .catch((err) => { if (__DEV__) console.warn('Benefits fetch error:', err); return null; }),
+          .then((r) => r.data)
+          .catch((err) => {
+            if (__DEV__) console.warn('Benefits fetch error:', err);
+            return null;
+          }),
         sessionId
           ? authFetch(`${API_URL}/cms/my-drugs-session/${sessionId}`)
               .then(async (r) => {
@@ -126,7 +137,10 @@ export default function HomeScreen() {
                 }
                 return r.json();
               })
-              .catch((err) => { if (__DEV__) console.warn('Drugs fetch error:', err); return null; })
+              .catch((err) => {
+                if (__DEV__) console.warn('Drugs fetch error:', err);
+                return null;
+              })
           : Promise.resolve(null),
       ]);
       if (!benefitsResult) {
@@ -139,9 +153,12 @@ export default function HomeScreen() {
       if (drugsRes) setDrugsData(drugsRes);
     } catch (err) {
       if (__DEV__) console.warn('Benefits load error:', err);
-      const errType = (err.name === 'AbortError') ? 'timeout'
-        : (err.message === 'Network request failed' || err.name === 'TypeError') ? 'network'
-        : 'server';
+      const errType =
+        err.name === 'AbortError'
+          ? 'timeout'
+          : err.message === 'Network request failed' || err.name === 'TypeError'
+            ? 'network'
+            : 'server';
       setBenefitsError(errType);
       setBenefits([]);
     } finally {
@@ -172,81 +189,92 @@ export default function HomeScreen() {
     }
   };
 
-  const handleAddReminder = useCallback(async (reminderData) => {
-    // Request notification permission on first reminder creation
-    await requestNotificationPermissions();
+  const handleAddReminder = useCallback(
+    async (reminderData) => {
+      // Request notification permission on first reminder creation
+      await requestNotificationPermissions();
 
-    try {
-      const res = await authFetch(`${API_URL}/reminders/${sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reminderData),
-      });
-      if (!res.ok) throw new Error('Create reminder failed');
-      const data = await res.json();
-      const newReminder = data.reminder;
+      try {
+        const res = await authFetch(`${API_URL}/reminders/${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reminderData),
+        });
+        if (!res.ok) throw new Error('Create reminder failed');
+        const data = await res.json();
+        const newReminder = data.reminder;
 
+        setReminders((prev) => {
+          const updated = [...prev, newReminder].sort(
+            (a, b) => a.time_hour * 60 + a.time_minute - (b.time_hour * 60 + b.time_minute),
+          );
+          cacheReminders(updated);
+          return updated;
+        });
+        // Schedule the local notification
+        scheduleReminder(newReminder);
+      } catch (err) {
+        if (__DEV__) console.log('Create reminder error:', err);
+      }
+    },
+    [sessionId],
+  );
+
+  const handleToggleReminder = useCallback(
+    async (reminderId, enabled) => {
+      // Optimistic update — use functional setter to avoid stale closure (H13)
       setReminders((prev) => {
-        const updated = [...prev, newReminder].sort(
-          (a, b) => a.time_hour * 60 + a.time_minute - (b.time_hour * 60 + b.time_minute),
+        const updated = prev.map((r) =>
+          r.id === reminderId ? { ...r, enabled: enabled ? 1 : 0 } : r,
         );
+        cacheReminders(updated);
+        // Schedule/cancel notification from the fresh state
+        const reminder = updated.find((r) => r.id === reminderId);
+        if (reminder) {
+          if (enabled) {
+            scheduleReminder(reminder);
+          } else {
+            cancelReminder(reminderId);
+          }
+        }
+        return updated;
+      });
+
+      try {
+        await authFetch(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled }),
+        });
+      } catch (err) {
+        if (__DEV__) console.log('Toggle reminder error:', err);
+        loadReminders(); // Revert on error
+      }
+    },
+    [sessionId],
+  );
+
+  const handleDeleteReminder = useCallback(
+    async (reminderId) => {
+      // Optimistic update
+      setReminders((prev) => {
+        const updated = prev.filter((r) => r.id !== reminderId);
         cacheReminders(updated);
         return updated;
       });
-      // Schedule the local notification
-      scheduleReminder(newReminder);
-    } catch (err) {
-      if (__DEV__) console.log('Create reminder error:', err);
-    }
-  }, [sessionId]);
+      cancelReminder(reminderId);
 
-  const handleToggleReminder = useCallback(async (reminderId, enabled) => {
-    // Optimistic update — use functional setter to avoid stale closure (H13)
-    setReminders((prev) => {
-      const updated = prev.map((r) => (r.id === reminderId ? { ...r, enabled: enabled ? 1 : 0 } : r));
-      cacheReminders(updated);
-      // Schedule/cancel notification from the fresh state
-      const reminder = updated.find((r) => r.id === reminderId);
-      if (reminder) {
-        if (enabled) {
-          scheduleReminder(reminder);
-        } else {
-          cancelReminder(reminderId);
-        }
+      try {
+        await authFetch(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
+          method: 'DELETE',
+        });
+      } catch (err) {
+        if (__DEV__) console.log('Delete reminder error:', err);
+        loadReminders(); // Revert on error
       }
-      return updated;
-    });
-
-    try {
-      await authFetch(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-    } catch (err) {
-      if (__DEV__) console.log('Toggle reminder error:', err);
-      loadReminders(); // Revert on error
-    }
-  }, [sessionId]);
-
-  const handleDeleteReminder = useCallback(async (reminderId) => {
-    // Optimistic update
-    setReminders((prev) => {
-      const updated = prev.filter((r) => r.id !== reminderId);
-      cacheReminders(updated);
-      return updated;
-    });
-    cancelReminder(reminderId);
-
-    try {
-      await authFetch(`${API_URL}/reminders/${sessionId}/${reminderId}`, {
-        method: 'DELETE',
-      });
-    } catch (err) {
-      if (__DEV__) console.log('Delete reminder error:', err);
-      loadReminders(); // Revert on error
-    }
-  }, [sessionId]);
+    },
+    [sessionId],
+  );
 
   // ── Usage Tracking ──────────────────────────────────────────────
 
@@ -268,39 +296,38 @@ export default function HomeScreen() {
     }
   };
 
-  const handleLogUsage = useCallback(async (usageData) => {
-    try {
-      const res = await authFetch(`${API_URL}/usage/${sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(usageData),
-      });
-      if (!res.ok) throw new Error('Log usage failed');
-      // Refresh summary to get updated totals
-      loadUsageSummary();
-    } catch (err) {
-      if (__DEV__) console.log('Log usage error:', err);
-    }
-  }, [sessionId]);
+  const _handleLogUsage = useCallback(
+    async (usageData) => {
+      try {
+        const res = await authFetch(`${API_URL}/usage/${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(usageData),
+        });
+        if (!res.ok) throw new Error('Log usage failed');
+        // Refresh summary to get updated totals
+        loadUsageSummary();
+      } catch (err) {
+        if (__DEV__) console.log('Log usage error:', err);
+      }
+    },
+    [sessionId],
+  );
 
   // ── Logout ─────────────────────────────────────────────────────
 
   const handleLogout = useCallback(() => {
-    Alert.alert(
-      'Log Out',
-      'Are you sure you want to log out? Your cached data will be cleared.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Log Out',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/');
-          },
+    Alert.alert('Log Out', 'Are you sure you want to log out? Your cached data will be cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Log Out',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          router.replace('/');
         },
-      ],
-    );
+      },
+    ]);
   }, [router]);
 
   // ── Render ──────────────────────────────────────────────────────
@@ -328,6 +355,7 @@ export default function HomeScreen() {
           planName={planName || ''}
           zipCode={zipCode || ''}
           sessionId={sessionId || ''}
+          memberName={`${firstName || ''} ${lastName || ''}`.trim()}
           onReminderCreated={loadReminders}
           onUsageLogged={loadUsageSummary}
         />
@@ -354,11 +382,12 @@ function buildBenefitCards(data, drugsData) {
   if (!data || typeof data !== 'object') return [];
   const row1 = [];
   const row2 = [];
-  const med = (data.medical && typeof data.medical === 'object') ? data.medical : {};
-  const dental = (data.dental && typeof data.dental === 'object') ? data.dental : {};
-  const otc = (data.otc && typeof data.otc === 'object') ? data.otc : {};
-  const flex = (data.flex_ssbci && typeof data.flex_ssbci === 'object') ? data.flex_ssbci : {};
-  const giveback = (data.part_b_giveback && typeof data.part_b_giveback === 'object') ? data.part_b_giveback : {};
+  const med = data.medical && typeof data.medical === 'object' ? data.medical : {};
+  const dental = data.dental && typeof data.dental === 'object' ? data.dental : {};
+  const otc = data.otc && typeof data.otc === 'object' ? data.otc : {};
+  const flex = data.flex_ssbci && typeof data.flex_ssbci === 'object' ? data.flex_ssbci : {};
+  const giveback =
+    data.part_b_giveback && typeof data.part_b_giveback === 'object' ? data.part_b_giveback : {};
 
   // --- Row 1: Medical copays (always 4) ---
   if (med.pcp_copay) {
@@ -401,7 +430,12 @@ function buildBenefitCards(data, drugsData) {
   }
 
   if (otc.has_otc && otc.amount) {
-    const periodLabel = otc.period === 'Monthly' ? 'Per month' : otc.period === 'Quarterly' ? 'Per quarter' : 'Per year';
+    const periodLabel =
+      otc.period === 'Monthly'
+        ? 'Per month'
+        : otc.period === 'Quarterly'
+          ? 'Per quarter'
+          : 'Per year';
     const amt = String(otc.amount);
     const display = amt.startsWith('$') ? amt : '$' + amt;
     row2.push({
@@ -415,8 +449,12 @@ function buildBenefitCards(data, drugsData) {
     row2.push({ label: 'Flex Card', in_network: 'Included' });
   }
 
-  row1.forEach(c => { c._row = 1; });
-  row2.forEach(c => { c._row = 2; });
+  row1.forEach((c) => {
+    c._row = 1;
+  });
+  row2.forEach((c) => {
+    c._row = 2;
+  });
 
   return [...row1, ...row2];
 }

@@ -1,28 +1,28 @@
 // ── Color Palette ─────────────────────────────────────────────
 export const COLORS = {
   // Backgrounds
-  bg: '#F7F5FA',              // warm purple-tinted gray (was flat gray)
-  bgGradientTop: '#EDE7F6',   // top of header gradient
+  bg: '#F7F5FA', // warm purple-tinted gray (was flat gray)
+  bgGradientTop: '#EDE7F6', // top of header gradient
   bgGradientBottom: '#F7F5FA', // blends into main bg
   card: '#FFFFFF',
-  cardTinted: '#FAFAFD',       // very subtle purple tint for alternating
+  cardTinted: '#FAFAFD', // very subtle purple tint for alternating
 
   // Brand
   accent: '#7B3FBF',
-  accentSoft: '#9B6BD4',       // lighter purple for secondary elements
+  accentSoft: '#9B6BD4', // lighter purple for secondary elements
   accentLight: '#F0E8F8',
-  accentLighter: '#F8F4FC',    // barely-there purple for card backgrounds
+  accentLighter: '#F8F4FC', // barely-there purple for card backgrounds
   accentDark: '#5A2D8C',
   accentGlow: 'rgba(123, 63, 191, 0.25)',
 
   // Category accent colors (for benefit card icon backgrounds)
-  careVisit: '#7B3FBF',       // purple - care visits (PCP, Specialist, Urgent, ER)
+  careVisit: '#7B3FBF', // purple - care visits (PCP, Specialist, Urgent, ER)
   careBg: 'rgba(123, 63, 191, 0.08)',
-  rxDrug: '#C0392B',          // warm red - prescriptions/drugs
+  rxDrug: '#C0392B', // warm red - prescriptions/drugs
   rxDrugBg: 'rgba(192, 57, 43, 0.08)',
-  clinical: '#3D6B99',        // slate blue - supplementals (Dental, OTC, Part B, Flex)
+  clinical: '#3D6B99', // slate blue - supplementals (Dental, OTC, Part B, Flex)
   clinicalBg: 'rgba(61, 107, 153, 0.08)',
-  savings: '#3A7D5C',         // sage green - savings
+  savings: '#3A7D5C', // sage green - savings
   savingsBg: 'rgba(58, 125, 92, 0.08)',
 
   // Text
@@ -83,14 +83,14 @@ export const SHADOWS = {
   cardLifted: {
     shadowColor: '#7B3FBF',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
+    shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 4,
   },
   container: {
     shadowColor: '#7B3FBF',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.10,
+    shadowOpacity: 0.1,
     shadowRadius: 16,
     elevation: 6,
   },
@@ -104,7 +104,7 @@ export const SHADOWS = {
   button: {
     shadowColor: '#7B3FBF',
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.20,
+    shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 4,
   },
@@ -126,18 +126,23 @@ export const SHADOWS = {
 
 // ── Typography Scale ─────────────────────────────────────────
 export const TYPE = {
-  hero:          { fontSize: 34, fontWeight: '700', letterSpacing: -0.5 },
-  h1:            { fontSize: 30, fontWeight: '700', letterSpacing: -0.3 },
-  h2:            { fontSize: 24, fontWeight: '700', letterSpacing: -0.2 },
-  h3:            { fontSize: 19, fontWeight: '700', letterSpacing: 0 },
-  body:          { fontSize: 16, fontWeight: '400', letterSpacing: 0.1 },
-  bodyMedium:    { fontSize: 15, fontWeight: '500', letterSpacing: 0.1 },
-  label:         { fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
-  labelSmall:    { fontSize: 11, fontWeight: '500', letterSpacing: 0.4 },
-  caption:       { fontSize: 12, fontWeight: '500', letterSpacing: 0.3 },
-  cardValue:     { fontSize: 19, fontWeight: '700', letterSpacing: 0.1 },
-  cardLabel:     { fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
-  sectionHeader: { fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  hero: { fontSize: 34, fontWeight: '700', letterSpacing: -0.5 },
+  h1: { fontSize: 30, fontWeight: '700', letterSpacing: -0.3 },
+  h2: { fontSize: 24, fontWeight: '700', letterSpacing: -0.2 },
+  h3: { fontSize: 19, fontWeight: '700', letterSpacing: 0 },
+  body: { fontSize: 16, fontWeight: '400', letterSpacing: 0.1 },
+  bodyMedium: { fontSize: 15, fontWeight: '500', letterSpacing: 0.1 },
+  label: { fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
+  labelSmall: { fontSize: 11, fontWeight: '500', letterSpacing: 0.4 },
+  caption: { fontSize: 12, fontWeight: '500', letterSpacing: 0.3 },
+  cardValue: { fontSize: 19, fontWeight: '700', letterSpacing: 0.1 },
+  cardLabel: { fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
 };
 
 // ── Animation Timing ─────────────────────────────────────────
@@ -153,31 +158,141 @@ export const MOTION = {
 // Maps label keywords → { family, name, color, bg } for @expo/vector-icons
 // 3-tone palette: purple (care visits), slate blue (clinical), sage green (savings)
 export const BENEFIT_ICON_MAP = {
-  'pcp':          { family: 'MaterialCommunityIcons', name: 'stethoscope',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'primary':      { family: 'MaterialCommunityIcons', name: 'stethoscope',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'doctor':       { family: 'MaterialCommunityIcons', name: 'stethoscope',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'specialist':   { family: 'MaterialCommunityIcons', name: 'account-tie',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'emergency':    { family: 'MaterialCommunityIcons', name: 'ambulance',                color: COLORS.careVisit,  bg: COLORS.careBg },
-  'er ':          { family: 'MaterialCommunityIcons', name: 'ambulance',                color: COLORS.careVisit,  bg: COLORS.careBg },
-  'urgent':       { family: 'MaterialCommunityIcons', name: 'medical-bag',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'dental':       { family: 'MaterialCommunityIcons', name: 'tooth-outline',            color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'vision':       { family: 'Ionicons',               name: 'eye-outline',              color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'eye':          { family: 'Ionicons',               name: 'eye-outline',              color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'hearing':      { family: 'MaterialCommunityIcons', name: 'ear-hearing',              color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'hospital':     { family: 'Ionicons',               name: 'bed-outline',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'inpatient':    { family: 'Ionicons',               name: 'bed-outline',              color: COLORS.careVisit,  bg: COLORS.careBg },
-  'mental':       { family: 'MaterialCommunityIcons', name: 'head-heart-outline',       color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'lab':          { family: 'MaterialCommunityIcons', name: 'flask-outline',            color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'x-ray':        { family: 'MaterialCommunityIcons', name: 'flask-outline',            color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'drug':         { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
-  'prescription': { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
-  'rx':           { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
-  'estimated':    { family: 'MaterialCommunityIcons', name: 'pill',                     color: COLORS.rxDrug,     bg: COLORS.rxDrugBg },
-  'preventive':   { family: 'Ionicons',               name: 'checkmark-circle-outline', color: COLORS.savings,    bg: COLORS.savingsBg },
-  'telehealth':   { family: 'Ionicons',               name: 'videocam-outline',         color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'otc':          { family: 'Ionicons',               name: 'cart-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'flex':         { family: 'Ionicons',               name: 'card-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'part b':       { family: 'Ionicons',               name: 'cash-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
-  'giveback':     { family: 'Ionicons',               name: 'cash-outline',             color: COLORS.clinical,   bg: COLORS.clinicalBg },
+  pcp: {
+    family: 'MaterialCommunityIcons',
+    name: 'stethoscope',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  primary: {
+    family: 'MaterialCommunityIcons',
+    name: 'stethoscope',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  doctor: {
+    family: 'MaterialCommunityIcons',
+    name: 'stethoscope',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  specialist: {
+    family: 'MaterialCommunityIcons',
+    name: 'account-tie',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  emergency: {
+    family: 'MaterialCommunityIcons',
+    name: 'ambulance',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  'er ': {
+    family: 'MaterialCommunityIcons',
+    name: 'ambulance',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  urgent: {
+    family: 'MaterialCommunityIcons',
+    name: 'medical-bag',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  dental: {
+    family: 'MaterialCommunityIcons',
+    name: 'tooth-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  vision: {
+    family: 'Ionicons',
+    name: 'eye-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  eye: { family: 'Ionicons', name: 'eye-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
+  hearing: {
+    family: 'MaterialCommunityIcons',
+    name: 'ear-hearing',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  hospital: { family: 'Ionicons', name: 'bed-outline', color: COLORS.careVisit, bg: COLORS.careBg },
+  inpatient: {
+    family: 'Ionicons',
+    name: 'bed-outline',
+    color: COLORS.careVisit,
+    bg: COLORS.careBg,
+  },
+  mental: {
+    family: 'MaterialCommunityIcons',
+    name: 'head-heart-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  lab: {
+    family: 'MaterialCommunityIcons',
+    name: 'flask-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  'x-ray': {
+    family: 'MaterialCommunityIcons',
+    name: 'flask-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  drug: {
+    family: 'MaterialCommunityIcons',
+    name: 'pill',
+    color: COLORS.rxDrug,
+    bg: COLORS.rxDrugBg,
+  },
+  prescription: {
+    family: 'MaterialCommunityIcons',
+    name: 'pill',
+    color: COLORS.rxDrug,
+    bg: COLORS.rxDrugBg,
+  },
+  rx: { family: 'MaterialCommunityIcons', name: 'pill', color: COLORS.rxDrug, bg: COLORS.rxDrugBg },
+  estimated: {
+    family: 'MaterialCommunityIcons',
+    name: 'pill',
+    color: COLORS.rxDrug,
+    bg: COLORS.rxDrugBg,
+  },
+  preventive: {
+    family: 'Ionicons',
+    name: 'checkmark-circle-outline',
+    color: COLORS.savings,
+    bg: COLORS.savingsBg,
+  },
+  telehealth: {
+    family: 'Ionicons',
+    name: 'videocam-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  otc: { family: 'Ionicons', name: 'cart-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
+  flex: { family: 'Ionicons', name: 'card-outline', color: COLORS.clinical, bg: COLORS.clinicalBg },
+  'part b': {
+    family: 'Ionicons',
+    name: 'cash-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
+  giveback: {
+    family: 'Ionicons',
+    name: 'cash-outline',
+    color: COLORS.clinical,
+    bg: COLORS.clinicalBg,
+  },
 };
-export const DEFAULT_ICON = { family: 'Ionicons', name: 'document-text-outline', color: COLORS.careVisit, bg: COLORS.careBg };
+export const DEFAULT_ICON = {
+  family: 'Ionicons',
+  name: 'document-text-outline',
+  color: COLORS.careVisit,
+  bg: COLORS.careBg,
+};

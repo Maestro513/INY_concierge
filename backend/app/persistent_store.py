@@ -100,6 +100,12 @@ class PersistentStore:
                 latency_sum     REAL NOT NULL DEFAULT 0.0,
                 updated_at      REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS screening_config (
+                id              INTEGER PRIMARY KEY CHECK (id = 1),
+                config_json     TEXT NOT NULL,
+                updated_at      REAL NOT NULL
+            );
         """)
         conn.commit()
         log.info(f"Persistent store ready at {self.db_path}")
@@ -415,4 +421,28 @@ class PersistentStore:
         conn.execute("DELETE FROM used_refresh_tokens WHERE used_at < ?", (now - 2592000,))
         # Old rate limit entries
         conn.execute("DELETE FROM rate_limit_hits WHERE hit_at < ?", (now - 600,))
+        conn.commit()
+
+    # ── Screening Config ───────────────────────────────────────────────
+
+    def get_screening_config(self) -> dict | None:
+        """Return admin-configured screenings or None if not set."""
+        row = self._conn().execute(
+            "SELECT config_json FROM screening_config WHERE id = 1"
+        ).fetchone()
+        if row:
+            return json.loads(row["config_json"])
+        return None
+
+    def set_screening_config(self, config: dict):
+        """Save screening config (upsert single row)."""
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO screening_config (id, config_json, updated_at)
+               VALUES (1, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                   config_json = excluded.config_json,
+                   updated_at = excluded.updated_at""",
+            (json.dumps(config), time.time()),
+        )
         conn.commit()
