@@ -130,8 +130,9 @@ export default function OTPScreen() {
           );
 
           clearPendingOtp();
+          const isDev = code === '123456';
           const screeningDone = await AsyncStorage.getItem('@health_screening_complete');
-          router.replace(screeningDone ? '/home' : '/health-screening');
+          router.replace(!isDev && screeningDone ? '/home' : '/health-screening');
         } else {
           setError('Verification failed. Please try again.');
         }
