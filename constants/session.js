@@ -55,10 +55,6 @@ export async function logout() {
   const { clearAllCache } = require('../utils/offlineCache');
   await clearAllCache();
 
-  // Clear screening flags so screenings show again on next login
-  const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-  await AsyncStorage.multiRemove(['@health_screening_complete', '@sdoh_screening_complete']);
-
   // Destroy encryption key so any remaining cached data is unreadable
   const { destroyEncryptionKey } = require('../utils/secureCache');
   await destroyEncryptionKey();
