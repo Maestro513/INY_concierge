@@ -326,6 +326,7 @@ export default function ProfileCard({
   onAddReminder,
   drugsData,
   onLogout,
+  onOpenSettings,
 }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -364,15 +365,6 @@ export default function ProfileCard({
       >
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {onLogout && (
-              <TouchableOpacity
-                onPress={onLogout}
-                accessibilityLabel="Log out"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="log-out-outline" size={20} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            )}
             <Text style={styles.greeting}>{greeting()}</Text>
           </View>
           <Text style={styles.name}>
@@ -490,6 +482,16 @@ export default function ProfileCard({
         >
           <Ionicons name="document-text-outline" size={18} color={COLORS.accent} />
           <Text style={styles.quickPillText}>Benefits</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onOpenSettings}
+          style={styles.quickPill}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open setup and settings"
+        >
+          <Ionicons name="settings-outline" size={18} color={COLORS.accent} />
+          <Text style={styles.quickPillText}>Setup</Text>
         </TouchableOpacity>
       </View>
 
