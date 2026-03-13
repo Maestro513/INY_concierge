@@ -20,13 +20,33 @@ import { RADII, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout } from '../constants/api';
 import { CALL_NUMBER } from '../constants/data';
 import { setPendingOtp } from '../constants/session';
+import { getDeviceTrust, isDeviceAuthAvailable } from '../utils/deviceAuth';
 const logo = require('../assets/images/logo.png');
 export default function PhoneScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [focused, setFocused] = useState(false);
+  const [checkingTrust, setCheckingTrust] = useState(true);
   const router = useRouter();
+
+  // On mount, check if device is trusted → redirect to lock screen
+  useEffect(() => {
+    (async () => {
+      try {
+        const { trusted } = await getDeviceTrust();
+        const authAvailable = await isDeviceAuthAvailable();
+        if (trusted && authAvailable) {
+          router.replace('/lock');
+          return;
+        }
+      } catch {
+        // Fall through to phone screen
+      }
+      setCheckingTrust(false);
+    })();
+  }, []);
+
   // Entrance animations
   const logoScale = useRef(new Animated.Value(0.8)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -109,6 +129,16 @@ export default function PhoneScreen() {
       setLoading(false);
     }
   };
+
+  // Don't flash the phone screen while checking device trust
+  if (checkingTrust) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Image source={logo} style={{ width: 140, height: 140 }} resizeMode="contain" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* ── Top Section: White with logo ── */}

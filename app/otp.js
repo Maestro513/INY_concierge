@@ -20,6 +20,7 @@ import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
 import { setMemberSession, getPendingOtp, clearPendingOtp } from '../constants/session';
 import { CALL_NUMBER } from '../constants/data';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { markDeviceTrusted } from '../utils/deviceAuth';
 
 export default function OTPScreen() {
   const pending = getPendingOtp();
@@ -130,6 +131,10 @@ export default function OTPScreen() {
           );
 
           clearPendingOtp();
+
+          // Mark device as trusted so future logins use device auth
+          await markDeviceTrusted(phone);
+
           const isDev = code === '123456';
           const screeningDone = await AsyncStorage.getItem('@health_screening_complete');
           router.replace(!isDev && screeningDone ? '/home' : '/health-screening');

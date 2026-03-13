@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/theme';
-import { getMemberSession, logout } from '../constants/session';
+import { getMemberSession, logout, fullLogout } from '../constants/session';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -20,18 +20,41 @@ export default function SettingsScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out? Your cached data will be cleared.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log Out',
-        style: 'destructive',
-        onPress: async () => {
-          setLoggingOut(true);
-          await logout();
-          router.replace('/');
+    Alert.alert(
+      'Log Out',
+      'You can unlock again with Face ID, fingerprint, or your phone passcode.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            setLoggingOut(true);
+            await logout();
+            router.replace('/');
+          },
         },
-      },
-    ]);
+      ],
+    );
+  };
+
+  const handleFullLogout = () => {
+    Alert.alert(
+      'Sign Out of Device',
+      'This will remove all data from this device. You will need to verify your phone number again with a new code.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            setLoggingOut(true);
+            await fullLogout();
+            router.replace('/');
+          },
+        },
+      ],
+    );
   };
 
   const handleFamilyAccess = () => {
@@ -110,21 +133,37 @@ export default function SettingsScreen() {
           <Text style={s.sectionLabel}>ACTIONS</Text>
           <View style={s.card}>
             <TouchableOpacity
-              style={[s.menuRow, s.menuRowLast]}
+              style={s.menuRow}
               onPress={handleLogout}
               disabled={loggingOut}
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel="Log out"
             >
+              <View style={[s.menuIcon, { backgroundColor: COLORS.accentLight }]}>
+                <Ionicons name="lock-closed-outline" size={20} color={COLORS.accent} />
+              </View>
+              <View style={s.menuInfo}>
+                <Text style={s.menuLabel}>Lock App</Text>
+                <Text style={s.menuSub}>Unlock later with Face ID or passcode</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.menuRow, s.menuRowLast]}
+              onPress={handleFullLogout}
+              disabled={loggingOut}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out of this device"
+            >
               <View style={[s.menuIcon, { backgroundColor: '#FDECEA' }]}>
                 <Ionicons name="log-out-outline" size={20} color="#C0392B" />
               </View>
               <View style={s.menuInfo}>
                 <Text style={[s.menuLabel, { color: '#C0392B' }]}>
-                  {loggingOut ? 'Logging out...' : 'Log Out'}
+                  {loggingOut ? 'Signing out...' : 'Sign Out of Device'}
                 </Text>
-                <Text style={s.menuSub}>Clear all cached data and sign out</Text>
+                <Text style={s.menuSub}>Requires phone verification to log back in</Text>
               </View>
             </TouchableOpacity>
           </View>
