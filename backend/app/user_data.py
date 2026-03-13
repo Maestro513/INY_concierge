@@ -9,6 +9,7 @@ API layer resolves session_id → phone before calling these methods.
 """
 
 import hashlib
+import hmac
 import logging
 import os
 import sqlite3
@@ -76,8 +77,9 @@ class UserDataDB:
 
     @staticmethod
     def _hash_phone(phone: str) -> str:
-        """SHA-256 hash of phone for indexed lookups (not reversible)."""
-        return hashlib.sha256(phone.encode()).hexdigest()
+        """HMAC-SHA256 keyed hash of phone for indexed lookups (not reversible without key)."""
+        key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+        return hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
 
     @staticmethod
     def _encrypt_phone(phone: str) -> str:

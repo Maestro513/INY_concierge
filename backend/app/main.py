@@ -1654,8 +1654,9 @@ def get_sob_pdf(plan_number: ValidPlanNumber, _user: dict = Depends(get_current_
 
 
 @app.get("/sob/raw/{plan_number}")
-def get_sob_raw(plan_number: str):
+def get_sob_raw(plan_number: ValidPlanNumber, _user: dict = Depends(get_current_user)):
     """Return the raw extracted JSON (chunks + carrier) for a plan."""
+    _authorize_plan(_user, plan_number)
     path = _find_extracted_file(normalize_plan_id(plan_number))
     if not path:
         raise HTTPException(status_code=404, detail=f"No extracted data for {plan_number}")
@@ -1664,8 +1665,10 @@ def get_sob_raw(plan_number: str):
 
 
 @app.get("/debug/files")
-def list_disk_files():
-    """List files on the persistent disk (dev only)."""
+def list_disk_files(_user: dict = Depends(get_current_user)):
+    """List files on the persistent disk (dev only, requires auth)."""
+    if APP_ENV not in ("development",):
+        raise HTTPException(status_code=404, detail="Not found")
     files = {}
     for folder in [EXTRACTED_DIR, PDFS_DIR]:
         if os.path.exists(folder):
@@ -2132,16 +2135,9 @@ def cms_my_drugs_session(session_id: str, _user: dict = Depends(get_current_user
         raise
     except Exception as e:
         log.error("Drug lookup failed: %s: %s", type(e).__name__, e)
-        raise HTTPException(status_code=500, detail=f"Drug lookup error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Drug lookup failed. Please try again later.")
 
 
-@app.get("/cms/my-drugs/{phone}")
-def cms_my_drugs(phone: str, _user: dict = Depends(get_current_user)):
-    """Deprecated — use /cms/my-drugs-session/{session_id} instead."""
-    raise HTTPException(
-        status_code=410,
-        detail="This endpoint is deprecated. Use /cms/my-drugs-session/{session_id} instead.",
-    )
 
 
 def _my_drugs_impl(member: dict):
