@@ -29,6 +29,7 @@ from .admin_auth import (
     hash_password,
     require_admin,
     require_role,
+    revoke_admin_token,
     set_auth_cookies,
 )
 from .audit import get_audit_log
@@ -245,8 +246,16 @@ async def admin_me(payload: dict = Depends(require_admin)):
 
 
 @router.post("/auth/logout")
-async def admin_logout():
-    """Clear auth cookies."""
+async def admin_logout(request: Request):
+    """Revoke tokens server-side and clear auth cookies."""
+    # Revoke the access token
+    access_token = request.cookies.get("admin_token", "")
+    if access_token:
+        revoke_admin_token(access_token)
+    # Revoke the refresh token
+    refresh_token = request.cookies.get("admin_refresh", "")
+    if refresh_token:
+        revoke_admin_token(refresh_token)
     response = JSONResponse(content={"success": True})
     clear_auth_cookies(response)
     return response
@@ -668,18 +677,26 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
     """
     Upload a tar.gz of extracted JSON files to EXTRACTED_DIR.
 
-    Auth: ADMIN_SECRET header (same as sync endpoints) — no JWT needed
-    so we can curl from CLI without logging in.
+    Auth: JWT (admin/super_admin) or ADMIN_SECRET header fallback for CLI.
 
     Usage:
         curl -X POST https://iny-concierge.onrender.com/api/admin/upload/extracted \
              -H "X-Admin-Secret: $ADMIN_SECRET" \
              -F "file=@extracted_jsons.tar.gz"
     """
-    secret = request.headers.get("X-Admin-Secret", "")
-    import hmac
-    if not ADMIN_SECRET or not hmac.compare_digest(secret, ADMIN_SECRET):
-        raise HTTPException(status_code=403, detail="Forbidden — invalid admin secret.")
+    # Try JWT auth first, fall back to static secret for CLI usage
+    uploader = "cli_upload"
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        payload = decode_admin_token(auth_header[7:])
+        if payload.get("role") not in ("admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="Insufficient permissions.")
+        uploader = payload.get("email", payload.get("sub", "unknown"))
+    else:
+        secret = request.headers.get("X-Admin-Secret", "")
+        import hmac
+        if not ADMIN_SECRET or not hmac.compare_digest(secret, ADMIN_SECRET):
+            raise HTTPException(status_code=403, detail="Forbidden — invalid admin secret.")
 
     if not file.filename or not file.filename.endswith((".tar.gz", ".tgz")):
         raise HTTPException(status_code=400, detail="File must be a .tar.gz archive.")
@@ -739,6 +756,14 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
         benefits_alt = len([f for f in os.listdir(EXTRACTED_DIR)
                             if f.endswith("_benefits.json")])
         benefits_count = max(benefits_json, benefits_alt)
+
+        get_audit_log().record(
+            actor=uploader,
+            action="upload",
+            resource="extracted_data",
+            ip_address=request.client.host if request.client else "",
+            detail=f"files={count} size={round(total_bytes / (1024 * 1024), 1)}MB",
+        )
 
         return {
             "success": True,
@@ -1040,7 +1065,7 @@ async def update_appointment_request(
     request_id: int,
     body: UpdateAppointmentRequest,
     request: Request,
-    payload: dict = Depends(require_admin),
+    payload: dict = Depends(require_role("admin", "super_admin")),
 ):
     """Update appointment request status or add agent notes."""
     from .user_data import UserDataDB

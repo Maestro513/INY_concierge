@@ -95,16 +95,19 @@ export default function SDoHScreeningScreen() {
   const handleSubmit = async () => {
     setSaving(true);
     try {
-      if (sessionId) {
-        try {
-          await authFetch(`${API_URL}/sdoh-screening`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(answers),
-          });
-        } catch {
-          if (__DEV__) console.log('SDoH screening save failed');
-        }
+      if (!sessionId) {
+        Alert.alert('Session expired', 'Please log in again to save your responses.');
+        setSaving(false);
+        return;
+      }
+      try {
+        await authFetch(`${API_URL}/sdoh-screening`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(answers),
+        });
+      } catch {
+        if (__DEV__) console.log('SDoH screening save failed');
       }
       await AsyncStorage.setItem(SDOH_KEY, 'true');
       router.replace('/home');

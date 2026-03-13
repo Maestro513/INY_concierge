@@ -20,7 +20,7 @@ let AsyncStorageMod = null;
 try {
   AsyncStorageMod = require('@react-native-async-storage/async-storage').default;
 } catch (e) {
-  console.log('[Notifications] AsyncStorage native module not available. Caching disabled.');
+  if (__DEV__) console.log('[Notifications] AsyncStorage native module not available. Caching disabled.');
 }
 
 let Notifications = null;
@@ -34,7 +34,7 @@ try {
     }),
   });
 } catch (e) {
-  console.log('[Notifications] Native module not available. Reminders will save but won\'t send alerts.');
+  if (__DEV__) console.log('[Notifications] Native module not available. Reminders will save but won\'t send alerts.');
 }
 
 // ── Android notification channel (required for Android 8+) ───────
@@ -52,7 +52,7 @@ export async function setupNotificationChannel() {
         description: 'Daily medication reminder alerts',
       });
     } catch (e) {
-      console.log('[Notifications] Channel setup failed:', e.message);
+      if (__DEV__) console.log('[Notifications] Channel setup failed:', e.message);
     }
   }
 }
@@ -115,7 +115,7 @@ export async function scheduleReminder(reminder) {
       },
     });
   } catch (e) {
-    console.log('[Notifications] Schedule failed:', e.message);
+    if (__DEV__) console.log('[Notifications] Schedule failed:', e.message);
   }
 }
 
@@ -139,7 +139,7 @@ export async function syncAllReminders(reminders) {
       if (r.enabled) await scheduleReminder(r);
     }
   } catch (e) {
-    console.log('[Notifications] Sync failed:', e.message);
+    if (__DEV__) console.log('[Notifications] Sync failed:', e.message);
   }
 }
 

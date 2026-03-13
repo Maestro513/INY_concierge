@@ -9,8 +9,6 @@
  * Trust expires after 90 days of inactivity (no app opens).
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 let LocalAuthentication = null;
 let SecureStore = null;
 
@@ -25,10 +23,10 @@ try {
   // Not available
 }
 
-// Keys
-const TRUST_KEY = '@device_trusted';          // AsyncStorage — "1" if trusted
-const TRUST_PHONE_KEY = 'iny_trust_phone';    // SecureStore — phone number
-const LAST_ACTIVITY_KEY = '@device_last_activity'; // AsyncStorage — epoch ms
+// Keys — all stored in SecureStore to prevent tampering on rooted devices
+const TRUST_KEY = 'iny_trust_flag';            // SecureStore — "1" if trusted
+const TRUST_PHONE_KEY = 'iny_trust_phone';     // SecureStore — phone number
+const LAST_ACTIVITY_KEY = 'iny_trust_activity'; // SecureStore — epoch ms
 
 const TRUST_EXPIRY_DAYS = 90;
 const TRUST_EXPIRY_MS = TRUST_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
@@ -40,18 +38,18 @@ const TRUST_EXPIRY_MS = TRUST_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
  * Stores the member's phone so we can auto-login on return.
  */
 export async function markDeviceTrusted(phone) {
-  await AsyncStorage.setItem(TRUST_KEY, '1');
-  await AsyncStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
-  if (SecureStore) {
-    await SecureStore.setItemAsync(TRUST_PHONE_KEY, phone);
-  }
+  if (!SecureStore) return;
+  await SecureStore.setItemAsync(TRUST_KEY, '1');
+  await SecureStore.setItemAsync(LAST_ACTIVITY_KEY, String(Date.now()));
+  await SecureStore.setItemAsync(TRUST_PHONE_KEY, phone);
 }
 
 /**
  * Update the last-activity timestamp (call on each app foreground).
  */
 export async function touchActivity() {
-  await AsyncStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+  if (!SecureStore) return;
+  await SecureStore.setItemAsync(LAST_ACTIVITY_KEY, String(Date.now()));
 }
 
 /**
@@ -59,12 +57,13 @@ export async function touchActivity() {
  * Returns { trusted: boolean, phone: string | null }.
  */
 export async function getDeviceTrust() {
+  if (!SecureStore) return { trusted: false, phone: null };
   try {
-    const trusted = await AsyncStorage.getItem(TRUST_KEY);
+    const trusted = await SecureStore.getItemAsync(TRUST_KEY);
     if (trusted !== '1') return { trusted: false, phone: null };
 
     // Check expiry
-    const lastActivity = await AsyncStorage.getItem(LAST_ACTIVITY_KEY);
+    const lastActivity = await SecureStore.getItemAsync(LAST_ACTIVITY_KEY);
     if (lastActivity) {
       const elapsed = Date.now() - parseInt(lastActivity, 10);
       if (elapsed > TRUST_EXPIRY_MS) {
@@ -74,11 +73,7 @@ export async function getDeviceTrust() {
     }
 
     // Get stored phone
-    let phone = null;
-    if (SecureStore) {
-      phone = await SecureStore.getItemAsync(TRUST_PHONE_KEY);
-    }
-
+    const phone = await SecureStore.getItemAsync(TRUST_PHONE_KEY);
     return { trusted: !!phone, phone };
   } catch {
     return { trusted: false, phone: null };
@@ -89,10 +84,10 @@ export async function getDeviceTrust() {
  * Clear device trust completely (used for "Sign out of this device").
  */
 export async function clearDeviceTrust() {
-  await AsyncStorage.multiRemove([TRUST_KEY, LAST_ACTIVITY_KEY]);
-  if (SecureStore) {
-    await SecureStore.deleteItemAsync(TRUST_PHONE_KEY).catch(() => {});
-  }
+  if (!SecureStore) return;
+  await SecureStore.deleteItemAsync(TRUST_KEY).catch(() => {});
+  await SecureStore.deleteItemAsync(LAST_ACTIVITY_KEY).catch(() => {});
+  await SecureStore.deleteItemAsync(TRUST_PHONE_KEY).catch(() => {});
 }
 
 // ── Local authentication (biometric / device PIN) ───────────────

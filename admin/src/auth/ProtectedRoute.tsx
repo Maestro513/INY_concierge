@@ -2,7 +2,12 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAdminAuth } from './AdminAuthProvider';
 import { Skeleton } from '@/components/ui/skeleton';
 
-export default function ProtectedRoute() {
+interface ProtectedRouteProps {
+  /** Roles allowed to access this route. If omitted, any authenticated active user is allowed. */
+  allowedRoles?: Array<'super_admin' | 'admin' | 'viewer'>;
+}
+
+export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps = {}) {
   const { user, loading } = useAdminAuth();
 
   if (loading) {
@@ -17,8 +22,12 @@ export default function ProtectedRoute() {
     );
   }
 
-  if (!user) {
+  if (!user || !user.is_active) {
     return <Navigate to="/admin/login" replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/admin" replace />;
   }
 
   return <Outlet />;

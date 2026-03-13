@@ -5,6 +5,7 @@ Zoho CRM client for looking up members by phone number.
 import logging
 import threading
 import time
+from urllib.parse import quote
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -122,8 +123,9 @@ def _search_contact_impl(phone: str) -> dict | None:
     # Try with formatted number (XXX) XXX-XXXX
     if len(clean) == 10:
         formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}"
+        encoded = quote(formatted, safe="")
         for field in ["Phone", "Mobile"]:
-            search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{formatted})"
+            search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{encoded})"
             resp = _http.get(search_url, headers=headers, timeout=15)
 
             if resp.status_code == 200:

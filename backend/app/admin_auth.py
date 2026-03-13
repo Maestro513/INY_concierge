@@ -56,6 +56,21 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 # ── JWT tokens ───────────────────────────────────────────────────────────────
 
+_revoked_jtis: set[str] = set()
+
+
+def revoke_admin_token(token: str) -> None:
+    """Add a token's jti to the revocation set (server-side logout)."""
+    try:
+        payload = jwt.decode(token, ADMIN_JWT_SECRET, algorithms=["HS256"],
+                             options={"verify_exp": False})
+        jti = payload.get("jti")
+        if jti:
+            _revoked_jtis.add(jti)
+    except jwt.InvalidTokenError:
+        pass  # Already invalid — nothing to revoke
+
+
 def create_admin_tokens(user: dict) -> dict:
     """Create access + refresh tokens for an admin user."""
     now = time.time()
@@ -64,6 +79,7 @@ def create_admin_tokens(user: dict) -> dict:
         "email": user["email"],
         "role": user["role"],
         "type": "admin_access",
+        "jti": secrets.token_urlsafe(24),
         "iat": now,
         "exp": now + ADMIN_ACCESS_TTL,
     }
@@ -97,6 +113,8 @@ def decode_admin_token(token: str, expected_type: str = "admin_access") -> dict:
         raise HTTPException(status_code=401, detail="Invalid admin token.")
     if payload.get("type") != expected_type:
         raise HTTPException(status_code=401, detail="Invalid admin token type.")
+    if payload.get("jti") in _revoked_jtis:
+        raise HTTPException(status_code=401, detail="Token has been revoked.")
     return payload
 
 

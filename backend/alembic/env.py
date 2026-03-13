@@ -5,6 +5,10 @@ Manages schema migrations for:
   - persistent_store.db (OTP + sessions)
   - user_data.db (reminders + usage tracking)
 
+NOTE: admin.db and audit.db are migrated by db_migrate.py (runs on
+every deploy via start.sh). If you add tables/columns to those DBs,
+add them there — not here.
+
 Both databases share the same migration history since they're
 part of the same application. Tables are created idempotently
 so migrations only run ALTER/ADD operations.

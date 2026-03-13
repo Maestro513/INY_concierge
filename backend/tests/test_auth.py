@@ -5,6 +5,7 @@ Note: OTP generation/verification is tested in test_persistent_store.py
 (which tests the production PersistentStore implementation).
 """
 
+import os
 import time
 
 import pytest
@@ -61,3 +62,42 @@ class TestJWTTokens:
         tokens = create_tokens("5551234567", sample_member, jwt_secret="secret-A")
         with pytest.raises(HTTPException):
             decode_token(tokens["access_token"], jwt_secret="secret-B")
+
+
+class TestProductionAuthEnforcement:
+    """Verify that protected endpoints reject unauthenticated requests
+    when APP_ENV is NOT development (i.e. auth is actually enforced)."""
+
+    @pytest.fixture
+    def prod_client(self):
+        """TestClient with APP_ENV=production so auth is enforced."""
+        orig = os.environ.get("APP_ENV")
+        os.environ["APP_ENV"] = "production"
+        os.environ.setdefault("JWT_SECRET", "test-prod-secret")
+        os.environ.setdefault("ADMIN_JWT_SECRET", "test-admin-prod-secret")
+        # Re-import to pick up production APP_ENV
+        import importlib
+        import app.main as main_mod
+        importlib.reload(main_mod)
+        from app.main import app
+        from fastapi.testclient import TestClient
+        with TestClient(app) as c:
+            yield c
+        # Restore
+        if orig is not None:
+            os.environ["APP_ENV"] = orig
+        else:
+            os.environ.pop("APP_ENV", None)
+        importlib.reload(main_mod)
+
+    def test_benefits_requires_auth(self, prod_client):
+        resp = prod_client.get("/benefits/H1234-001")
+        assert resp.status_code == 401
+
+    def test_ask_requires_auth(self, prod_client):
+        resp = prod_client.post("/ask", json={"question": "test", "plan_number": "H1234-001"})
+        assert resp.status_code == 401
+
+    def test_health_screenings_config_requires_auth(self, prod_client):
+        resp = prod_client.get("/health-screenings/config")
+        assert resp.status_code == 401

@@ -66,7 +66,7 @@ export default function HomeScreen() {
   useEffect(() => {
     // Reset all state when plan changes (e.g. user logs out and back in)
     setBenefits([]);
-    setBenefitsError(false);
+    setBenefitsError('');
     setSobData(null);
     setReminders([]);
     setUsageSummary([]);

@@ -5,6 +5,8 @@ Separate from the mobile user data — stores admin accounts,
 login events, and search analytics.
 """
 
+import hashlib
+import hmac as _hmac
 import logging
 import os
 import sqlite3
@@ -139,13 +141,21 @@ def update_admin_user(uid: int, **fields) -> dict | None:
 
 # ── Login Events ─────────────────────────────────────────────────────────────
 
+def _hash_identifier(value: str) -> str:
+    """Deterministic HMAC hash for PII stored in login/search events."""
+    key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+    return _hmac.new(key, value.lower().strip().encode(), hashlib.sha256).hexdigest()
+
+
 def record_login_event(phone: str = "", ip_address: str = "",
                        user_agent: str = "", success: bool = True):
     with _get_conn() as conn:
         conn.execute(
             "INSERT INTO login_events (phone, ip_address, user_agent, success) "
             "VALUES (?, ?, ?, ?)",
-            (phone, ip_address, user_agent, 1 if success else 0),
+            (_hash_identifier(phone) if phone else "",
+             _hash_identifier(ip_address) if ip_address else "",
+             user_agent, 1 if success else 0),
         )
 
 
@@ -154,7 +164,7 @@ def clear_failed_logins(email: str):
     with _get_conn() as conn:
         conn.execute(
             "DELETE FROM login_events WHERE phone = ? AND success = 0",
-            (email,),
+            (_hash_identifier(email),),
         )
 
 
@@ -165,7 +175,7 @@ def count_recent_failed_logins(email: str, window_seconds: int = 900) -> int:
         row = conn.execute(
             "SELECT COUNT(*) FROM login_events "
             "WHERE phone = ? AND success = 0 AND created_at > ?",
-            (email, cutoff),
+            (_hash_identifier(email), cutoff),
         ).fetchone()
         return row[0] if row else 0
 
@@ -196,7 +206,8 @@ def record_search_event(event_type: str, query: str = "", plan_number: str = "",
         conn.execute(
             "INSERT INTO search_events (event_type, query, plan_number, phone, metadata) "
             "VALUES (?, ?, ?, ?, ?)",
-            (event_type, query, plan_number, phone, metadata),
+            (event_type, query, plan_number,
+             _hash_identifier(phone) if phone else "", metadata),
         )
 
 

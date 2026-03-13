@@ -261,7 +261,7 @@ def ask_claude(question: str, plan_number: str) -> dict:
 
     # H9: Scrub PHI from user question before sending to third-party API
     safe_question = _scrub_phi(question)
-    context = find_relevant_chunks(chunks, question)  # Use original for relevance matching
+    context = find_relevant_chunks(chunks, safe_question)
 
     from .circuit_breaker import anthropic_breaker
 

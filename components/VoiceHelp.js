@@ -811,6 +811,7 @@ export default function VoiceHelp({
   // Refs to avoid stale closures in speech recognition event handlers
   const modeRef = useRef(mode);
   const liveTextRef = useRef(liveText);
+  const processingRef = useRef(false);
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
@@ -901,7 +902,12 @@ export default function VoiceHelp({
   }, [mode, answer]);
 
   // --- Actions ---
-  const processQuestion = async (q) => {
+  const processQuestion = async (rawQ) => {
+    if (processingRef.current) return;
+    // Sanitize: trim, cap length, strip control characters
+    const q = rawQ.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim().slice(0, 2000);
+    if (!q) return;
+    processingRef.current = true;
     Speech.stop();
     setIsSpeaking(false);
     setQuestion(q);
@@ -924,6 +930,7 @@ export default function VoiceHelp({
           },
         });
       }, 800);
+      processingRef.current = false;
       return;
     }
 
@@ -959,6 +966,7 @@ export default function VoiceHelp({
         speakResponse(msg);
         setIsSpeaking(true);
       }
+      processingRef.current = false;
       return;
     }
 
@@ -971,6 +979,7 @@ export default function VoiceHelp({
       setTimeout(() => {
         router.push({ pathname: '/doctor-results', params: { specialty } });
       }, 800);
+      processingRef.current = false;
       return;
     }
 
@@ -1010,6 +1019,7 @@ export default function VoiceHelp({
     setAnswer(response);
     speakResponse(response);
     setIsSpeaking(true);
+    processingRef.current = false;
   };
 
   const toggleSpeech = async () => {

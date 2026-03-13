@@ -56,9 +56,15 @@ backend/pdfs/
 backend/extracted/
 backend/pdf Updated/
 
-# Audit / persistent data
-audit.db
-persistent_store.db
+# Database files — anywhere in project
+*.db
+*.db-shm
+*.db-wal
+
+# Pipeline output (contains PHI)
+pipeline_output/
+benefits_cache.json
+pipeline_run_*.log
 
 # Vercel
 .vercel/

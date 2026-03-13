@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AdminAuthProvider } from '@/auth/AdminAuthProvider';
 import ProtectedRoute from '@/auth/ProtectedRoute';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import AdminLayout from '@/layout/AdminLayout';
 import LoginPage from '@/pages/login/LoginPage';
 import DashboardPage from '@/pages/dashboard/DashboardPage';
@@ -25,6 +26,7 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AdminAuthProvider>
@@ -52,5 +54,6 @@ export default function App() {
         </AdminAuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
