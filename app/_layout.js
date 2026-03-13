@@ -13,6 +13,7 @@ import {
 import * as Sentry from '@sentry/react-native';
 import { COLORS } from '../constants/theme';
 import { setupNotificationChannel } from '../utils/notifications';
+import { touchActivity } from '../utils/deviceAuth';
 
 // ── Sentry error monitoring ─────────────────────────────────────
 // DSN must come from environment — no hardcoded fallback (prevents event flooding)
@@ -71,7 +72,7 @@ Text.render = function (...args) {
 };
 
 // L6: Idle timeout — auto-lock after 10 minutes of inactivity
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — generous for elderly users
 
 function useIdleTimeout() {
   const router = useRouter();
@@ -85,14 +86,18 @@ function useIdleTimeout() {
       } else if (nextState === 'active' && backgroundedAt.current) {
         const elapsed = Date.now() - backgroundedAt.current;
         backgroundedAt.current = null;
+        // Update device trust activity timestamp
+        touchActivity().catch(() => {});
         // Only redirect if on an authenticated screen (not login/otp)
         if (
           elapsed >= IDLE_TIMEOUT_MS &&
           segments[0] &&
           segments[0] !== 'index' &&
-          segments[0] !== 'otp'
+          segments[0] !== 'otp' &&
+          segments[0] !== 'lock'
         ) {
-          router.replace('/');
+          // Send to lock screen (device auth) instead of full re-login
+          router.replace('/lock');
         }
       }
     });
@@ -135,6 +140,7 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="index" options={{ animation: 'none' }} />
+          <Stack.Screen name="lock" options={{ animation: 'fade', gestureEnabled: false }} />
           <Stack.Screen name="home" options={{ animation: 'fade', gestureEnabled: false }} />
           <Stack.Screen name="otp" options={{ animation: 'slide_from_right' }} />
           <Stack.Screen
@@ -156,6 +162,10 @@ export default function RootLayout() {
           <Stack.Screen
             name="sdoh-screening"
             options={{ animation: 'slide_from_right', gestureEnabled: false }}
+          />
+          <Stack.Screen
+            name="settings"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
           />
         </Stack>
       </SafeAreaProvider>

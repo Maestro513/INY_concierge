@@ -39,8 +39,9 @@ export function clearMemberSession() {
 }
 
 /**
- * Full logout: clear all in-memory state, tokens, and cached PHI.
- * Call this from the logout button to ensure nothing persists.
+ * Soft logout: clear session + tokens but keep device trust.
+ * User can re-enter via device unlock (Face ID / fingerprint / PIN)
+ * without going through OTP again.
  */
 export async function logout() {
   // Clear in-memory state
@@ -58,4 +59,17 @@ export async function logout() {
   // Destroy encryption key so any remaining cached data is unreadable
   const { destroyEncryptionKey } = require('../utils/secureCache');
   await destroyEncryptionKey();
+
+  // NOTE: Device trust is preserved — next app open will prompt device auth
+  // instead of full OTP. Use fullLogout() to clear device trust too.
+}
+
+/**
+ * Full logout: clear everything including device trust.
+ * Next login will require a fresh OTP. Use for "Sign out of this device".
+ */
+export async function fullLogout() {
+  await logout();
+  const { clearDeviceTrust } = require('../utils/deviceAuth');
+  await clearDeviceTrust();
 }
