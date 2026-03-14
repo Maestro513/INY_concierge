@@ -12,6 +12,9 @@ module.exports = {
     __DEV__: 'readonly',
     btoa: 'readonly',
     atob: 'readonly',
+    URL: 'readonly',
+    TextEncoder: 'readonly',
+    TextDecoder: 'readonly',
   },
   rules: {
     'prettier/prettier': 'warn',

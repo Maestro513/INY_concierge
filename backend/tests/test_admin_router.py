@@ -201,29 +201,31 @@ class TestMemberCreation:
 # ── File Upload (zip-slip guard) ────────────────────────────────────────────
 
 class TestFileUpload:
-    def test_upload_requires_admin_secret(self, client):
+    def test_upload_requires_auth(self, client):
         resp = client.post("/api/admin/upload/extracted",
-                           headers={"X-Admin-Secret": "wrong"},
+                           files={"file": ("test.tar.gz", b"data", "application/gzip")})
+        assert resp.status_code == 401
+
+    def test_upload_requires_admin_role(self, client):
+        resp = client.post("/api/admin/upload/extracted",
+                           headers=_auth_header(role="viewer"),
                            files={"file": ("test.tar.gz", b"data", "application/gzip")})
         assert resp.status_code == 403
 
     def test_upload_rejects_non_tgz(self, client):
-        from app.config import ADMIN_SECRET
         resp = client.post("/api/admin/upload/extracted",
-                           headers={"X-Admin-Secret": ADMIN_SECRET},
+                           headers=_auth_header(),
                            files={"file": ("test.zip", b"data", "application/zip")})
         assert resp.status_code == 400
 
     def test_upload_rejects_invalid_gzip(self, client):
-        from app.config import ADMIN_SECRET
         resp = client.post("/api/admin/upload/extracted",
-                           headers={"X-Admin-Secret": ADMIN_SECRET},
+                           headers=_auth_header(),
                            files={"file": ("test.tar.gz", b"not-gzip", "application/gzip")})
         assert resp.status_code == 400
 
     def test_upload_valid_tar_extracts_json(self, client):
         """Upload a real tar.gz with a JSON file; verify extraction."""
-        from app.config import ADMIN_SECRET
         # Create a small valid tar.gz in memory
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -234,7 +236,7 @@ class TestFileUpload:
         buf.seek(0)
 
         resp = client.post("/api/admin/upload/extracted",
-                           headers={"X-Admin-Secret": ADMIN_SECRET},
+                           headers=_auth_header(),
                            files={"file": ("plans.tar.gz", buf, "application/gzip")})
         assert resp.status_code == 200
         assert resp.json()["files_extracted"] >= 1

@@ -58,9 +58,9 @@ class TestFieldEncryption:
         cipher1 = FieldCipher(key=key1)
         cipher2 = FieldCipher(key=key2)
         encrypted = cipher1.encrypt("sensitive")
-        decrypted = cipher2.decrypt(encrypted)
-        # Should fail gracefully — returns the encrypted value as-is
-        assert decrypted == encrypted
+        # Should raise ValueError — never return ciphertext as plaintext
+        with pytest.raises(ValueError, match="Failed to decrypt"):
+            cipher2.decrypt(encrypted)
 
 
 class TestPIIMasking:
