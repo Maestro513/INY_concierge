@@ -100,7 +100,7 @@ export default function MemberDetailPage() {
       setEditPlanName(member.plan_name);
       setEditPlanNumber(member.plan_number);
     }
-    handleOpenPlanDialog();
+    setPlanDialogOpen(true);
   };
 
   // Add reminder dialog

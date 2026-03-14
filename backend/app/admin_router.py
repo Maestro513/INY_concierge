@@ -677,26 +677,21 @@ async def upload_extracted_tar(request: Request, file: UploadFile = File(...)):
     """
     Upload a tar.gz of extracted JSON files to EXTRACTED_DIR.
 
-    Auth: JWT (admin/super_admin) or ADMIN_SECRET header fallback for CLI.
+    Auth: JWT (admin/super_admin role required).
 
     Usage:
         curl -X POST https://iny-concierge.onrender.com/api/admin/upload/extracted \
-             -H "X-Admin-Secret: $ADMIN_SECRET" \
+             -H "Authorization: Bearer $ADMIN_JWT" \
              -F "file=@extracted_jsons.tar.gz"
     """
-    # Try JWT auth first, fall back to static secret for CLI usage
-    uploader = "cli_upload"
+    # Require JWT auth — static secret fallback removed for security (per-user audit trail)
     auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        payload = decode_admin_token(auth_header[7:])
-        if payload.get("role") not in ("admin", "super_admin"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions.")
-        uploader = payload.get("email", payload.get("sub", "unknown"))
-    else:
-        secret = request.headers.get("X-Admin-Secret", "")
-        import hmac
-        if not ADMIN_SECRET or not hmac.compare_digest(secret, ADMIN_SECRET):
-            raise HTTPException(status_code=403, detail="Forbidden — invalid admin secret.")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required.")
+    payload = decode_admin_token(auth_header[7:])
+    if payload.get("role") not in ("admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions.")
+    uploader = payload.get("email", payload.get("sub", "unknown"))
 
     if not file.filename or not file.filename.endswith((".tar.gz", ".tgz")):
         raise HTTPException(status_code=400, detail="File must be a .tar.gz archive.")

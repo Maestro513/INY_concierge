@@ -202,7 +202,7 @@ if APP_ENV == "production":
         allow_origins=_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )
 elif APP_ENV == "development":
     # Dev only: allow any localhost origin
@@ -211,7 +211,7 @@ elif APP_ENV == "development":
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )
 else:
     # Staging / other: use same strict origins as production
@@ -222,8 +222,30 @@ else:
         allow_origins=_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )
+
+# ── CSRF origin check for mutating requests ──────────────────────────────────
+# Mobile apps (React Native) don't send Origin headers, so requests without
+# Origin/Referer are allowed (they must still carry a valid Bearer token).
+# When an Origin IS present (browser / web-widget), it must match our allow-list.
+_CSRF_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+_CSRF_ALLOWED_ORIGINS = set(_default_prod_origins) if APP_ENV in ("production", "staging") else set()
+
+@app.middleware("http")
+async def csrf_origin_check(request: Request, call_next) -> Response:
+    if APP_ENV not in ("production", "staging"):
+        return await call_next(request)
+    if request.method not in _CSRF_MUTATING:
+        return await call_next(request)
+    # Admin routes already have their own CSRF check via the router dependency
+    if request.url.path.startswith("/api/admin"):
+        return await call_next(request)
+    origin = request.headers.get("origin", "")
+    if origin:
+        if origin.rstrip("/") not in _CSRF_ALLOWED_ORIGINS:
+            return JSONResponse(status_code=403, content={"detail": "Origin not allowed."})
+    return await call_next(request)
 
 # ── Security headers middleware ──────────────────────────────────────────────
 @app.middleware("http")
@@ -2892,17 +2914,37 @@ def get_screening_config(user: dict = Depends(get_current_user)):
     return {}
 
 
+class HealthScreeningRequest(BaseModel):
+    gender: str = Field("", max_length=20)
+    answers: dict = Field(default_factory=dict)
+    reminders: list = Field(default_factory=list)
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: str) -> str:
+        allowed = {"male", "female", "other", ""}
+        if v.lower() not in allowed:
+            raise ValueError(f"gender must be one of {allowed}")
+        return v.lower()
+
+    @field_validator("reminders")
+    @classmethod
+    def limit_reminders(cls, v: list) -> list:
+        if len(v) > 100:
+            raise ValueError("Too many reminders (max 100).")
+        return v
+
+
 @app.post("/health-screenings")
-async def save_health_screenings(request: Request, user: dict = Depends(get_current_user)):
+async def save_health_screenings(body: HealthScreeningRequest, user: dict = Depends(get_current_user)):
     """Save a member's screening answers + generate reminders."""
-    body = await request.json()
     phone = user.get("sub", "")
     session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired.")
     try:
         udb = UserDataDB()
-        udb.save_health_screenings(phone, body)
+        udb.save_health_screenings(phone, body.model_dump())
     except Exception as e:
         log.warning("Failed to save health screenings: %s", e)
     return {"success": True}
