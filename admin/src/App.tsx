@@ -34,21 +34,21 @@ export default function App() {
             {/* Public — Login */}
             <Route path="/admin/login" element={<LoginPage />} />
 
-            {/* Protected — Admin shell (all active users) */}
-            <Route element={<ProtectedRoute />}>
+            {/* Protected — Viewer-safe routes (read-only dashboards) */}
+            <Route element={<ProtectedRoute allowedRoles={['super_admin', 'admin', 'viewer']} />}>
               <Route element={<AdminLayout />}>
                 <Route path="/admin" element={<DashboardPage />} />
-                <Route path="/admin/members" element={<MembersPage />} />
-                <Route path="/admin/members/:id" element={<MemberDetailPage />} />
-                <Route path="/admin/plans" element={<PlansPage />} />
                 <Route path="/admin/screening-gaps" element={<ScreeningGapsPage />} />
                 <Route path="/admin/sdoh-report" element={<SDoHReportPage />} />
               </Route>
             </Route>
 
-            {/* Protected — Admin-only routes */}
+            {/* Protected — Admin routes (member & plan management) */}
             <Route element={<ProtectedRoute allowedRoles={['super_admin', 'admin']} />}>
               <Route element={<AdminLayout />}>
+                <Route path="/admin/members" element={<MembersPage />} />
+                <Route path="/admin/members/:id" element={<MemberDetailPage />} />
+                <Route path="/admin/plans" element={<PlansPage />} />
                 <Route path="/admin/system" element={<SystemPage />} />
                 <Route path="/admin/settings" element={<SettingsPage />} />
               </Route>

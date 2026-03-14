@@ -832,13 +832,17 @@ export default function VoiceHelp({
   // --- Track speech ending ---
   useEffect(() => {
     let interval;
+    let active = true;
     if (isSpeaking) {
       interval = setInterval(async () => {
         const speaking = await Speech.isSpeakingAsync();
-        if (!speaking) setIsSpeaking(false);
+        if (!speaking && active) setIsSpeaking(false);
       }, 500);
     }
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [isSpeaking]);
 
   // --- Speech Recognition Events ---

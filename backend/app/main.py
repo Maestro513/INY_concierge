@@ -571,8 +571,10 @@ def _authorize_plan(user: dict, plan_number: str) -> None:
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     user_plan = normalize_plan_id(session["data"].get("plan_number", ""))
     requested = normalize_plan_id(plan_number)
-    if user_plan and requested and user_plan != requested:
-        log.warning("IDOR attempt: user plan %s tried to access %s", user_plan[:5], requested[:5])
+    if not user_plan:
+        raise HTTPException(status_code=403, detail="No plan assigned to your account.")
+    if not requested or user_plan != requested:
+        log.warning("IDOR attempt: user plan %s tried to access %s", user_plan[:5], requested[:5] if requested else "(empty)")
         raise HTTPException(status_code=403, detail="Not authorized for this plan.")
 
 
@@ -2936,8 +2938,9 @@ class HealthScreeningRequest(BaseModel):
 
 
 @app.post("/health-screenings")
-async def save_health_screenings(body: HealthScreeningRequest, user: dict = Depends(get_current_user)):
+async def save_health_screenings(request: Request, body: HealthScreeningRequest, user: dict = Depends(get_current_user)):
     """Save a member's screening answers + generate reminders."""
+    _check_ip_rate(request, max_hits=10, window=60, label="health_screening")
     phone = user.get("sub", "")
     session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
     if not session:
@@ -3001,9 +3004,10 @@ class AppointmentRequest(BaseModel):
 
 
 @app.post("/appointment-request")
-async def create_appointment_request(body: AppointmentRequest,
+async def create_appointment_request(request: Request, body: AppointmentRequest,
                                      user: dict = Depends(get_current_user)):
     """Member requests a doctor appointment — creates alert for admin/agent."""
+    _check_ip_rate(request, max_hits=5, window=60, label="appointment_request")
     phone = user.get("sub", "")
     session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
     if not session:

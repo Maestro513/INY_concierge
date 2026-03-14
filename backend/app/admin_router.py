@@ -97,6 +97,14 @@ def _get_store() -> PersistentStore:
     return _store
 
 
+def _check_admin_rate(request: Request, *, max_hits: int, window: int, label: str) -> None:
+    """Raise 429 if the client IP exceeds max_hits within window seconds."""
+    ip = request.client.host if request.client else "unknown"
+    key = f"admin_{label}:{ip}"
+    if not _get_store().check_rate_limit(key, max_hits, window):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait before trying again.")
+
+
 # ── Request / Response models ────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
@@ -341,6 +349,7 @@ async def create_member(body: CreateMemberRequest,
     - Saves to Zoho CRM (or local store if Zoho unavailable)
     - Optionally sends OTP verification code to member's phone
     """
+    _check_admin_rate(request, max_hits=10, window=60, label="member_create")
     phone = _normalize_phone(body.phone)
     if len(phone) != 10:
         raise HTTPException(status_code=400, detail="Phone must be a valid 10-digit US number.")
@@ -409,6 +418,7 @@ async def admin_send_otp(body: SendOTPRequest,
                          request: Request,
                          payload: dict = Depends(require_admin)):
     """Send OTP login code to a member's phone (triggered by admin)."""
+    _check_admin_rate(request, max_hits=5, window=60, label="send_otp")
     phone = _normalize_phone(body.phone)
     if len(phone) != 10:
         raise HTTPException(status_code=400, detail="Invalid phone number.")
