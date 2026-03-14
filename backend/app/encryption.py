@@ -1,7 +1,17 @@
 """
 Field-level encryption for PHI/PII at rest.
 
-Uses Fernet (AES-128-CBC with HMAC) from the cryptography library.
+Uses Fernet (AES-128-CBC + HMAC-SHA256) from the cryptography library.
+Fernet provides authenticated encryption: AES-128-CBC for confidentiality
+and HMAC-SHA256 for integrity/tamper detection.
+
+HIPAA compliance note:
+    HIPAA (45 CFR §164.312(a)(2)(iv)) requires encryption but does not
+    mandate a specific key size. AES-128 is NIST-approved (FIPS 197) and
+    considered secure through at least 2030 (NIST SP 800-57). If compliance
+    documentation references "AES-256", update it to reflect AES-128-CBC
+    or migrate to an AES-256-GCM implementation.
+
 Encrypted values are base64-encoded and prefixed with "enc:" so we can
 distinguish them from plaintext during migration.
 

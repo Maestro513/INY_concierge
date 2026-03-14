@@ -313,7 +313,7 @@ export default function OTPScreen() {
             </View>
             <View style={s.trustItem}>
               <Ionicons name="shield-checkmark-outline" size={14} color="rgba(255,255,255,0.5)" />
-              <Text style={s.trustText}>256-bit Encrypted</Text>
+              <Text style={s.trustText}>AES Encrypted</Text>
             </View>
           </View>
         </Animated.View>

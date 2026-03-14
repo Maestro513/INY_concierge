@@ -10,7 +10,12 @@ import anthropic
 
 from .config import ANTHROPIC_API_KEY, EXTRACTED_DIR
 
-# PHI patterns to strip from user questions before sending to third-party API
+# PHI identifier patterns to strip from user questions before sending to
+# third-party API.  We scrub *identifiers* (phone, SSN, Medicare#, email, DOB)
+# but intentionally preserve medication names — they are clinical context Claude
+# needs to answer benefit questions, and they are not PHI once identifiers are
+# removed (HIPAA Safe Harbor: health info without the 18 identifiers is
+# de-identified).
 _PHI_PATTERNS = [
     (re.compile(r"\b\d{1}[A-Z]{2}\d{1}-[A-Z]{2}\d{1}-[A-Z]{2}\d{2}\b"), "[MEDICARE_ID]"),   # Medicare number
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[SSN]"),                                           # SSN
@@ -19,11 +24,17 @@ _PHI_PATTERNS = [
     (re.compile(r"\b\(\d{3}\)\s*\d{3}-\d{4}\b"), "[PHONE]"),                                   # (xxx) xxx-xxxx
     (re.compile(r"\b\d{3}-\d{3}-\d{4}\b"), "[PHONE]"),                                         # xxx-xxx-xxxx
     (re.compile(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"), "[DOB]"),                                     # Date of birth
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"), "[EMAIL]"),          # Email address
 ]
 
 
 def _scrub_phi(text: str) -> str:
-    """Remove PHI patterns (Medicare IDs, SSNs, phone numbers, DOBs) from text."""
+    """Remove PHI identifiers from text before sending to third-party API.
+
+    Scrubs: Medicare IDs, SSNs, phone numbers, DOBs, email addresses.
+    Preserves: medication names, symptoms, conditions (needed for benefit
+    answers; not PHI without identifiers per HIPAA Safe Harbor §164.514(b)).
+    """
     for pattern, replacement in _PHI_PATTERNS:
         text = pattern.sub(replacement, text)
     return text

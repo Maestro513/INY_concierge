@@ -98,10 +98,10 @@ export default function LockScreen() {
 
       if (lookupRes.ok) {
         const data = await lookupRes.json();
-        if (data.found) {
-          // OTP was sent — need to go through OTP flow
+        if (data.otp_sent) {
+          // M9: Backend returns otp_sent (no first_name pre-auth).
           const { setPendingOtp } = require('../constants/session');
-          setPendingOtp(phone, data.first_name);
+          setPendingOtp(phone, '');
           router.replace('/otp');
           return;
         }
