@@ -397,7 +397,7 @@ const s = StyleSheet.create({
   },
   privacyText: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: COLORS.textTertiary,
     lineHeight: 17,
