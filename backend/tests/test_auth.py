@@ -71,26 +71,30 @@ class TestProductionAuthEnforcement:
     @pytest.fixture
     def prod_client(self):
         """TestClient with APP_ENV=production so auth is enforced."""
+        import sys
+
+        from fastapi.testclient import TestClient
+
         orig = os.environ.get("APP_ENV")
         os.environ["APP_ENV"] = "production"
         os.environ.setdefault("JWT_SECRET", "test-prod-secret")
         os.environ.setdefault("ADMIN_JWT_SECRET", "test-admin-prod-secret")
-        # Re-import to pick up production APP_ENV
-        import importlib  # noqa: E402
+        # Drop all cached app modules so re-import picks up new APP_ENV
+        cached = {k: sys.modules.pop(k) for k in list(sys.modules) if k.startswith("app")}
+        import app.main as main_mod
 
-        import app.main as main_mod  # noqa: E402
-        importlib.reload(main_mod)
-        from fastapi.testclient import TestClient  # noqa: E402
-
-        from app.main import app  # noqa: E402
-        with TestClient(app) as c:
+        with TestClient(main_mod.app) as c:
             yield c
-        # Restore
+        # Restore env and modules
         if orig is not None:
             os.environ["APP_ENV"] = orig
         else:
             os.environ.pop("APP_ENV", None)
-        importlib.reload(main_mod)
+        # Remove production modules, restore original cached ones
+        for k in list(sys.modules):
+            if k.startswith("app"):
+                sys.modules.pop(k, None)
+        sys.modules.update(cached)
 
     def test_benefits_requires_auth(self, prod_client):
         resp = prod_client.get("/benefits/H1234-001")
