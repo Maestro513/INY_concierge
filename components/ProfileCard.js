@@ -315,7 +315,6 @@ function AddReminderModal({ visible, onClose, onSave }) {
 export default function ProfileCard({
   member,
   onViewSOB,
-  onViewIDCard,
   benefits,
   loading,
   benefitsError,
@@ -545,19 +544,6 @@ export default function ProfileCard({
         </View>
       ) : row1.length > 0 ? (
         <>
-          {/* ID Card link inside benefits */}
-          <TouchableOpacity
-            onPress={onViewIDCard}
-            style={styles.idCardLink}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel="View digital ID card"
-          >
-            <Ionicons name="card-outline" size={16} color={COLORS.accent} />
-            <Text style={styles.idCardLinkText}>View ID Card</Text>
-            <Ionicons name="chevron-forward" size={14} color={COLORS.accent} />
-          </TouchableOpacity>
-
           {/* Copays — 2x2 grid */}
           <Text style={styles.sectionLabel}>Your Copays</Text>
           <View style={styles.copayGrid}>
@@ -799,25 +785,6 @@ const styles = StyleSheet.create({
   // Empty state
   emptyWrap: { alignItems: 'center', paddingVertical: 16 },
   emptyText: { fontSize: 14, fontWeight: '500', color: COLORS.textTertiary, textAlign: 'center' },
-
-  // ID Card link in benefits
-  idCardLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: COLORS.accentLight || '#F0E8F8',
-    borderRadius: RADII.md,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-    alignSelf: 'stretch',
-  },
-  idCardLinkText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.accent,
-  },
 
   // Section label
   sectionLabel: {

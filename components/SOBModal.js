@@ -16,7 +16,7 @@ import { API_URL, getAccessToken } from '../constants/api';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
-export default function SOBModal({ visible, onClose, member, sobData, loading, onRetry }) {
+export default function SOBModal({ visible, onClose, member, sobData, loading, onRetry, onViewIDCard }) {
   const [downloading, setDownloading] = useState(false);
 
   if (!visible) return null;
@@ -113,31 +113,42 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
               <View style={s.headerIcon}>
                 <Ionicons name="document-text" size={16} color={COLORS.accent} />
               </View>
-              <Text style={s.title}>Summary of Benefits</Text>
+              <Text style={s.title}>Benefits</Text>
             </View>
-            <View style={s.headerRight}>
-              {hasData && !isLoading ? (
-                <TouchableOpacity
-                  onPress={handleDownload}
-                  style={s.downloadBtn}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel="Download benefits PDF"
-                >
-                  <Ionicons name="download-outline" size={14} color="#fff" />
-                  <Text style={s.downloadText}>PDF</Text>
-                </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                onPress={onClose}
-                style={s.closeBtn}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-              >
-                <Ionicons name="close" size={18} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              onPress={onClose}
+              style={s.closeBtn}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Action buttons: ID Card + Download PDF */}
+          <View style={s.actionRow}>
+            <TouchableOpacity
+              onPress={() => { if (onViewIDCard) { onClose(); onViewIDCard(); } }}
+              style={s.actionBtn}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="View digital ID card"
+            >
+              <Ionicons name="card-outline" size={18} color={COLORS.accent} />
+              <Text style={s.actionBtnText}>ID Card</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleDownload}
+              style={s.actionBtn}
+              activeOpacity={0.7}
+              disabled={isLoading || !hasData}
+              accessibilityRole="button"
+              accessibilityLabel="Download benefits PDF"
+            >
+              <Ionicons name="download-outline" size={18} color={(!isLoading && hasData) ? COLORS.accent : COLORS.textTertiary} />
+              <Text style={[s.actionBtnText, (!isLoading && hasData) ? {} : { color: COLORS.textTertiary }]}>Download PDF</Text>
+            </TouchableOpacity>
           </View>
 
           <ScrollView
@@ -352,19 +363,31 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { ...TYPE.h3, color: COLORS.text },
-  downloadBtn: {
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  actionBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: COLORS.accent,
-    borderRadius: RADII.full,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    ...SHADOWS.button,
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.accentLight || '#F0E8F8',
+    borderRadius: RADII.md,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
   },
-  downloadText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  actionBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.accent,
+  },
   closeBtn: {
     width: 32,
     height: 32,

@@ -423,7 +423,6 @@ export default function HomeScreen() {
         <ProfileCard
           member={member}
           onViewSOB={handleOpenSOB}
-          onViewIDCard={handleViewIDCard}
           benefits={benefits}
           loading={loading}
           benefitsError={benefitsError}
@@ -467,6 +466,7 @@ export default function HomeScreen() {
           sobData={sobData}
           loading={sobLoading}
           onRetry={loadSOBData}
+          onViewIDCard={handleViewIDCard}
         />
       </SafeAreaView>
     </View>
