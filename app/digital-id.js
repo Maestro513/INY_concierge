@@ -56,7 +56,7 @@ export default function DigitalIDScreen() {
       const result = await cachedFetch(authFetch, url);
       setCardData(result.data);
     } catch (e) {
-      console.log('ID Card load error:', e);
+      if (__DEV__) console.log('ID Card load error:', e);
       setError('Could not load card details');
     } finally {
       setLoading(false);

@@ -32,13 +32,16 @@ class TestHealthEndpoint:
         data = resp.json()
         assert "status" in data
         assert "checks" in data
-        assert "persistent_store" in data["checks"]
+        assert "db" in data["checks"]
 
-    def test_health_checks_anthropic_key(self, client):
+    def test_health_minimal_disclosure(self, client):
         resp = client.get("/health")
         data = resp.json()
-        # In test env, key may or may not be set
-        assert data["checks"]["anthropic_key"] in ("configured", "missing")
+        # M14: health endpoint should NOT expose API key status, session counts, or exception types
+        checks = data["checks"]
+        assert "anthropic_key" not in checks
+        for v in checks.values():
+            assert "Error" not in str(v)  # no exception class names
 
 
 class TestMetricsEndpoint:
@@ -66,7 +69,9 @@ class TestAuthFlow:
         assert resp.status_code in (200, 429)
         if resp.status_code == 200:
             data = resp.json()
-            assert data["found"] is False
+            # M9: response should NOT reveal whether phone was found
+            assert "found" not in data
+            assert data.get("otp_sent") is True
 
     def test_verify_otp_missing_fields(self, client):
         resp = client.post("/auth/verify-otp", json={})

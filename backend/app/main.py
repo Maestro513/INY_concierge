@@ -205,10 +205,10 @@ if APP_ENV == "production":
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     )
 elif APP_ENV == "development":
-    # Dev only: allow any localhost origin
+    # Dev only: allow localhost origins (no LAN IPs — use CORS_ORIGINS for specific devices)
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
+        allow_origin_regex=r"http://localhost(:\d+)?",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
@@ -784,41 +784,35 @@ def _check_ip_rate(request: Request, *, max_hits: int, window: int, label: str =
 
 @app.get("/health")
 def health():
-    """Deep health check — verifies DB connectivity, CMS data, and critical config."""
+    """Health check — verifies core subsystems are operational.
+    Returns only ok/error status per subsystem, no internal details."""
     checks = {}
 
     # 1. Persistent store DB writable
     try:
         store = get_store()
         store.count_active_sessions(ttl=SESSION_TTL)
-        checks["persistent_store"] = "ok"
-    except Exception as e:
-        checks["persistent_store"] = f"error: {type(e).__name__}"
+        checks["db"] = "ok"
+    except Exception:
+        checks["db"] = "error"
 
     # 2. CMS benefits DB loaded
     try:
         cms = get_cms()
-        checks["cms_db"] = "ok" if cms is not None else "not loaded"
-    except Exception as e:
-        checks["cms_db"] = f"error: {type(e).__name__}"
+        checks["cms"] = "ok" if cms is not None else "unavailable"
+    except Exception:
+        checks["cms"] = "error"
 
     # 3. Extracted plan data present
     try:
-        json_count = len([f for f in os.listdir(EXTRACTED_DIR) if f.endswith(".json")]) if os.path.isdir(EXTRACTED_DIR) else 0
-        checks["extracted_plans"] = json_count
-    except Exception as e:
-        checks["extracted_plans"] = f"error: {type(e).__name__}"
+        has_plans = os.path.isdir(EXTRACTED_DIR) and any(
+            f.endswith(".json") for f in os.listdir(EXTRACTED_DIR)
+        )
+        checks["plans"] = "ok" if has_plans else "empty"
+    except Exception:
+        checks["plans"] = "error"
 
-    # 4. Critical API keys configured
-    checks["anthropic_key"] = "configured" if ANTHROPIC_API_KEY else "missing"
-
-    # CMS is optional (only used for benefits gap-fill, not auth).
-    # Don't let it drag the health check to 503 and trigger Render restarts.
-    _critical_keys = ("persistent_store", "anthropic_key")
-    healthy = all(
-        checks.get(k) in ("ok", "configured")
-        for k in _critical_keys
-    ) and checks.get("extracted_plans", 0) > 0
+    healthy = checks["db"] == "ok" and checks["plans"] == "ok"
 
     return JSONResponse(
         content={"status": "ok" if healthy else "degraded", "checks": checks},
@@ -968,7 +962,9 @@ def lookup_member(req: LookupRequest, request: Request):
             ip_address=request.client.host if request.client else "",
             detail="not_found",
         )
-        return {"found": False}
+        # M9: Return same response shape for found and not-found to prevent phone enumeration.
+        # "If your number is registered, you'll receive a code." pattern.
+        return {"otp_sent": True}
 
     # H1: Session creation deferred to /auth/verify-otp — no PHI materialized pre-auth.
     # The verify-otp endpoint will re-fetch from Zoho if needed.
@@ -994,11 +990,9 @@ def lookup_member(req: LookupRequest, request: Request):
         detail="otp_sent" if not is_test else "test_account",
     )
 
-    return {
-        "found": True,
-        "first_name": member["first_name"],
-        "otp_sent": True,
-    }
+    # M9: Same response shape as not-found — no "found" field, no first_name.
+    # The verify-otp endpoint returns member data after successful authentication.
+    return {"otp_sent": True}
 
 
 @app.post("/auth/verify-otp")

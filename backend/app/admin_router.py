@@ -159,7 +159,7 @@ class CreateMemberRequest(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=100)
     last_name: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., pattern=r"^[\d\-\+\(\)\s]{7,20}$")  # Normalized in handler
-    medicare_number: str = Field("", max_length=20)
+    medicare_number: str = Field("", pattern=r"^([A-Za-z0-9]{4}-[A-Za-z0-9]{3}-[A-Za-z0-9]{4})?$")
     zip_code: str = Field("", pattern=r"^(\d{5})?$")
     carrier: str = Field("", max_length=100)
     plan_name: str = Field("", max_length=200)

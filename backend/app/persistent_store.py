@@ -36,6 +36,11 @@ class PersistentStore:
         self.db_path = db_path or os.environ.get("STORE_DB_PATH", DEFAULT_STORE_DB)
         self._local = threading.local()
         self._ensure_tables()
+        # Restrict DB file permissions to owner-only (0600)
+        try:
+            os.chmod(self.db_path, 0o600)
+        except OSError:
+            pass
 
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
@@ -56,6 +61,7 @@ class PersistentStore:
             CREATE TABLE IF NOT EXISTS otp_store (
                 phone           TEXT PRIMARY KEY,
                 code_hash       TEXT NOT NULL,
+                salt            TEXT NOT NULL DEFAULT '',
                 created_at      REAL NOT NULL,
                 ttl             INTEGER NOT NULL DEFAULT 300,
                 attempts        INTEGER NOT NULL DEFAULT 0,
@@ -107,14 +113,23 @@ class PersistentStore:
                 updated_at      REAL NOT NULL
             );
         """)
+        # Migration: add salt column to existing otp_store tables
+        try:
+            conn.execute("ALTER TABLE otp_store ADD COLUMN salt TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         conn.commit()
         log.info(f"Persistent store ready at {self.db_path}")
 
     # ── OTP Methods ───────────────────────────────────────────────────────
 
     @staticmethod
-    def _hash_code(code: str) -> str:
-        return hashlib.sha256(code.encode()).hexdigest()
+    def _hash_code(code: str, salt: str = "") -> str:
+        return hashlib.sha256((salt + code).encode()).hexdigest()
+
+    @staticmethod
+    def _generate_salt() -> str:
+        return secrets.token_hex(16)
 
     def generate_otp(self, phone: str, *, otp_ttl: int = 300,
                      max_sends: int = 5, send_window: int = 600) -> str | None:
@@ -134,20 +149,22 @@ class PersistentStore:
         # Log this send
         conn.execute("INSERT INTO otp_send_log (phone, sent_at) VALUES (?, ?)", (phone, now))
 
-        # Generate code
+        # Generate code + per-OTP salt
         code = f"{secrets.randbelow(900000) + 100000}"
+        salt = self._generate_salt()
 
         # Upsert OTP entry
         conn.execute(
-            """INSERT INTO otp_store (phone, code_hash, created_at, ttl, attempts, locked_until)
-               VALUES (?, ?, ?, ?, 0, 0)
+            """INSERT INTO otp_store (phone, code_hash, salt, created_at, ttl, attempts, locked_until)
+               VALUES (?, ?, ?, ?, ?, 0, 0)
                ON CONFLICT(phone) DO UPDATE SET
                    code_hash = excluded.code_hash,
+                   salt = excluded.salt,
                    created_at = excluded.created_at,
                    ttl = excluded.ttl,
                    attempts = 0,
                    locked_until = 0""",
-            (phone, self._hash_code(code), now, otp_ttl),
+            (phone, self._hash_code(code, salt), salt, now, otp_ttl),
         )
 
         # PR11: Batch prune + commit in single transaction to reduce write contention
@@ -183,8 +200,9 @@ class PersistentStore:
                 conn.execute("COMMIT")
                 return False
 
-            # Check code
-            if not hmac.compare_digest(self._hash_code(code), row["code_hash"]):
+            # Check code (use per-OTP salt; fall back to unsalted for legacy rows)
+            salt = row["salt"] if "salt" in row.keys() else ""
+            if not hmac.compare_digest(self._hash_code(code, salt), row["code_hash"]):
                 attempts = row["attempts"] + 1
                 if attempts >= max_attempts:
                     conn.execute(
