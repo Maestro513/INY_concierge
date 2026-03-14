@@ -4,6 +4,7 @@ import {
   ArrowLeft, Phone, MapPin, Mail, Calendar, Shield,
   KeyRound, Pill, Send, FileText, Check,
   Plus, Trash2, Activity, Eye,
+  ClipboardCheck, Heart, Car, UtensilsCrossed, Users, Home,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,55 @@ import {
 import client from '@/api/client';
 import { ENDPOINTS } from '@/config/api';
 import { Skeleton } from '@/components/ui/skeleton';
+
+// ── Default screening questions (same as mobile app) ──────────────
+const DEFAULT_SHARED_SCREENINGS = [
+  { id: 'awv', label: 'Annual Wellness Visit', timeframe: 'in the past year' },
+  { id: 'flu', label: 'Flu Shot', timeframe: 'this season' },
+  { id: 'colonoscopy', label: 'Colonoscopy', timeframe: 'in the past 5 years' },
+  { id: 'cholesterol', label: 'Cholesterol / Blood Work', timeframe: 'in the past year' },
+  { id: 'a1c', label: 'Diabetes Screening (A1C)', timeframe: 'in the past year' },
+  { id: 'fall_risk', label: 'Fall Risk Assessment', timeframe: 'in the past year' },
+];
+const DEFAULT_MALE_SCREENINGS = [
+  { id: 'prostate', label: 'Prostate (PSA) Screening', timeframe: 'in the past year' },
+];
+const DEFAULT_FEMALE_SCREENINGS = [
+  { id: 'mammogram', label: 'Mammogram', timeframe: 'in the past 1-2 years' },
+  { id: 'bone_density', label: 'Bone Density Scan (DEXA)', timeframe: 'in the past 2 years' },
+];
+
+const SDOH_QUESTIONS = [
+  {
+    id: 'transportation',
+    icon: Car,
+    question: 'In the past 12 months, has lack of reliable transportation kept them from medical appointments?',
+    type: 'yesno' as const,
+    flagLabel: 'Transportation',
+  },
+  {
+    id: 'food_insecurity',
+    icon: UtensilsCrossed,
+    question: 'Within the past 12 months, have they worried that food would run out before getting money to buy more?',
+    type: 'yesno' as const,
+    flagLabel: 'Food Access',
+  },
+  {
+    id: 'social_isolation',
+    icon: Users,
+    question: 'How often do they feel lonely or isolated from those around them?',
+    type: 'scale' as const,
+    options: ['never', 'rarely', 'sometimes', 'often', 'always'],
+    flagLabel: 'Social Connection',
+  },
+  {
+    id: 'housing_stability',
+    icon: Home,
+    question: 'Are they worried about losing their housing, or is their current housing situation unsafe?',
+    type: 'yesno' as const,
+    flagLabel: 'Housing',
+  },
+];
 
 const CARRIERS = ['Humana', 'Aetna', 'UHC', 'Wellcare', 'Devoted', 'Cigna', 'Blue Cross', 'Other'];
 
@@ -114,6 +164,26 @@ export default function MemberDetailPage() {
   const [otpSending, setOtpSending] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
 
+  // Health Screening state
+  const [screeningGender, setScreeningGender] = useState<'male' | 'female' | ''>('');
+  const [screeningAnswers, setScreeningAnswers] = useState<Record<string, boolean>>({});
+  const [screeningSaving, setScreeningSaving] = useState(false);
+  const [screeningSaved, setScreeningSaved] = useState(false);
+  const [screeningLoading, setScreeningLoading] = useState(false);
+  const [screeningLoaded, setScreeningLoaded] = useState(false);
+
+  // SDOH state
+  const [sdohAnswers, setSdohAnswers] = useState<Record<string, string>>({
+    transportation: 'no',
+    food_insecurity: 'no',
+    social_isolation: 'never',
+    housing_stability: 'no',
+  });
+  const [sdohSaving, setSdohSaving] = useState(false);
+  const [sdohSaved, setSdohSaved] = useState(false);
+  const [sdohLoading, setSdohLoading] = useState(false);
+  const [sdohLoaded, setSdohLoaded] = useState(false);
+
   function handlePlanSave() {
     setSaving(true);
     setTimeout(() => {
@@ -128,6 +198,71 @@ export default function MemberDetailPage() {
       setOtpSending(false);
       setOtpSent(true);
     }, 1200);
+  }
+
+  // ── Load existing screening data ──
+  function loadScreeningData() {
+    if (!member || screeningLoaded) return;
+    setScreeningLoading(true);
+    client
+      .get(ENDPOINTS.MEMBER_HEALTH_SCREENING(member.phone))
+      .then((res) => {
+        const s = res.data?.screening;
+        if (s) {
+          setScreeningGender((s.gender || '') as 'male' | 'female' | '');
+          setScreeningAnswers(s.answers || {});
+        }
+        setScreeningLoaded(true);
+      })
+      .catch(() => {})
+      .finally(() => setScreeningLoading(false));
+  }
+
+  function loadSdohData() {
+    if (!member || sdohLoaded) return;
+    setSdohLoading(true);
+    client
+      .get(ENDPOINTS.MEMBER_SDOH_SCREENING(member.phone))
+      .then((res) => {
+        const s = res.data?.screening;
+        if (s) {
+          setSdohAnswers({
+            transportation: s.transportation || 'no',
+            food_insecurity: s.food_insecurity || 'no',
+            social_isolation: s.social_isolation || 'never',
+            housing_stability: s.housing_stability || 'no',
+          });
+        }
+        setSdohLoaded(true);
+      })
+      .catch(() => {})
+      .finally(() => setSdohLoading(false));
+  }
+
+  function handleScreeningSave() {
+    if (!member) return;
+    setScreeningSaving(true);
+    setScreeningSaved(false);
+    client
+      .post(ENDPOINTS.MEMBER_HEALTH_SCREENING(member.phone), {
+        gender: screeningGender,
+        answers: screeningAnswers,
+        reminders: [],
+      })
+      .then(() => setScreeningSaved(true))
+      .catch(() => {})
+      .finally(() => setScreeningSaving(false));
+  }
+
+  function handleSdohSave() {
+    if (!member) return;
+    setSdohSaving(true);
+    setSdohSaved(false);
+    client
+      .post(ENDPOINTS.MEMBER_SDOH_SCREENING(member.phone), sdohAnswers)
+      .then(() => setSdohSaved(true))
+      .catch(() => {})
+      .finally(() => setSdohSaving(false));
   }
 
   function handleAddReminder() {
@@ -328,6 +463,12 @@ export default function MemberDetailPage() {
               <TabsTrigger value="activity" className="text-xs data-[state=active]:bg-background">
                 <Activity className="mr-1.5 h-3.5 w-3.5" /> Activity Log ({member.activity.length})
               </TabsTrigger>
+              <TabsTrigger value="screenings" className="text-xs data-[state=active]:bg-background" onClick={loadScreeningData}>
+                <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" /> Screenings
+              </TabsTrigger>
+              <TabsTrigger value="sdoh" className="text-xs data-[state=active]:bg-background" onClick={loadSdohData}>
+                <Heart className="mr-1.5 h-3.5 w-3.5" /> Well-Being
+              </TabsTrigger>
             </TabsList>
 
             {/* Reminders Tab */}
@@ -398,6 +539,226 @@ export default function MemberDetailPage() {
                       );
                     })}
                   </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Screenings Tab — agent fills on behalf of member */}
+            <TabsContent value="screenings" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Health Screening Checklist</CardTitle>
+                    <Badge variant="secondary" className="text-[10px] bg-chart-4/10 text-chart-4">Phone Intake</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Walk through these preventive screenings with the member during the call.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {screeningLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Gender selection */}
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Gender</Label>
+                        <div className="flex gap-2">
+                          {(['male', 'female'] as const).map((g) => (
+                            <Button
+                              key={g}
+                              variant={screeningGender === g ? 'default' : 'outline'}
+                              size="sm"
+                              className="h-8 text-xs capitalize"
+                              onClick={() => setScreeningGender(g)}
+                            >
+                              {g}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {screeningGender && (
+                        <>
+                          <Separator />
+                          <div className="space-y-2">
+                            {(() => {
+                              const applicable = [
+                                ...DEFAULT_SHARED_SCREENINGS,
+                                ...(screeningGender === 'male' ? DEFAULT_MALE_SCREENINGS : DEFAULT_FEMALE_SCREENINGS),
+                              ];
+                              return applicable.map((s) => (
+                                <div
+                                  key={s.id}
+                                  className={`flex items-center justify-between rounded-lg border p-3 transition-colors cursor-pointer ${
+                                    screeningAnswers[s.id] === true
+                                      ? 'border-success/50 bg-success/5'
+                                      : screeningAnswers[s.id] === false
+                                        ? 'border-warning/50 bg-warning/5'
+                                        : 'border-border hover:bg-accent/30'
+                                  }`}
+                                  onClick={() =>
+                                    setScreeningAnswers((prev) => ({
+                                      ...prev,
+                                      [s.id]: prev[s.id] === true ? false : true,
+                                    }))
+                                  }
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+                                      screeningAnswers[s.id] === true ? 'bg-success/10' : 'bg-muted'
+                                    }`}>
+                                      {screeningAnswers[s.id] === true ? (
+                                        <Check className="h-4 w-4 text-success" />
+                                      ) : (
+                                        <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
+                                      )}
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-medium">{s.label}</p>
+                                      <p className="text-[11px] text-muted-foreground">Have you completed this {s.timeframe}?</p>
+                                    </div>
+                                  </div>
+                                  <Badge
+                                    variant="secondary"
+                                    className={`text-[10px] ${
+                                      screeningAnswers[s.id] === true
+                                        ? 'bg-success/10 text-success'
+                                        : screeningAnswers[s.id] === false
+                                          ? 'bg-warning/10 text-warning'
+                                          : 'bg-muted text-muted-foreground'
+                                    }`}
+                                  >
+                                    {screeningAnswers[s.id] === true ? 'Yes' : screeningAnswers[s.id] === false ? 'No' : 'Not asked'}
+                                  </Badge>
+                                </div>
+                              ));
+                            })()}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2">
+                            {screeningSaved && (
+                              <div className="flex items-center gap-1.5 text-success">
+                                <Check className="h-3.5 w-3.5" />
+                                <span className="text-xs font-medium">Saved successfully</span>
+                              </div>
+                            )}
+                            <div className="ml-auto">
+                              <Button
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={handleScreeningSave}
+                                disabled={screeningSaving || !Object.keys(screeningAnswers).length}
+                              >
+                                {screeningSaving ? (
+                                  <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Saving...</>
+                                ) : (
+                                  <><Check className="mr-1.5 h-3.5 w-3.5" /> Save Screening</>
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* SDOH / Well-Being Tab — agent fills on behalf of member */}
+            <TabsContent value="sdoh" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Social Determinants of Health</CardTitle>
+                    <Badge variant="secondary" className="text-[10px] bg-chart-4/10 text-chart-4">Phone Intake</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Ask the member about social factors that may affect their health and benefits usage.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {sdohLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : (
+                    <>
+                      {SDOH_QUESTIONS.map((q) => {
+                        const Icon = q.icon;
+                        return (
+                          <div key={q.id} className="rounded-lg border border-border p-4 space-y-3">
+                            <div className="flex items-start gap-3">
+                              <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                                <Icon className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{q.flagLabel}</p>
+                                <p className="text-sm">{q.question}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 pl-11">
+                              {q.type === 'yesno' ? (
+                                <>
+                                  {(['no', 'yes'] as const).map((val) => (
+                                    <Button
+                                      key={val}
+                                      variant={sdohAnswers[q.id] === val ? (val === 'yes' ? 'destructive' : 'default') : 'outline'}
+                                      size="sm"
+                                      className="h-7 text-xs capitalize"
+                                      onClick={() => setSdohAnswers((prev) => ({ ...prev, [q.id]: val }))}
+                                    >
+                                      {val}
+                                    </Button>
+                                  ))}
+                                </>
+                              ) : (
+                                <>
+                                  {(q.options || []).map((opt) => (
+                                    <Button
+                                      key={opt}
+                                      variant={sdohAnswers[q.id] === opt ? 'default' : 'outline'}
+                                      size="sm"
+                                      className="h-7 text-xs capitalize"
+                                      onClick={() => setSdohAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                                    >
+                                      {opt}
+                                    </Button>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      <div className="flex items-center justify-between pt-2">
+                        {sdohSaved && (
+                          <div className="flex items-center gap-1.5 text-success">
+                            <Check className="h-3.5 w-3.5" />
+                            <span className="text-xs font-medium">Saved successfully</span>
+                          </div>
+                        )}
+                        <div className="ml-auto">
+                          <Button
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={handleSdohSave}
+                            disabled={sdohSaving}
+                          >
+                            {sdohSaving ? (
+                              <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Saving...</>
+                            ) : (
+                              <><Check className="mr-1.5 h-3.5 w-3.5" /> Save Well-Being</>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

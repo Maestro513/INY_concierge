@@ -34,4 +34,7 @@ export const ENDPOINTS = {
   ANALYTICS_CARRIERS: '/api/admin/analytics/carriers',
   ANALYTICS_STATES: '/api/admin/analytics/states',
   ANALYTICS_AGE_GROUPS: '/api/admin/analytics/age-groups',
+  // Screening & SDOH phone intake
+  MEMBER_HEALTH_SCREENING: (phone: string) => `/api/admin/members/${phone}/health-screening`,
+  MEMBER_SDOH_SCREENING: (phone: string) => `/api/admin/members/${phone}/sdoh-screening`,
 } as const;

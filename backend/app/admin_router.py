@@ -1089,3 +1089,108 @@ async def update_appointment_request(
         detail=f"status={body.status or 'unchanged'}",
     )
     return {"success": True, "request": updated}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  AGENT PHONE INTAKE — submit screening / SDOH on behalf of a member
+# ════════════════════════════════════════════════════════════════════════════
+
+class AgentHealthScreeningRequest(BaseModel):
+    gender: str = Field("", max_length=20)
+    answers: dict = Field(default_factory=dict)
+    reminders: list = Field(default_factory=list)
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: str) -> str:
+        allowed = {"male", "female", "other", ""}
+        if v.lower() not in allowed:
+            raise ValueError(f"gender must be one of {allowed}")
+        return v.lower()
+
+    @field_validator("reminders")
+    @classmethod
+    def limit_reminders(cls, v: list) -> list:
+        if len(v) > 100:
+            raise ValueError("Too many reminders (max 100).")
+        return v
+
+
+@router.post("/members/{phone}/health-screening")
+async def admin_submit_health_screening(
+    phone: str,
+    body: AgentHealthScreeningRequest,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Agent submits a health-screening on behalf of a member (phone intake)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    data = body.model_dump()
+    data["submitted_by"] = "agent"
+    data["agent_username"] = payload.get("sub", "unknown")
+    udb.save_health_screenings(phone, data)
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="health_screening",
+        resource_id=phone[-4:],
+        ip_address=request.client.host if request.client else "",
+        detail=f"agent_phone_intake gender={body.gender} answers={len(body.answers)}",
+    )
+    log.info("Agent %s submitted health screening for member ***%s", payload.get("sub"), phone[-4:])
+    return {"success": True}
+
+
+class AgentSDoHScreeningRequest(BaseModel):
+    transportation: str = Field("no", pattern=r"^(yes|no)$")
+    food_insecurity: str = Field("no", pattern=r"^(yes|no)$")
+    social_isolation: str = Field("never", pattern=r"^(never|rarely|sometimes|often|always)$")
+    housing_stability: str = Field("no", pattern=r"^(yes|no)$")
+
+
+@router.post("/members/{phone}/sdoh-screening")
+async def admin_submit_sdoh_screening(
+    phone: str,
+    body: AgentSDoHScreeningRequest,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Agent submits an SDOH screening on behalf of a member (phone intake)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    udb.save_sdoh_screening(phone, body.model_dump())
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="sdoh_screening",
+        resource_id=phone[-4:],
+        ip_address=request.client.host if request.client else "",
+        detail="agent_phone_intake",
+    )
+    log.info("Agent %s submitted SDOH screening for member ***%s", payload.get("sub"), phone[-4:])
+    return {"success": True}
+
+
+@router.get("/members/{phone}/health-screening")
+async def admin_get_health_screening(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get a member's most recent health screening (for pre-populating the form)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    result = udb.get_health_screenings(phone)
+    return {"screening": result}
+
+
+@router.get("/members/{phone}/sdoh-screening")
+async def admin_get_sdoh_screening(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get a member's most recent SDOH screening (for pre-populating the form)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    result = udb.get_sdoh_screening(phone)
+    return {"screening": result}
