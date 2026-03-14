@@ -34,7 +34,7 @@ jobs:
       - name: Security audit (pip)
         run: |
           pip install pip-audit
-          pip audit
+          pip-audit
 
       - name: Run tests
         env:
