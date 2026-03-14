@@ -154,8 +154,7 @@ export default function OTPScreen() {
           continue;
         }
         setError(
-          `Can't reach server (${err.message}). URL: ${url}\n` +
-            'Check that your phone can reach this address in a browser.',
+          "Can't reach the server right now. Please check your internet connection and try again.",
         );
       }
     }

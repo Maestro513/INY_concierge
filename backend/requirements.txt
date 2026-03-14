@@ -6,7 +6,6 @@ python-dotenv==1.0.1
 pydantic[email]==2.9.0
 requests==2.32.4
 python-multipart==0.0.22
-gdown==5.2.0
 google-auth==2.38.0
 google-api-python-client==2.163.0
 PyJWT==2.9.0

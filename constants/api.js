@@ -95,9 +95,28 @@ function _generateRequestId() {
   return `${ts}-${rand}`;
 }
 
+// ── Domain pinning — only allow requests to our known API host ──
+const PINNED_HOSTS = new Set(['iny-concierge.onrender.com']);
+
+function _validateUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (!__DEV__ && parsed.protocol !== 'https:') {
+      throw new Error('HTTPS required in production');
+    }
+    if (!__DEV__ && !PINNED_HOSTS.has(parsed.hostname)) {
+      throw new Error(`Untrusted API host: ${parsed.hostname}`);
+    }
+  } catch (e) {
+    if (e.message.includes('HTTPS') || e.message.includes('Untrusted')) throw e;
+    throw new Error('Invalid API URL');
+  }
+}
+
 // ── Authenticated Fetch ───────────────────────────────────────
-// Wraps fetch with: timeout, Bearer token, auto-refresh on 401, X-Request-ID
+// Wraps fetch with: timeout, Bearer token, auto-refresh on 401, X-Request-ID, domain pinning
 export async function authFetch(url, options = {}, timeoutMs = 15000) {
+  _validateUrl(url);
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -131,24 +150,34 @@ export async function authFetch(url, options = {}, timeoutMs = 15000) {
   }
 }
 
+// Mutex: only one refresh request at a time; concurrent callers share the same promise
+let _refreshPromise = null;
+
 async function _tryRefresh() {
-  try {
-    const res = await fetch(`${API_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: _refreshToken }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    await setTokens(data.access_token, data.refresh_token);
-    return true;
-  } catch {
-    return false;
-  }
+  if (_refreshPromise) return _refreshPromise;
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: _refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      await setTokens(data.access_token, data.refresh_token);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+  return _refreshPromise;
 }
 
 // ── Legacy: plain fetch with timeout (for pre-auth calls) ─────
 export function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+  _validateUrl(url);
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(id));

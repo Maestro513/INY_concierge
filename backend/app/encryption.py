@@ -83,8 +83,8 @@ class FieldCipher:
             token = value[len(_ENC_PREFIX):]
             return self._fernet.decrypt(token.encode()).decode()
         except Exception as e:
-            log.error(f"Decryption failed: {e}")
-            return value  # return as-is on failure
+            log.error("Decryption failed for field — data may be corrupted")
+            raise ValueError("Failed to decrypt field value. The encryption key may have changed or data is corrupted.") from e
 
 
 # Singleton — configured from env

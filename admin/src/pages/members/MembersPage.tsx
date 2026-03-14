@@ -60,6 +60,14 @@ function getInitials(first: string, last: string) {
   return `${first[0]}${last[0]}`.toUpperCase();
 }
 
+function maskPhone(phone: string): string {
+  // Show only last 4 digits: (***) ***-0142
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 4) return '***';
+  const last4 = digits.slice(-4);
+  return `(***) ***-${last4}`;
+}
+
 const CARRIER_COLORS: Record<string, string> = {
   Humana: 'bg-chart-1/10 text-chart-1',
   Aetna: 'bg-chart-2/10 text-chart-2',
@@ -275,7 +283,7 @@ export default function MembersPage() {
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs font-mono font-medium">{m.phone}</TableCell>
+                  <TableCell className="text-xs font-mono font-medium">{maskPhone(m.phone)}</TableCell>
                   <TableCell>
                     {m.plan_number ? (
                       <div>

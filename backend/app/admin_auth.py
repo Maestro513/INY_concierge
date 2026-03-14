@@ -200,13 +200,14 @@ def authenticate_admin(email: str, password: str) -> dict:
 
 def bootstrap_super_admin(email: str, password: str, first_name: str = "Admin",
                           last_name: str = "User") -> dict:
-    """Create the first super_admin account. Used from CLI."""
+    """Create the first super_admin account. Used from CLI.
+
+    If the account already exists, password is NOT silently reset.
+    Use the admin password-change flow instead.
+    """
     existing = admin_db.get_admin_user_by_email(email)
     if existing:
-        # L3: Update password hash so bootstrap always sets the intended credentials
-        pw_hash = hash_password(password)
-        admin_db.update_admin_user(existing["id"], password_hash=pw_hash)
-        log.info("Admin user already exists (id=%s) — password updated", existing['id'])
+        log.warning("Admin user already exists (id=%s) — skipping bootstrap (use admin UI to reset password)", existing['id'])
         return existing
     pw_hash = hash_password(password)
     user = admin_db.create_admin_user(
