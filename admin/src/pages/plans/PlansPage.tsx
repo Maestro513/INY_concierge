@@ -1,26 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Search, Filter, FileText, CheckCircle2, XCircle,
-  ChevronLeft, ChevronRight, AlertCircle,
+  ChevronLeft, ChevronRight, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import client from '@/api/client';
+import { ENDPOINTS } from '@/config/api';
 
-const MOCK_PLANS = [
-  { plan_number: 'H0028-014', plan_name: 'Humana Gold Plus (HMO)', carrier: 'Humana', plan_type: 'HMO', has_pdf: true, has_extraction: true, has_benefits: true },
-  { plan_number: 'H5521-028', plan_name: 'Aetna Medicare Premier (PPO)', carrier: 'Aetna', plan_type: 'PPO', has_pdf: true, has_extraction: true, has_benefits: true },
-  { plan_number: 'H4590-012', plan_name: 'UHC AARP Medicare Advantage (HMO)', carrier: 'UHC', plan_type: 'HMO', has_pdf: true, has_extraction: true, has_benefits: false },
-  { plan_number: 'H0174-010', plan_name: 'Wellcare Simple (HMO)', carrier: 'Wellcare', plan_type: 'HMO', has_pdf: true, has_extraction: false, has_benefits: false },
-  { plan_number: 'H7040-003', plan_name: 'Devoted Health Access (HMO)', carrier: 'Devoted', plan_type: 'HMO', has_pdf: true, has_extraction: true, has_benefits: true },
-  { plan_number: 'H1036-077', plan_name: 'Humana Honor (PPO)', carrier: 'Humana', plan_type: 'PPO', has_pdf: true, has_extraction: true, has_benefits: true },
-  { plan_number: 'H0628-008', plan_name: 'Aetna Medicare Signature (HMO-POS)', carrier: 'Aetna', plan_type: 'HMO-POS', has_pdf: true, has_extraction: true, has_benefits: false },
-  { plan_number: 'H0029-007', plan_name: 'Wellcare Dual Access (HMO-POS D-SNP)', carrier: 'Wellcare', plan_type: 'HMO-POS D-SNP', has_pdf: false, has_extraction: false, has_benefits: false },
-];
+interface PlanEntry {
+  plan_number: string;
+  plan_name: string;
+  carrier: string;
+  plan_type: string;
+  has_pdf: boolean;
+  has_extraction: boolean;
+  has_benefits: boolean;
+}
+
+interface PlansResponse {
+  data: PlanEntry[];
+  total: number;
+  page: number;
+  per_page: number;
+}
 
 function StatusDot({ ok }: { ok: boolean }) {
   return ok ? (
@@ -32,23 +41,69 @@ function StatusDot({ ok }: { ok: boolean }) {
 
 export default function PlansPage() {
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [plans, setPlans] = useState<PlanEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const perPage = 50;
 
-  const filtered = MOCK_PLANS.filter((p) => {
-    const q = search.toLowerCase();
-    return (
-      p.plan_name.toLowerCase().includes(q) ||
-      p.plan_number.toLowerCase().includes(q) ||
-      p.carrier.toLowerCase().includes(q)
-    );
-  });
+  const fetchPlans = useCallback(async (searchQuery: string, pageNum: number) => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await client.get<PlansResponse>(ENDPOINTS.PLANS, {
+        params: { search: searchQuery, page: pageNum, per_page: perPage },
+      });
+      setPlans(res.data.data);
+      setTotal(res.data.total);
+    } catch {
+      setError('Failed to load plans.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPlans(search, page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, fetchPlans]); // search triggers via debounced effect below, not on every keystroke
+
+  // Debounced search: reset to page 1 when searching
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      fetchPlans(search, 1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search, fetchPlans]);
+
+  // Compute stats from total data
+  const statsWithExtraction = plans.filter((p) => p.has_extraction).length;
+  const statsWithBenefits = plans.filter((p) => p.has_benefits).length;
+  const statsWithoutPdf = plans.filter((p) => !p.has_pdf).length;
+
+  const totalPages = Math.ceil(total / perPage);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Plans</h1>
-        <p className="text-sm text-muted-foreground">
-          Browse all plans, extraction status, and benefits data
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Plans</h1>
+          <p className="text-sm text-muted-foreground">
+            Browse all plans, extraction status, and benefits data
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => fetchPlans(search, page)}
+          disabled={loading}
+        >
+          <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Quick Stats */}
@@ -59,7 +114,7 @@ export default function PlansPage() {
               <FileText className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="text-xl font-bold">3,840</p>
+              <p className="text-xl font-bold">{loading ? '...' : total.toLocaleString()}</p>
               <p className="text-[11px] text-muted-foreground">Total Plans</p>
             </div>
           </CardContent>
@@ -70,8 +125,8 @@ export default function PlansPage() {
               <CheckCircle2 className="h-4 w-4 text-success" />
             </div>
             <div>
-              <p className="text-xl font-bold">3,612</p>
-              <p className="text-[11px] text-muted-foreground">Extracted</p>
+              <p className="text-xl font-bold">{loading ? '...' : statsWithExtraction.toLocaleString()}</p>
+              <p className="text-[11px] text-muted-foreground">Extracted (this page)</p>
             </div>
           </CardContent>
         </Card>
@@ -81,8 +136,8 @@ export default function PlansPage() {
               <FileText className="h-4 w-4 text-chart-2" />
             </div>
             <div>
-              <p className="text-xl font-bold">2,800</p>
-              <p className="text-[11px] text-muted-foreground">With Benefits</p>
+              <p className="text-xl font-bold">{loading ? '...' : statsWithBenefits.toLocaleString()}</p>
+              <p className="text-[11px] text-muted-foreground">With Benefits (this page)</p>
             </div>
           </CardContent>
         </Card>
@@ -92,12 +147,23 @@ export default function PlansPage() {
               <AlertCircle className="h-4 w-4 text-warning" />
             </div>
             <div>
-              <p className="text-xl font-bold">228</p>
-              <p className="text-[11px] text-muted-foreground">Missing PDF</p>
+              <p className="text-xl font-bold">{loading ? '...' : statsWithoutPdf.toLocaleString()}</p>
+              <p className="text-[11px] text-muted-foreground">Missing PDF (this page)</p>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Error */}
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+          <Button variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => fetchPlans(search, page)}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Table */}
       <Card className="border-border/50 shadow-sm">
@@ -134,34 +200,80 @@ export default function PlansPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((p) => (
-                <TableRow key={p.plan_number} className="cursor-pointer hover:bg-accent/30 transition-colors">
-                  <TableCell className="text-xs font-mono font-semibold text-primary">{p.plan_number}</TableCell>
-                  <TableCell className="text-xs font-medium max-w-64 truncate">{p.plan_name}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="text-[10px] font-semibold">{p.carrier}</Badge>
+              {loading
+                ? Array.from({ length: 8 }).map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-4 w-4 mx-auto" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-4 w-4 mx-auto" /></TableCell>
+                      <TableCell className="text-center"><Skeleton className="h-4 w-4 mx-auto" /></TableCell>
+                    </TableRow>
+                  ))
+                : plans.map((p) => (
+                    <TableRow key={p.plan_number} className="cursor-pointer hover:bg-accent/30 transition-colors">
+                      <TableCell className="text-xs font-mono font-semibold text-primary">{p.plan_number}</TableCell>
+                      <TableCell className="text-xs font-medium max-w-64 truncate">{p.plan_name}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="text-[10px] font-semibold">{p.carrier}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{p.plan_type}</TableCell>
+                      <TableCell className="text-center"><StatusDot ok={p.has_pdf} /></TableCell>
+                      <TableCell className="text-center"><StatusDot ok={p.has_extraction} /></TableCell>
+                      <TableCell className="text-center"><StatusDot ok={p.has_benefits} /></TableCell>
+                    </TableRow>
+                  ))
+              }
+              {!loading && plans.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8 text-sm text-muted-foreground">
+                    {search ? `No plans matching "${search}"` : 'No plans found'}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{p.plan_type}</TableCell>
-                  <TableCell className="text-center"><StatusDot ok={p.has_pdf} /></TableCell>
-                  <TableCell className="text-center"><StatusDot ok={p.has_extraction} /></TableCell>
-                  <TableCell className="text-center"><StatusDot ok={p.has_benefits} /></TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
 
           <div className="flex items-center justify-between border-t border-border px-4 py-3">
             <p className="text-xs text-muted-foreground">
-              Showing {filtered.length} of 3,840 plans
+              Showing {plans.length} of {total.toLocaleString()} plans
             </p>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" className="h-7 w-7 p-0">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <Button variant="default" size="sm" className="h-7 min-w-7 p-0 text-xs">1</Button>
-              <Button variant="outline" size="sm" className="h-7 min-w-7 p-0 text-xs">2</Button>
-              <Button variant="outline" size="sm" className="h-7 min-w-7 p-0 text-xs">3</Button>
-              <Button variant="outline" size="sm" className="h-7 w-7 p-0">
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                const pageNum = i + 1;
+                return (
+                  <Button
+                    key={pageNum}
+                    variant={page === pageNum ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 min-w-7 p-0 text-xs"
+                    onClick={() => setPage(pageNum)}
+                  >
+                    {pageNum}
+                  </Button>
+                );
+              })}
+              {totalPages > 5 && (
+                <span className="text-xs text-muted-foreground px-1">...</span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>

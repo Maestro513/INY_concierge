@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Phone, MapPin, Mail, Calendar, Shield,
   KeyRound, Pill, Send, FileText, Check,
-  Plus, Trash2, Activity, Eye,
+  Plus, Trash2, Activity, Eye, AlertCircle,
   ClipboardCheck, Heart, Car, UtensilsCrossed, Users, Home,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -192,12 +192,27 @@ export default function MemberDetailPage() {
     }, 800);
   }
 
-  function handleSendOtp() {
+  const [otpError, setOtpError] = useState('');
+
+  async function handleSendOtp() {
+    if (!member) return;
     setOtpSending(true);
-    setTimeout(() => {
-      setOtpSending(false);
+    setOtpError('');
+    try {
+      await client.post(ENDPOINTS.MEMBER_SEND_OTP, {
+        phone: member.phone,
+      });
       setOtpSent(true);
-    }, 1200);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } };
+      if (axiosErr.response?.status === 429) {
+        setOtpError('Too many OTP requests. Please wait and try again.');
+      } else {
+        setOtpError(axiosErr.response?.data?.detail || 'Failed to send OTP.');
+      }
+    } finally {
+      setOtpSending(false);
+    }
   }
 
   // ── Load existing screening data ──
@@ -265,12 +280,74 @@ export default function MemberDetailPage() {
       .finally(() => setSdohSaving(false));
   }
 
-  function handleAddReminder() {
-    // TODO: POST /api/admin/members/:phone/reminders
-    setReminderDialogOpen(false);
-    setNewDrugName('');
-    setNewDose('');
-    setNewTime('08:00');
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderError, setReminderError] = useState('');
+
+  async function handleAddReminder() {
+    if (!member) return;
+    setReminderSaving(true);
+    setReminderError('');
+    const [hourStr, minuteStr] = newTime.split(':');
+    try {
+      const res = await client.post(ENDPOINTS.MEMBER_REMINDERS(member.phone), {
+        drug_name: newDrugName,
+        dose_label: newDose,
+        time_hour: parseInt(hourStr, 10),
+        time_minute: parseInt(minuteStr, 10),
+      });
+      // Add the new reminder to the local state
+      const newReminder = res.data.reminder;
+      setMember({
+        ...member,
+        reminders: [
+          ...member.reminders,
+          {
+            id: newReminder.id,
+            drug_name: newReminder.drug_name,
+            dose: newReminder.dose_label,
+            time: newTime,
+            enabled: true,
+          },
+        ],
+      });
+      setReminderDialogOpen(false);
+      setNewDrugName('');
+      setNewDose('');
+      setNewTime('08:00');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setReminderError(axiosErr.response?.data?.detail || 'Failed to create reminder.');
+    } finally {
+      setReminderSaving(false);
+    }
+  }
+
+  async function handleDeleteReminder(reminderId: number) {
+    if (!member) return;
+    try {
+      await client.delete(ENDPOINTS.MEMBER_REMINDER(member.phone, reminderId));
+      setMember({
+        ...member,
+        reminders: member.reminders.filter((r) => r.id !== reminderId),
+      });
+    } catch {
+      // Silent fail — could add toast here
+    }
+  }
+
+  async function handleToggleReminder(reminderId: number, enabled: boolean) {
+    if (!member) return;
+    try {
+      await client.put(ENDPOINTS.MEMBER_REMINDER(member.phone, reminderId), { enabled });
+      setMember({
+        ...member,
+        reminders: member.reminders.map((r) =>
+          r.id === reminderId ? { ...r, enabled } : r
+        ),
+      });
+    } catch {
+      // Silent fail
+    }
   }
 
   if (loading) {
@@ -504,11 +581,17 @@ export default function MemberDetailPage() {
                       <div className="flex items-center gap-2">
                         <Badge
                           variant="secondary"
-                          className={`text-[10px] ${r.enabled ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}
+                          className={`text-[10px] cursor-pointer ${r.enabled ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}
+                          onClick={() => handleToggleReminder(r.id, !r.enabled)}
                         >
                           {r.enabled ? 'Active' : 'Paused'}
                         </Badge>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDeleteReminder(r.id)}
+                        >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -845,10 +928,20 @@ export default function MemberDetailPage() {
               <Input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} className="h-9" />
             </div>
           </div>
+          {reminderError && (
+            <div className="flex items-center gap-2 text-sm text-destructive px-1">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span className="text-xs">{reminderError}</span>
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReminderDialogOpen(false)} className="text-xs">Cancel</Button>
-            <Button onClick={handleAddReminder} disabled={!newDrugName || !newDose} className="text-xs">
-              <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Reminder
+            <Button variant="outline" onClick={() => { setReminderDialogOpen(false); setReminderError(''); }} className="text-xs">Cancel</Button>
+            <Button onClick={handleAddReminder} disabled={!newDrugName || !newDose || reminderSaving} className="text-xs">
+              {reminderSaving ? (
+                <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Adding...</>
+              ) : (
+                <><Plus className="mr-1.5 h-3.5 w-3.5" /> Add Reminder</>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -873,6 +966,12 @@ export default function MemberDetailPage() {
               <div className="mt-3 flex items-center gap-2 rounded-lg bg-success/10 border border-success/20 p-3">
                 <Check className="h-4 w-4 text-success shrink-0" />
                 <p className="text-xs font-medium text-success">OTP sent successfully! Member has 5 minutes to use it.</p>
+              </div>
+            )}
+            {otpError && (
+              <div className="mt-3 flex items-center gap-2 rounded-lg bg-destructive/5 border border-destructive/20 p-3">
+                <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+                <p className="text-xs font-medium text-destructive">{otpError}</p>
               </div>
             )}
           </div>

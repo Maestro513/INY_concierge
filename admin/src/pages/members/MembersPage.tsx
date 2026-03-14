@@ -107,6 +107,25 @@ export default function MembersPage() {
   const [createSuccess, setCreateSuccess] = useState(false);
   const [otpSentTo, setOtpSentTo] = useState('');
 
+  const [otpStatus, setOtpStatus] = useState<{ phone: string; success: boolean; message: string } | null>(null);
+
+  async function handleSendOtpToMember(m: MockMember) {
+    try {
+      await client.post(ENDPOINTS.MEMBER_SEND_OTP, {
+        phone: m.phone.replace(/\D/g, ''),
+      });
+      setOtpStatus({ phone: m.phone, success: true, message: `OTP sent to ${m.first_name}` });
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } };
+      setOtpStatus({
+        phone: m.phone,
+        success: false,
+        message: axiosErr.response?.data?.detail || 'Failed to send OTP',
+      });
+    }
+    setTimeout(() => setOtpStatus(null), 4000);
+  }
+
   const filtered = MOCK_MEMBERS.filter((m) => {
     const q = search.toLowerCase();
     return (
@@ -206,6 +225,18 @@ export default function MembersPage() {
           <UserPlus className="mr-1.5 h-3.5 w-3.5" /> New Member
         </Button>
       </div>
+
+      {/* OTP Status Toast */}
+      {otpStatus && (
+        <div className={`flex items-center gap-2 rounded-lg border p-3 text-sm ${
+          otpStatus.success
+            ? 'border-success/30 bg-success/5 text-success'
+            : 'border-destructive/30 bg-destructive/5 text-destructive'
+        }`}>
+          {otpStatus.success ? <Check className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+          <span className="text-xs">{otpStatus.message}</span>
+        </div>
+      )}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-4 gap-4">
@@ -374,7 +405,7 @@ export default function MembersPage() {
                         <DropdownMenuItem className="text-xs text-primary font-semibold" onClick={(e) => { e.stopPropagation(); openAssignPlan(m); }}>
                           <FileText className="mr-2 h-3.5 w-3.5" /> Assign Plan
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="text-xs text-primary font-medium" onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenuItem className="text-xs text-primary font-medium" onClick={(e) => { e.stopPropagation(); handleSendOtpToMember(m); }}>
                           <KeyRound className="mr-2 h-3.5 w-3.5" /> Send OTP Login
                         </DropdownMenuItem>
                         <DropdownMenuItem className="text-xs" onClick={(e) => e.stopPropagation()}>

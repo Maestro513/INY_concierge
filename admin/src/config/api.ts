@@ -13,6 +13,12 @@ export const ENDPOINTS = {
   MEMBER_ACTIVITY: (phone: string) => `/api/admin/members/${phone}/activity`,
   MEMBER_CREATE: '/api/admin/members/create',
   MEMBER_SEND_OTP: '/api/admin/members/send-otp',
+  MEMBER_REMINDERS: (phone: string) => `/api/admin/members/${phone}/reminders`,
+  MEMBER_REMINDER: (phone: string, id: number) => `/api/admin/members/${phone}/reminders/${id}`,
+
+  // Admin users (self-management)
+  ADMIN_USERS: '/api/admin/users',
+  ADMIN_USER: (id: number) => `/api/admin/users/${id}`,
 
   // Plans
   PLANS: '/api/admin/plans',
