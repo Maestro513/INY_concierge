@@ -110,27 +110,42 @@ def _search_contact_impl(phone: str) -> dict | None:
 
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
 
-    # Search by phone and mobile fields
-    for field in ["Phone", "Mobile"]:
-        search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{clean})"
-        resp = _http.get(search_url, headers=headers, timeout=15)
+    # Build all common phone formats Zoho might store
+    formats = [
+        clean,                                                    # 9546680435
+        f"({clean[:3]}) {clean[3:6]}-{clean[6:]}",              # (954) 668-0435
+        f"{clean[:3]}-{clean[3:6]}-{clean[6:]}",                # 954-668-0435
+        f"+1{clean}",                                             # +19546680435
+        f"1{clean}",                                              # 19546680435
+        f"{clean[:3]}.{clean[3:6]}.{clean[6:]}",                # 954.668.0435
+        f"+1 ({clean[:3]}) {clean[3:6]}-{clean[6:]}",           # +1 (954) 668-0435
+        f"{clean[:3]} {clean[3:6]} {clean[6:]}",                # 954 668 0435
+    ]
 
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("data") and len(data["data"]) > 0:
-                return _extract_contact(data["data"][0])
-
-    # Try with formatted number (XXX) XXX-XXXX
-    if len(clean) == 10:
-        formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}"
-        encoded = quote(formatted, safe="")
+    for fmt in formats:
+        encoded = quote(fmt, safe="")
         for field in ["Phone", "Mobile"]:
             search_url = f"{API_BASE}/Contacts/search?criteria=({field}:equals:{encoded})"
             resp = _http.get(search_url, headers=headers, timeout=15)
+            log.debug("Zoho search %s=%s → %s", field, fmt, resp.status_code)
 
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("data") and len(data["data"]) > 0:
+                    log.info("Found contact via %s=%s", field, fmt)
                     return _extract_contact(data["data"][0])
 
+    # Last resort: contains search (handles any wrapper format)
+    for field in ["Phone", "Mobile"]:
+        search_url = f"{API_BASE}/Contacts/search?criteria=({field}:contains:{clean})"
+        resp = _http.get(search_url, headers=headers, timeout=15)
+        log.debug("Zoho contains search %s~%s → %s", field, clean, resp.status_code)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("data") and len(data["data"]) > 0:
+                log.info("Found contact via %s contains %s", field, clean)
+                return _extract_contact(data["data"][0])
+
+    log.warning("No Zoho contact found for phone ending in ...%s", clean[-4:])
     return None

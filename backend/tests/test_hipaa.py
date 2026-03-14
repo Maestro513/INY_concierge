@@ -21,8 +21,17 @@ class TestFieldEncryption:
         original = "1EG4-TE5-MK72"
         encrypted = cipher.encrypt(original)
         assert encrypted != original
-        assert encrypted.startswith("enc:")
+        assert encrypted.startswith("enc2:")  # AES-256-GCM prefix
         decrypted = cipher.decrypt(encrypted)
+        assert decrypted == original
+
+    def test_legacy_fernet_decrypt(self, cipher):
+        """Legacy Fernet-encrypted values (enc: prefix) can still be decrypted."""
+        original = "1EG4-TE5-MK72"
+        # Encrypt with Fernet directly to simulate legacy data
+        fernet_token = cipher._fernet.encrypt(original.encode()).decode()
+        legacy_value = "enc:" + fernet_token
+        decrypted = cipher.decrypt(legacy_value)
         assert decrypted == original
 
     def test_empty_string(self, cipher):

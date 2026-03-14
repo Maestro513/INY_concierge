@@ -113,11 +113,13 @@ export default function PhoneScreen() {
       const data = await res.json();
       if (res.status === 429) {
         setError('Too many attempts. Please wait a few minutes and try again.');
-      } else if (data.found) {
-        setPendingOtp(rawDigits, data.first_name);
+      } else if (data.otp_sent) {
+        // M9: Backend no longer returns found/first_name pre-auth (anti-enumeration).
+        // first_name will be returned after OTP verification.
+        setPendingOtp(rawDigits, '');
         router.push('/otp');
       } else {
-        setError("We couldn't find an account with that number. Please call us at (844) 463-2931.");
+        setError("Something went wrong. Please try again or call us at (844) 463-2931.");
       }
     } catch (err) {
       if (err.name === 'AbortError') {
