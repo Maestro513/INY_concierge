@@ -266,7 +266,7 @@ export default function PhoneScreen() {
             </View>
             <View style={styles.trustItem}>
               <Ionicons name="shield-checkmark-outline" size={14} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.trustText}>AES Encrypted</Text>
+              <Text style={styles.trustText}>256-bit Encrypted</Text>
             </View>
             <View style={styles.trustItem}>
               <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.5)" />
