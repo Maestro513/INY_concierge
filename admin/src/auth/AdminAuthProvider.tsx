@@ -15,6 +15,8 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, loading: true });
 
@@ -43,6 +45,25 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     }
     setState({ user: null, loading: false });
   }, []);
+
+  // Idle timeout — auto-logout after 30 minutes of inactivity
+  useEffect(() => {
+    if (!state.user) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        logout();
+      }, IDLE_TIMEOUT_MS);
+    };
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'] as const;
+    events.forEach((e) => window.addEventListener(e, resetTimer));
+    resetTimer();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, resetTimer));
+    };
+  }, [state.user, logout]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout }}>

@@ -42,7 +42,8 @@ def _audit_hmac_key() -> bytes:
                 "AUDIT_HMAC_KEY must be set in production/staging. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
             )
-        key = "audit-actor-dev-key-not-for-production"
+        import secrets as _audit_secrets
+        key = _audit_secrets.token_urlsafe(32)
     return key.encode()
 
 
