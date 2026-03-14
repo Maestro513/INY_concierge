@@ -54,9 +54,10 @@ OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "4"))   # lockout after 4 w
 OTP_MAX_SENDS = int(os.getenv("OTP_MAX_SENDS", "4"))         # max 4 sends per window
 OTP_SEND_WINDOW = int(os.getenv("OTP_SEND_WINDOW", "300"))   # 5 minute window
 
-# Test account — only enabled in development/staging (never in production)
-TEST_PHONE = os.getenv("TEST_PHONE", "") if APP_ENV != "production" else ""
-TEST_OTP = os.getenv("TEST_OTP", "") if APP_ENV != "production" else ""
+# Test account — enabled in all environments when env vars are set.
+# Keep TEST_OTP strong and rotate regularly in production.
+TEST_PHONE = os.getenv("TEST_PHONE", "")
+TEST_OTP = os.getenv("TEST_OTP", "")
 
 # Warn if well-known/predictable test credentials are being used
 if TEST_PHONE and TEST_OTP:
