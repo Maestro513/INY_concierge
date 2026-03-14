@@ -132,6 +132,10 @@ export default function HomeScreen() {
     router.push('/pharmacy-results');
   };
 
+  const handleBookTransportation = () => {
+    router.push('/book-transportation');
+  };
+
   // ── Benefits ────────────────────────────────────────────────────
 
   const loadAllBenefits = async () => {
@@ -431,6 +435,7 @@ export default function HomeScreen() {
           drugsData={drugsData}
           onLogout={handleLogout}
           onOpenSettings={handleOpenSettings}
+          onBookTransportation={handleBookTransportation}
         />
         <MedAdherence
           summary={adherenceSummary}
