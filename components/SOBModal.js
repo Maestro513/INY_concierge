@@ -130,13 +130,13 @@ export default function SOBModal({ visible, onClose, member, sobData, loading, o
           <View style={s.actionRow}>
             <TouchableOpacity
               onPress={() => { if (onViewIDCard) { onClose(); onViewIDCard(); } }}
-              style={s.actionBtn}
+              style={[s.actionBtn, s.actionBtnPrimary]}
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel="View digital ID card"
             >
-              <Ionicons name="card-outline" size={18} color={COLORS.accent} />
-              <Text style={s.actionBtnText}>ID Card</Text>
+              <Ionicons name="card-outline" size={20} color="#fff" />
+              <Text style={[s.actionBtnText, { color: '#fff', fontSize: 15 }]}>ID Card</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleDownload}
@@ -382,6 +382,12 @@ const s = StyleSheet.create({
     borderRadius: RADII.md,
     paddingVertical: 12,
     paddingHorizontal: 12,
+  },
+  actionBtnPrimary: {
+    flex: 1.4,
+    backgroundColor: COLORS.accent,
+    paddingVertical: 14,
+    ...SHADOWS.button,
   },
   actionBtnText: {
     fontSize: 14,
