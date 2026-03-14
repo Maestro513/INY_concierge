@@ -35,9 +35,9 @@ _ENC_PREFIX = "enc2:"         # AES-256-GCM (current)
 # Try to import cryptography; if not available, fall back to no-op
 try:
     from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-    from cryptography.hazmat.primitives import hashes
     _HAS_CRYPTO = True
 except ImportError:
     _HAS_CRYPTO = False
