@@ -262,5 +262,7 @@ def estimate_current_month_costs(
         "current_month_costs": current,
         "ytd_total": round(ytd_total, 2),
         "deductible_amount": drug_deductible,
-        "deductible_remaining": max(0.0, drug_deductible - ytd_total) if drug_deductible > 0 else 0.0,
+        "deductible_remaining": max(0.0, drug_deductible - sum(
+            d["deductible_spend"] for m in result["monthly_breakdown"] for d in m["drugs"]
+        )) if drug_deductible > 0 else 0.0,
     }
