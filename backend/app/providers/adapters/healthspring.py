@@ -4,12 +4,10 @@ HealthSpring Provider Directory FHIR Adapter.
 HealthSpring (HCSC, formerly Cigna Medicare) uses Cigna's FHIR server.
 DaVinci PDEX Plan Net v1.2.0. No authentication required.
 
-Flow:
-1. GET /PractitionerRole?specialty=NUCC → roles with NPI, phone, location refs
-2. GET /Practitioner/{id} → names, credentials
-3. GET /Location/{id} → addresses, coordinates
-
-_include is NOT supported — must fetch Practitioner and Location separately.
+Flow (zip-first, matching Humana pattern):
+1. GET /Location?address-postalcode=ZIP → locations near the member
+2. GET /PractitionerRole?specialty=NUCC&location=Location/{id} → roles at those locations
+3. GET /Practitioner/{id} → names, credentials
 
 Base: https://fhir.cigna.com/ProviderDirectory/v1
 Auth: None (public directory)
@@ -28,6 +26,8 @@ logger = logging.getLogger(__name__)
 HS_BASE = "https://fhir.cigna.com/ProviderDirectory/v1"
 HEADERS = {"Accept": "application/json"}
 TIMEOUT = 30.0
+MAX_LOCATIONS = 20
+MAX_BATCH_REFS = 100
 
 
 class HealthspringAdapter(BaseAdapter):
@@ -44,12 +44,10 @@ class HealthspringAdapter(BaseAdapter):
         """
         Find providers by specialty near a zip code.
 
-        Since _include is not supported and PractitionerRole doesn't
-        have a location-address search param, we:
-        1. Search PractitionerRole by specialty (nationwide)
-        2. Batch fetch referenced Practitioner resources (names)
-        3. Batch fetch referenced Location resources (addresses)
-        4. Let the service layer filter by distance
+        Uses a zip-first approach:
+        1. Search Location by zip code to get nearby locations
+        2. Search PractitionerRole by specialty + location
+        3. Batch fetch Practitioner resources for names/NPIs
         """
         codes = resolve_specialty(specialty)
         nucc_code = codes.get("nucc")
@@ -61,13 +59,25 @@ class HealthspringAdapter(BaseAdapter):
 
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                # Step 1: search PractitionerRole by specialty
-                roles = await self._search_roles(client, nucc_code, limit)
-                if not roles:
-                    logger.debug("[HealthSpring] No PractitionerRole results")
+                # Step 1: find locations near the zip code
+                location_ids = await self._search_locations_by_zip(client, zip_code)
+                if not location_ids:
+                    logger.debug(f"[HealthSpring] No locations found for zip {zip_code}")
                     return []
 
-                # Collect unique Practitioner and Location refs to fetch
+                # Step 2: search PractitionerRole by specialty + location
+                roles = []
+                for loc_id in location_ids[:MAX_LOCATIONS]:
+                    batch = await self._search_roles_at_location(client, nucc_code, loc_id, limit)
+                    roles.extend(batch)
+                    if len(roles) >= limit:
+                        break
+
+                if not roles:
+                    logger.debug("[HealthSpring] No PractitionerRole results for locations")
+                    return []
+
+                # Collect unique Practitioner refs to fetch (locations already known)
                 prac_refs = set()
                 loc_refs = set()
                 for role in roles:
@@ -81,10 +91,10 @@ class HealthspringAdapter(BaseAdapter):
 
                 logger.debug(f"[HealthSpring] Fetching {len(prac_refs)} practitioners, {len(loc_refs)} locations")
 
-                # Step 2 & 3: fetch Practitioner and Location in parallel
+                # Step 3: fetch Practitioner and Location in parallel (capped)
                 prac_map, loc_map = await asyncio.gather(
-                    self._batch_fetch(client, list(prac_refs)),
-                    self._batch_fetch(client, list(loc_refs)),
+                    self._batch_fetch(client, list(prac_refs)[:MAX_BATCH_REFS]),
+                    self._batch_fetch(client, list(loc_refs)[:MAX_BATCH_REFS]),
                 )
 
                 # Step 4: build results
@@ -100,46 +110,73 @@ class HealthspringAdapter(BaseAdapter):
 
         except Exception as e:
             logger.error(f"HealthSpring search failed: {e}")
-            logger.warning(f"[HealthSpring] Search failed: {e}")
             return []
 
-    async def _search_roles(
+    async def _search_locations_by_zip(
         self,
         client: httpx.AsyncClient,
-        nucc_code: str,
-        limit: int,
-    ) -> list[dict]:
-        """Search PractitionerRole by specialty."""
-        logger.debug(f"[HealthSpring] Searching PractitionerRole: specialty={nucc_code}")
-
-        params = {
-            "specialty": nucc_code,
-            "_count": str(min(limit, 100)),
-        }
-
+        zip_code: str,
+    ) -> list[str]:
+        """Search Location by zip code, return list of Location resource IDs."""
         try:
             resp = await client.get(
-                f"{HS_BASE}/PractitionerRole",
-                params=params,
+                f"{HS_BASE}/Location",
+                params={
+                    "address-postalcode": zip_code,
+                    "_count": str(MAX_LOCATIONS),
+                },
                 headers=HEADERS,
             )
             resp.raise_for_status()
             bundle = resp.json() or {}
         except httpx.HTTPStatusError as e:
-            logger.warning(f"[HealthSpring] PractitionerRole search failed: {e.response.status_code} {e.response.text[:300]}")
+            logger.warning(f"[HealthSpring] Location search failed: {e.response.status_code}")
             return []
         except Exception as e:
-            logger.warning(f"[HealthSpring] PractitionerRole search error: {e}")
+            logger.warning(f"[HealthSpring] Location search error: {e}")
             return []
 
-        entries = bundle.get("entry", []) or []
+        location_ids = []
+        for entry in bundle.get("entry", []) or []:
+            resource = (entry or {}).get("resource", {}) or {}
+            if resource.get("resourceType") == "Location" and resource.get("id"):
+                location_ids.append(resource["id"])
+
+        logger.debug(f"[HealthSpring] Found {len(location_ids)} locations for zip {zip_code}")
+        return location_ids
+
+    async def _search_roles_at_location(
+        self,
+        client: httpx.AsyncClient,
+        nucc_code: str,
+        location_id: str,
+        limit: int,
+    ) -> list[dict]:
+        """Search PractitionerRole by specialty at a specific location."""
+        try:
+            resp = await client.get(
+                f"{HS_BASE}/PractitionerRole",
+                params={
+                    "specialty": nucc_code,
+                    "location": f"Location/{location_id}",
+                    "_count": str(min(limit, 50)),
+                },
+                headers=HEADERS,
+            )
+            resp.raise_for_status()
+            bundle = resp.json() or {}
+        except httpx.HTTPStatusError as e:
+            logger.debug(f"[HealthSpring] Role search at {location_id} failed: {e.response.status_code}")
+            return []
+        except Exception as e:
+            logger.debug(f"[HealthSpring] Role search at {location_id} error: {e}")
+            return []
+
         roles = []
-        for entry in entries:
+        for entry in bundle.get("entry", []) or []:
             resource = (entry or {}).get("resource", {}) or {}
             if resource.get("resourceType") == "PractitionerRole":
                 roles.append(resource)
-
-        logger.debug(f"[HealthSpring] Found {len(roles)} PractitionerRole entries")
         return roles
 
     async def _batch_fetch(

@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import {
   HeartPulse,
   AlertTriangle,
@@ -20,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useQuery } from '@tanstack/react-query';
 import api from '@/api/client';
 
 interface ScreeningStat {
@@ -69,21 +69,13 @@ function CompletionBar({ pct }: { pct: number }) {
 }
 
 export default function ScreeningGapsPage() {
-  const [data, setData] = useState<GapReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    api.get('/api/admin/screening-gap-report')
-      .then((res) => {
-        setData(res.data);
-        setError('');
-      })
-      .catch((err) => {
-        setError(err.response?.data?.detail || 'Failed to load screening data');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const { data, isLoading: loading, error: queryError } = useQuery<GapReport>({
+    queryKey: ['screening-gap-report'],
+    queryFn: () => api.get('/api/admin/screening-gap-report').then((res) => res.data),
+  });
+  const error = queryError
+    ? (queryError as Error)?.message || 'Failed to load screening data'
+    : '';
 
   if (loading) {
     return (
@@ -108,7 +100,7 @@ export default function ScreeningGapsPage() {
     );
   }
 
-  if (!data || data.total_members === 0) {
+  if (!data || !data.total_members) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold tracking-tight">Screening Gap Report</h1>

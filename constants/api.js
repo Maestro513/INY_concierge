@@ -21,7 +21,13 @@ const PROD_URL = 'https://iny-concierge.onrender.com';
 
 const getApiUrl = () => {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
-  if (envUrl) return envUrl;
+  if (envUrl) {
+    if (!__DEV__ && !envUrl.startsWith('https://')) {
+      console.error('[API] EXPO_PUBLIC_API_URL must use HTTPS in production');
+      return PROD_URL;
+    }
+    return envUrl;
+  }
   return PROD_URL;
 };
 

@@ -201,7 +201,8 @@ class MedicarePlanSearch:
         if not unique_plans:
             return []
 
-        plan_keys = [(p["contract_id"], p["plan_id"]) for p in unique_plans]
+        # Cap to prevent unbounded OR clauses in SQL
+        plan_keys = [(p["contract_id"], p["plan_id"]) for p in unique_plans[:25]]
         placeholders = " OR ".join(
             ["(sa.pbp_a_hnumber = ? AND sa.pbp_a_plan_identifier = ?)"] * len(plan_keys)
         )

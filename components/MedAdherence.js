@@ -43,22 +43,23 @@ function AdherenceBar({ pct }) {
 
 // ── Single med adherence row ────────────────────────────────────
 function AdherenceRow({ item }) {
-  const pctColor = item.adherence_pct >= 80 ? '#4CAF50' : item.adherence_pct >= 50 ? '#FF9800' : COLORS.error;
+  const pctColor =
+    item.adherence_pct >= 80 ? '#4CAF50' : item.adherence_pct >= 50 ? '#FF9800' : COLORS.error;
   return (
     <View style={styles.medRow}>
       <View style={styles.medIcon}>
         <MaterialCommunityIcons name="pill" size={16} color={COLORS.rxDrug} />
       </View>
       <View style={styles.medInfo}>
-        <Text style={styles.medName} numberOfLines={1}>{item.drug_name}</Text>
+        <Text style={styles.medName} numberOfLines={1}>
+          {item.drug_name}
+        </Text>
         <AdherenceBar pct={item.adherence_pct} />
         <Text style={styles.medDetail}>
           {item.doses_taken}/{item.total_days} doses · {item.doses_missed} missed
         </Text>
       </View>
-      <Text style={[styles.pctText, { color: pctColor }]}>
-        {item.adherence_pct}%
-      </Text>
+      <Text style={[styles.pctText, { color: pctColor }]}>{item.adherence_pct}%</Text>
     </View>
   );
 }
@@ -76,7 +77,9 @@ function RefillAlertRow({ alert }) {
         />
       </View>
       <View style={styles.alertInfo}>
-        <Text style={styles.alertDrug} numberOfLines={1}>{alert.drug_name}</Text>
+        <Text style={styles.alertDrug} numberOfLines={1}>
+          {alert.drug_name}
+        </Text>
         <Text style={styles.alertDetail}>
           {alert.days_until_refill !== null
             ? alert.days_until_refill <= 0
@@ -173,11 +176,7 @@ export default function MedAdherence({ summary, refillAlerts, loading, onLogDose
 
           {/* Log dose button */}
           {onLogDose && (
-            <TouchableOpacity
-              style={styles.logBtn}
-              onPress={onLogDose}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={styles.logBtn} onPress={onLogDose} activeOpacity={0.7}>
               <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.accent} />
               <Text style={styles.logBtnText}>Log Dose Taken</Text>
             </TouchableOpacity>

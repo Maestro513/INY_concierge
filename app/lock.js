@@ -23,13 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, RADII, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens, loadTokens } from '../constants/api';
-import { setMemberSession } from '../constants/session';
-import {
-  authenticateWithDevice,
-  getDeviceTrust,
-  touchActivity,
-  clearDeviceTrust,
-} from '../utils/deviceAuth';
+import { authenticateWithDevice, getDeviceTrust, touchActivity } from '../utils/deviceAuth';
 
 const logo = require('../assets/images/logo.png');
 
@@ -72,37 +66,25 @@ export default function LockScreen() {
       return;
     }
 
-    // Step 3: Re-authenticate with backend using stored tokens
-    const { access } = await loadTokens();
-    if (access) {
-      // Try using existing tokens — hit a lightweight auth endpoint
+    // Step 3: Re-authenticate with backend using stored refresh token
+    const { refresh } = await loadTokens();
+    if (refresh) {
       try {
-        const res = await fetchWithTimeout(`${API_URL}/auth/verify-otp`, {
+        const res = await fetchWithTimeout(`${API_URL}/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone, code: '__device_reauth__' }),
+          body: JSON.stringify({ refresh_token: refresh }),
         });
         const data = await res.json();
 
         if (data.access_token) {
           await setTokens(data.access_token, data.refresh_token);
-          setMemberSession(
-            {
-              firstName: data.first_name,
-              lastName: data.last_name,
-              planName: data.plan_name,
-              planNumber: data.plan_number,
-              agent: data.agent || '',
-              zipCode: data.zip_code || '',
-            },
-            data.session_id || '',
-          );
           await touchActivity();
           router.replace('/home');
           return;
         }
       } catch {
-        // Token-based reauth failed — try phone lookup below
+        // Token refresh failed — try phone lookup below
       }
     }
 

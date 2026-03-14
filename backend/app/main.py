@@ -204,13 +204,24 @@ if APP_ENV == "production":
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
-else:
-    # Dev: allow any localhost origin
+elif APP_ENV == "development":
+    # Dev only: allow any localhost origin
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
+    )
+else:
+    # Staging / other: use same strict origins as production
+    _extra = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()] if CORS_ORIGINS else []
+    _origins = _default_prod_origins + _extra
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Admin-Secret"],
     )
 
@@ -2873,7 +2884,7 @@ def get_id_card_data(plan_number: ValidPlanNumber, request: Request, _user: dict
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.get("/health-screenings/config")
-def get_screening_config(auth: dict = Depends(require_auth)):
+def get_screening_config(user: dict = Depends(get_current_user)):
     """Return admin-configured screening questions (or empty so frontend uses defaults)."""
     config = get_store().get_screening_config()
     if config:
@@ -2882,18 +2893,15 @@ def get_screening_config(auth: dict = Depends(require_auth)):
 
 
 @app.post("/health-screenings")
-async def save_health_screenings(request: Request, auth: dict = Depends(require_auth)):
+async def save_health_screenings(request: Request, user: dict = Depends(get_current_user)):
     """Save a member's screening answers + generate reminders."""
     body = await request.json()
-    session_id = auth.get("session_id") or auth.get("sub", "")
-    store = get_store()
-    session = store.get_session(session_id, ttl=SESSION_TTL)
+    phone = user.get("sub", "")
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired.")
-    # Store answers in user data DB
     try:
         udb = UserDataDB()
-        phone = session.get("phone", "")
         udb.save_health_screenings(phone, body)
     except Exception as e:
         log.warning("Failed to save health screenings: %s", e)
@@ -2916,14 +2924,12 @@ class SDoHScreening(BaseModel):
 
 
 @app.post("/sdoh-screening")
-async def save_sdoh_screening(body: SDoHScreening, auth: dict = Depends(require_auth)):
+async def save_sdoh_screening(body: SDoHScreening, user: dict = Depends(get_current_user)):
     """Save a member's SDoH screening answers."""
-    session_id = auth.get("session_id") or auth.get("sub", "")
-    store = get_store()
-    session = store.get_session(session_id, ttl=SESSION_TTL)
+    phone = user.get("sub", "")
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired.")
-    phone = session.get("phone", "")
     udb = get_user_db()
     udb.save_sdoh_screening(phone, body.model_dump())
     get_audit_log().record(
@@ -2954,14 +2960,12 @@ class AppointmentRequest(BaseModel):
 
 @app.post("/appointment-request")
 async def create_appointment_request(body: AppointmentRequest,
-                                     auth: dict = Depends(require_auth)):
+                                     user: dict = Depends(get_current_user)):
     """Member requests a doctor appointment — creates alert for admin/agent."""
-    session_id = auth.get("session_id") or auth.get("sub", "")
-    store = get_store()
-    session = store.get_session(session_id, ttl=SESSION_TTL)
+    phone = user.get("sub", "")
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired.")
-    phone = session.get("phone", "")
     udb = UserDataDB()
     req_id = udb.create_appointment_request(
         phone=phone,

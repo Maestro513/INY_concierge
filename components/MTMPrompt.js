@@ -1,14 +1,7 @@
 import { useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Animated,
-  Linking,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Linking } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
+import { COLORS, RADII, SHADOWS, MOTION } from '../constants/theme';
 
 /**
  * MTM (Medication Therapy Management) eligibility prompt.
@@ -20,7 +13,7 @@ import { COLORS, RADII, SHADOWS, TYPE, MOTION } from '../constants/theme';
  *   message: string
  *   onDismiss: () => void (optional)
  */
-export default function MTMPrompt({ eligible, medicationCount, message, onDismiss }) {
+export default function MTMPrompt({ eligible, medicationCount, _message, onDismiss }) {
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(10)).current;
 
@@ -36,7 +29,9 @@ export default function MTMPrompt({ eligible, medicationCount, message, onDismis
   if (!eligible) return null;
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
+    <Animated.View
+      style={[styles.container, { opacity: fadeIn, transform: [{ translateY: slideUp }] }]}
+    >
       <View style={styles.iconRow}>
         <View style={styles.iconWrap}>
           <MaterialCommunityIcons name="medical-bag" size={20} color="#3D6B99" />
@@ -44,8 +39,8 @@ export default function MTMPrompt({ eligible, medicationCount, message, onDismis
         <View style={styles.content}>
           <Text style={styles.title}>Free Medication Review Available</Text>
           <Text style={styles.subtitle}>
-            You're on {medicationCount} medications — you may qualify for a free Medication
-            Therapy Management (MTM) consultation with your pharmacist.
+            You're on {medicationCount} medications — you may qualify for a free Medication Therapy
+            Management (MTM) consultation with your pharmacist.
           </Text>
         </View>
         {onDismiss && (
@@ -73,8 +68,9 @@ export default function MTMPrompt({ eligible, medicationCount, message, onDismis
         accessibilityRole="button"
         accessibilityLabel="Learn about medication therapy management"
         onPress={() => {
-          Linking.openURL('https://www.medicare.gov/drug-coverage-part-d/what-drug-plans-cover/medication-therapy-management-programs-for-complex-health-needs')
-            .catch(() => {});
+          Linking.openURL(
+            'https://www.medicare.gov/drug-coverage-part-d/what-drug-plans-cover/medication-therapy-management-programs-for-complex-health-needs',
+          ).catch(() => {});
         }}
       >
         <Ionicons name="open-outline" size={16} color={COLORS.white} />

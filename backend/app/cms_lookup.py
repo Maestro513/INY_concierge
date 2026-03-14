@@ -84,6 +84,16 @@ class CMSLookup:
             self._local.conn = conn
         return conn
 
+    def close(self):
+        """Close the thread-local connection if open."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
+
+    def __del__(self):
+        self.close()
+
     def _query_one(self, sql: str, params: tuple) -> Optional[dict]:
         with self._conn() as conn:
             row = conn.execute(sql, params).fetchone()

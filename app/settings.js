@@ -1,17 +1,9 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  Platform,
-  ScrollView,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADII, SHADOWS, SPACING } from '../constants/theme';
+import { COLORS, RADII, SHADOWS } from '../constants/theme';
 import { getMemberSession, logout, fullLogout } from '../constants/session';
 
 export default function SettingsScreen() {

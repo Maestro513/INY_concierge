@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Phone, MapPin, Mail, Calendar, Shield,
@@ -19,31 +19,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-
-// ── Mock member detail (will be fetched via TanStack Query) ──
-const MOCK_DETAIL = {
-  '1': {
-    id: '1', first_name: 'Maria', last_name: 'Garcia', phone: '(305) 555-0142',
-    email: 'maria.garcia@email.com', zip_code: '33142', dob: '1952-03-15',
-    address: '1234 SW 8th St, Miami, FL 33142',
-    carrier: 'Humana', plan_name: 'Humana Gold Plus (HMO)', plan_number: 'H0028-014',
-    agent: 'John Smith', status: 'active' as const,
-    created_at: '2024-09-12', last_login: '2h ago',
-    reminders: [
-      { id: 1, drug_name: 'Lisinopril', dose: '10mg', time: '08:00 AM', enabled: true },
-      { id: 2, drug_name: 'Metformin', dose: '500mg', time: '12:00 PM', enabled: true },
-      { id: 3, drug_name: 'Atorvastatin', dose: '20mg', time: '09:00 PM', enabled: false },
-    ],
-    activity: [
-      { type: 'login', desc: 'Logged in via OTP', time: '2h ago' },
-      { type: 'search', desc: 'Searched "does my plan cover insulin"', time: '2h ago' },
-      { type: 'benefits', desc: 'Viewed dental benefits', time: '3h ago' },
-      { type: 'reminder', desc: 'Added Metformin reminder', time: '1d ago' },
-      { type: 'login', desc: 'Logged in via OTP', time: '1d ago' },
-      { type: 'search', desc: 'Searched "eye doctor copay"', time: '3d ago' },
-    ],
-  },
-};
+import client from '@/api/client';
+import { ENDPOINTS } from '@/config/api';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const CARRIERS = ['Humana', 'Aetna', 'UHC', 'Wellcare', 'Devoted', 'Cigna', 'Blue Cross', 'Other'];
 
@@ -63,19 +41,67 @@ const ACTIVITY_ICONS: Record<string, typeof Activity> = {
   reminder: Pill,
 };
 
+interface MemberDetail {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  zip_code: string;
+  dob: string;
+  address: string;
+  carrier: string;
+  plan_name: string;
+  plan_number: string;
+  agent: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+  last_login: string;
+  reminders: Array<{ id: number; drug_name: string; dose: string; time: string; enabled: boolean }>;
+  activity: Array<{ type: string; desc: string; time: string }>;
+}
+
 export default function MemberDetailPage() {
-  const { id: _id } = useParams<{ id: string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  // In production, this will be a TanStack Query hook
-  const member = MOCK_DETAIL['1']; // always show mock for now
+  const [member, setMember] = useState<MemberDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    client
+      .get(ENDPOINTS.MEMBER(id))
+      .then((res) => {
+        if (!cancelled) {
+          setMember(res.data);
+          setError('');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError('Failed to load member details.');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [id]);
 
   // Edit plan dialog
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
-  const [editCarrier, setEditCarrier] = useState(member.carrier);
-  const [editPlanName, setEditPlanName] = useState(member.plan_name);
-  const [editPlanNumber, setEditPlanNumber] = useState(member.plan_number);
+  const [editCarrier, setEditCarrier] = useState('');
+  const [editPlanName, setEditPlanName] = useState('');
+  const [editPlanNumber, setEditPlanNumber] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const handleOpenPlanDialog = () => {
+    if (member) {
+      setEditCarrier(member.carrier);
+      setEditPlanName(member.plan_name);
+      setEditPlanNumber(member.plan_number);
+    }
+    handleOpenPlanDialog();
+  };
 
   // Add reminder dialog
   const [reminderDialogOpen, setReminderDialogOpen] = useState(false);
@@ -110,6 +136,29 @@ export default function MemberDetailPage() {
     setNewDrugName('');
     setNewDose('');
     setNewTime('08:00');
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-12 w-64" />
+        <div className="grid grid-cols-3 gap-6">
+          <Skeleton className="h-64" />
+          <Skeleton className="col-span-2 h-64" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !member) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 space-y-4">
+        <p className="text-sm text-destructive">{error || 'Member not found.'}</p>
+        <Button variant="outline" size="sm" onClick={() => navigate('/admin/members')}>
+          <ArrowLeft className="mr-1.5 h-3.5 w-3.5" /> Back to Members
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -231,7 +280,7 @@ export default function MemberDetailPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold">Plan Assignment</CardTitle>
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPlanDialogOpen(true)}>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleOpenPlanDialog()}>
                   <FileText className="mr-1.5 h-3 w-3" /> Change Plan
                 </Button>
               </div>
@@ -261,7 +310,7 @@ export default function MemberDetailPage() {
                     <FileText className="mx-auto h-8 w-8 text-warning/60" />
                     <p className="mt-2 text-sm font-semibold text-warning">No Plan Assigned</p>
                     <p className="text-xs text-muted-foreground mt-1">Assign a plan to connect this member's app to benefits data.</p>
-                    <Button size="sm" className="mt-3 text-xs" onClick={() => setPlanDialogOpen(true)}>
+                    <Button size="sm" className="mt-3 text-xs" onClick={() => handleOpenPlanDialog()}>
                       Assign Plan Now
                     </Button>
                   </div>

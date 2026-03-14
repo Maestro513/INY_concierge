@@ -69,10 +69,13 @@ class CircuitBreaker:
                 )
 
     def __enter__(self):
-        state = self.state
-        if state == "open":
-            retry_after = self.recovery_timeout - (time.time() - self._opened_at)
-            raise CircuitOpenError(self.name, max(0, retry_after))
+        with self._lock:
+            if self._state == "open":
+                if time.time() - self._opened_at >= self.recovery_timeout:
+                    self._state = "half_open"
+                else:
+                    retry_after = self.recovery_timeout - (time.time() - self._opened_at)
+                    raise CircuitOpenError(self.name, max(0, retry_after))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

@@ -11,6 +11,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAdminAuth } from '@/auth/AdminAuthProvider';
 
 const NAV_ITEMS = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -23,6 +24,8 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
+  const { logout } = useAdminAuth();
+
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col bg-sidebar-background text-sidebar-foreground border-r border-sidebar-border">
       {/* Logo */}
@@ -64,7 +67,10 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-sidebar-border p-3">
-        <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground/50 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground">
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground/50 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        >
           <LogOut className="h-4.5 w-4.5" />
           Sign Out
         </button>

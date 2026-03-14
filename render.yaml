@@ -19,6 +19,7 @@ services:
         generateValue: true
       - key: ADMIN_JWT_SECRET
         generateValue: true
+    healthCheckPath: /health
     disk:
       name: iny-data
       mountPath: /data

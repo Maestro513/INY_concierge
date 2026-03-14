@@ -159,45 +159,54 @@ class PersistentStore:
     def verify_otp(self, phone: str, code: str, *,
                    max_attempts: int = 5, lockout_seconds: int = 300) -> bool:
         conn = self._conn()
-        row = conn.execute("SELECT * FROM otp_store WHERE phone = ?", (phone,)).fetchone()
-        if not row:
-            return False
+        # Use BEGIN IMMEDIATE to acquire a write lock upfront,
+        # preventing TOCTOU race conditions with concurrent requests.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute("SELECT * FROM otp_store WHERE phone = ?", (phone,)).fetchone()
+            if not row:
+                conn.execute("ROLLBACK")
+                return False
 
-        now = time.time()
+            now = time.time()
 
-        # Check lockout
-        if now < row["locked_until"]:
-            remaining = int(row["locked_until"] - now)
-            log.warning(f"OTP locked for phone ending {phone[-4:]}, {remaining}s remaining")
-            return False
+            # Check lockout
+            if now < row["locked_until"]:
+                conn.execute("ROLLBACK")
+                remaining = int(row["locked_until"] - now)
+                log.warning(f"OTP locked for phone ending {phone[-4:]}, {remaining}s remaining")
+                return False
 
-        # Check expiration
-        if now - row["created_at"] > row["ttl"]:
+            # Check expiration
+            if now - row["created_at"] > row["ttl"]:
+                conn.execute("DELETE FROM otp_store WHERE phone = ?", (phone,))
+                conn.execute("COMMIT")
+                return False
+
+            # Check code
+            if not hmac.compare_digest(self._hash_code(code), row["code_hash"]):
+                attempts = row["attempts"] + 1
+                if attempts >= max_attempts:
+                    conn.execute(
+                        "UPDATE otp_store SET attempts = ?, locked_until = ? WHERE phone = ?",
+                        (attempts, now + lockout_seconds, phone),
+                    )
+                    log.warning(f"OTP locked out for phone ending {phone[-4:]} after {max_attempts} attempts")
+                else:
+                    conn.execute(
+                        "UPDATE otp_store SET attempts = ? WHERE phone = ?",
+                        (attempts, phone),
+                    )
+                conn.execute("COMMIT")
+                return False
+
+            # Success — delete OTP (single-use)
             conn.execute("DELETE FROM otp_store WHERE phone = ?", (phone,))
-            conn.commit()
-            return False
-
-        # Check code
-        if not hmac.compare_digest(self._hash_code(code), row["code_hash"]):
-            attempts = row["attempts"] + 1
-            if attempts >= max_attempts:
-                conn.execute(
-                    "UPDATE otp_store SET attempts = ?, locked_until = ? WHERE phone = ?",
-                    (attempts, now + lockout_seconds, phone),
-                )
-                log.warning(f"OTP locked out for phone ending {phone[-4:]} after {max_attempts} attempts")
-            else:
-                conn.execute(
-                    "UPDATE otp_store SET attempts = ? WHERE phone = ?",
-                    (attempts, phone),
-                )
-            conn.commit()
-            return False
-
-        # Success — delete OTP (single-use)
-        conn.execute("DELETE FROM otp_store WHERE phone = ?", (phone,))
-        conn.commit()
-        return True
+            conn.execute("COMMIT")
+            return True
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     def get_otp_send_count(self, phone: str, send_window: int = 600) -> int:
         """Get the number of OTP sends in the current window (for testing)."""

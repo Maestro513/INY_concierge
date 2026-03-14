@@ -133,13 +133,14 @@ class AuditLog:
         now = time.time()
         ts = datetime.utcfromtimestamp(now).isoformat() + "Z"
         masked_actor = hash_actor(actor) if actor and actor.isdigit() else actor
+        safe_detail = mask_pii_in_string(detail) if detail else detail
 
         conn = self._conn()
         conn.execute(
             """INSERT INTO audit_log
                (timestamp, actor, action, resource, resource_id, ip_address, detail, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (ts, masked_actor, action, resource, resource_id, ip_address, detail, now),
+            (ts, masked_actor, action, resource, resource_id, ip_address, safe_detail, now),
         )
         conn.commit()
 

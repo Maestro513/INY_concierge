@@ -325,7 +325,7 @@ export default function ProfileCard({
   onDeleteReminder,
   onAddReminder,
   drugsData,
-  onLogout,
+  _onLogout,
   onOpenSettings,
 }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);

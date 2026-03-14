@@ -2,8 +2,22 @@ import { Bell, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { useAdminAuth } from '@/auth/AdminAuthProvider';
+
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin',
+  viewer: 'Viewer',
+};
 
 export default function Topbar() {
+  const { user } = useAdminAuth();
+  const initials = user
+    ? `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase() || 'AD'
+    : 'AD';
+  const displayName = user ? `${user.first_name} ${user.last_name}`.trim() || 'Admin' : 'Admin';
+  const roleLabel = user ? ROLE_LABELS[user.role] ?? user.role : '';
+
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/80 px-6 backdrop-blur-sm">
       {/* Search */}
@@ -29,12 +43,12 @@ export default function Topbar() {
         <div className="flex items-center gap-3">
           <Avatar className="h-8 w-8 border-2 border-primary/20">
             <AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">
-              AD
+              {initials}
             </AvatarFallback>
           </Avatar>
           <div className="hidden md:block">
-            <p className="text-sm font-semibold leading-none">Admin</p>
-            <p className="text-[11px] text-muted-foreground">Super Admin</p>
+            <p className="text-sm font-semibold leading-none">{displayName}</p>
+            <p className="text-[11px] text-muted-foreground">{roleLabel}</p>
           </div>
         </div>
       </div>
