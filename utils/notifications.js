@@ -16,11 +16,16 @@
  */
 
 // ── Lazy-load native modules (fail gracefully when not compiled in) ──
-let AsyncStorageMod = null;
+// ── Encrypted AsyncStorage cache ────────────────────────────────
+
+import { secureSet, secureGet } from './secureCache';
+
+let _AsyncStorageMod = null;
 try {
-  AsyncStorageMod = require('@react-native-async-storage/async-storage').default;
+  _AsyncStorageMod = require('@react-native-async-storage/async-storage').default;
 } catch (e) {
-  if (__DEV__) console.log('[Notifications] AsyncStorage native module not available. Caching disabled.');
+  if (__DEV__)
+    console.log('[Notifications] AsyncStorage native module not available. Caching disabled.');
 }
 
 let Notifications = null;
@@ -34,7 +39,10 @@ try {
     }),
   });
 } catch (e) {
-  if (__DEV__) console.log('[Notifications] Native module not available. Reminders will save but won\'t send alerts.');
+  if (__DEV__)
+    console.log(
+      "[Notifications] Native module not available. Reminders will save but won't send alerts.",
+    );
 }
 
 // ── Android notification channel (required for Android 8+) ───────
@@ -142,10 +150,6 @@ export async function syncAllReminders(reminders) {
     if (__DEV__) console.log('[Notifications] Sync failed:', e.message);
   }
 }
-
-// ── Encrypted AsyncStorage cache ────────────────────────────────
-
-import { secureSet, secureGet } from './secureCache';
 
 const REMINDERS_CACHE_KEY = '@med_reminders';
 const USAGE_CACHE_KEY = '@benefits_usage_summary';

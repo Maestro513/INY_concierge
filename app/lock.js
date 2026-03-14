@@ -23,13 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, RADII, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens, loadTokens } from '../constants/api';
-import { setMemberSession } from '../constants/session';
-import {
-  authenticateWithDevice,
-  getDeviceTrust,
-  touchActivity,
-  clearDeviceTrust,
-} from '../utils/deviceAuth';
+import { authenticateWithDevice, getDeviceTrust, touchActivity } from '../utils/deviceAuth';
 
 const logo = require('../assets/images/logo.png');
 
@@ -73,7 +67,7 @@ export default function LockScreen() {
     }
 
     // Step 3: Re-authenticate with backend using stored refresh token
-    const { access, refresh } = await loadTokens();
+    const { refresh } = await loadTokens();
     if (refresh) {
       try {
         const res = await fetchWithTimeout(`${API_URL}/auth/refresh`, {

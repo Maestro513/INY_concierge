@@ -32,7 +32,9 @@ jobs:
           ruff check app/ tests/
 
       - name: Security audit (pip)
-        run: pip audit
+        run: |
+          pip install pip-audit
+          pip audit
 
       - name: Run tests
         env:

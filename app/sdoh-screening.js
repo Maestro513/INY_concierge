@@ -173,12 +173,7 @@ export default function SDoHScreeningScreen() {
                 onPress={() => setAnswer('yes')}
                 activeOpacity={0.7}
               >
-                <Text
-                  style={[
-                    s.optionText,
-                    answers[current.id] === 'yes' && s.optionTextActive,
-                  ]}
-                >
+                <Text style={[s.optionText, answers[current.id] === 'yes' && s.optionTextActive]}>
                   Yes
                 </Text>
               </TouchableOpacity>
@@ -187,12 +182,7 @@ export default function SDoHScreeningScreen() {
                 onPress={() => setAnswer('no')}
                 activeOpacity={0.7}
               >
-                <Text
-                  style={[
-                    s.optionText,
-                    answers[current.id] === 'no' && s.optionTextNoActive,
-                  ]}
-                >
+                <Text style={[s.optionText, answers[current.id] === 'no' && s.optionTextNoActive]}>
                   No
                 </Text>
               </TouchableOpacity>
@@ -208,9 +198,7 @@ export default function SDoHScreeningScreen() {
                     onPress={() => setAnswer(opt.value)}
                     activeOpacity={0.7}
                   >
-                    <Text style={[s.scaleText, selected && s.scaleTextActive]}>
-                      {opt.label}
-                    </Text>
+                    <Text style={[s.scaleText, selected && s.scaleTextActive]}>{opt.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -230,7 +218,8 @@ export default function SDoHScreeningScreen() {
         <View style={s.privacyBox}>
           <Ionicons name="lock-closed-outline" size={14} color={COLORS.textTertiary} />
           <Text style={s.privacyText}>
-            Your answers are private and help us connect you with plan benefits you may not know about.
+            Your answers are private and help us connect you with plan benefits you may not know
+            about.
           </Text>
         </View>
       </ScrollView>

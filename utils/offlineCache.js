@@ -113,9 +113,7 @@ export async function clearAllCache() {
   if (!AsyncStorage) return;
   try {
     const keys = await AsyncStorage.getAllKeys();
-    const cacheKeys = keys.filter(
-      (k) => k.startsWith(CACHE_PREFIX) || k.startsWith(ETAG_PREFIX),
-    );
+    const cacheKeys = keys.filter((k) => k.startsWith(CACHE_PREFIX) || k.startsWith(ETAG_PREFIX));
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
     }

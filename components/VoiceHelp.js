@@ -905,7 +905,10 @@ export default function VoiceHelp({
   const processQuestion = async (rawQ) => {
     if (processingRef.current) return;
     // Sanitize: trim, cap length, strip control characters
-    const q = rawQ.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim().slice(0, 2000);
+    const q = rawQ
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+      .trim()
+      .slice(0, 2000);
     if (!q) return;
     processingRef.current = true;
     Speech.stop();

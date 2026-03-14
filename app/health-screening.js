@@ -1,13 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -77,7 +69,7 @@ export default function HealthScreeningScreen() {
   const [sharedScreenings, setSharedScreenings] = useState(DEFAULT_SHARED);
   const [maleScreenings, setMaleScreenings] = useState(DEFAULT_MALE);
   const [femaleScreenings, setFemaleScreenings] = useState(DEFAULT_FEMALE);
-  const [loadingScreenings, setLoadingScreenings] = useState(true);
+  const [, setLoadingScreenings] = useState(true);
 
   // Fetch admin-configured screenings (fall back to defaults)
   useEffect(() => {

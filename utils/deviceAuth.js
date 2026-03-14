@@ -24,8 +24,8 @@ try {
 }
 
 // Keys — all stored in SecureStore to prevent tampering on rooted devices
-const TRUST_KEY = 'iny_trust_flag';            // SecureStore — "1" if trusted
-const TRUST_PHONE_KEY = 'iny_trust_phone';     // SecureStore — phone number
+const TRUST_KEY = 'iny_trust_flag'; // SecureStore — "1" if trusted
+const TRUST_PHONE_KEY = 'iny_trust_phone'; // SecureStore — phone number
 const LAST_ACTIVITY_KEY = 'iny_trust_activity'; // SecureStore — epoch ms
 
 const TRUST_EXPIRY_DAYS = 90;
@@ -117,7 +117,7 @@ export async function authenticateWithDevice() {
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Unlock to access your benefits',
       fallbackLabel: 'Use phone passcode',
-      disableDeviceFallback: false,  // Allow phone PIN as fallback
+      disableDeviceFallback: false, // Allow phone PIN as fallback
       cancelLabel: 'Use phone number',
     });
     return result.success;
