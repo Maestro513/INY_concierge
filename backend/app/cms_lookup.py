@@ -92,7 +92,10 @@ class CMSLookup:
             self._local.conn = None
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _query_one(self, sql: str, params: tuple) -> Optional[dict]:
         with self._conn() as conn:
