@@ -4,7 +4,7 @@ import {
   Search, Filter, MoreHorizontal, Phone, MapPin,
   ChevronLeft, ChevronRight, Eye, Pencil, Shield,
   KeyRound, Pill, Send, FileText, Check,
-  UserPlus, Hash,
+  UserPlus, Hash, AlertCircle,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import client from '@/api/client';
+import { ENDPOINTS } from '@/config/api';
 
 // ── Types ──
 interface MockMember {
@@ -127,28 +129,54 @@ export default function MembersPage() {
 
   function handleAssignSave() {
     setAssignSaving(true);
-    // TODO: call PUT /api/admin/members/:phone/plan
+    // NOTE: PUT /api/admin/members/:phone/plan does not exist on the backend yet.
+    // Once implemented, replace this with:
+    // client.put(ENDPOINTS.MEMBER(assignMember.phone) + '/plan', { carrier, plan_name, plan_number })
     setTimeout(() => {
       setAssignSaving(false);
       setAssignOpen(false);
     }, 800);
   }
 
-  function handleCreateMember() {
+  const [createError, setCreateError] = useState('');
+
+  async function handleCreateMember() {
     setCreateSaving(true);
-    // TODO: call POST /api/admin/members/create with body
-    // In production: client.post(ENDPOINTS.MEMBER_CREATE, { ... })
-    const phone = newPhone;
-    setTimeout(() => {
+    setCreateError('');
+    try {
+      const res = await client.post(ENDPOINTS.MEMBER_CREATE, {
+        first_name: newFirstName,
+        last_name: newLastName,
+        phone: newPhone.replace(/\D/g, ''),
+        medicare_number: newMedicareNumber,
+        zip_code: newZipCode,
+        carrier: newCarrier,
+        plan_name: newPlanName,
+        plan_number: newPlanNumber,
+        send_verification: true,
+      });
       setCreateSaving(false);
       setCreateSuccess(true);
-      setOtpSentTo(phone);
-    }, 1200);
+      setOtpSentTo(res.data.otp_sent ? newPhone : '');
+    } catch (err: unknown) {
+      setCreateSaving(false);
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } };
+      if (axiosErr.response?.status === 409) {
+        setCreateError('A member with this phone number already exists.');
+      } else if (axiosErr.response?.status === 422) {
+        setCreateError('Invalid input. Please check the phone number and MBI format.');
+      } else if (axiosErr.response?.status === 429) {
+        setCreateError('Too many requests. Please wait a moment and try again.');
+      } else {
+        setCreateError(axiosErr.response?.data?.detail || 'Failed to create member. Please try again.');
+      }
+    }
   }
 
   function closeCreateDialog() {
     setCreateOpen(false);
     setCreateSuccess(false);
+    setCreateError('');
     setOtpSentTo('');
     resetCreateForm();
   }
@@ -598,6 +626,13 @@ export default function MembersPage() {
                 )}
               </div>
 
+              {createError && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span className="text-xs">{createError}</span>
+                </div>
+              )}
+
               <DialogFooter>
                 <Button variant="outline" onClick={closeCreateDialog} className="text-xs">Cancel</Button>
                 <Button onClick={handleCreateMember} disabled={!newFirstName || !newLastName || !newPhone || !newMedicareNumber || createSaving} className="text-xs">
@@ -624,12 +659,22 @@ export default function MembersPage() {
                 <div className="mt-4 rounded-lg border border-success/20 bg-success/5 p-4">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <Phone className="h-4 w-4 text-success" />
-                    <span className="text-sm font-semibold text-success">Verification Code Sent</span>
+                    <span className="text-sm font-semibold text-success">
+                      {otpSentTo ? 'Verification Code Sent' : 'Member Created'}
+                    </span>
                   </div>
-                  <p className="text-sm font-mono font-bold">{otpSentTo}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    The member has 5 minutes to enter the code in the app to complete sign-up.
-                  </p>
+                  {otpSentTo ? (
+                    <>
+                      <p className="text-sm font-mono font-bold">{otpSentTo}</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        The member has 5 minutes to enter the code in the app to complete sign-up.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      OTP delivery failed. The member can request a code from the app.
+                    </p>
+                  )}
                 </div>
 
                 {newPlanNumber && (
