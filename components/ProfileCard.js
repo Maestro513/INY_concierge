@@ -315,7 +315,6 @@ function AddReminderModal({ visible, onClose, onSave }) {
 export default function ProfileCard({
   member,
   onViewSOB,
-  onViewIDCard,
   benefits,
   loading,
   benefitsError,
@@ -327,6 +326,7 @@ export default function ProfileCard({
   drugsData,
   _onLogout,
   onOpenSettings,
+  onBookTransportation,
 }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -449,14 +449,14 @@ export default function ProfileCard({
       {/* Quick Actions — pill style */}
       <View style={styles.quickActionsRow}>
         <TouchableOpacity
-          onPress={onViewIDCard}
+          onPress={onBookTransportation}
           style={styles.quickPill}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel="View digital ID card"
+          accessibilityLabel="Book transportation"
         >
-          <Ionicons name="card-outline" size={18} color={COLORS.accent} />
-          <Text style={styles.quickPillText}>ID Card</Text>
+          <Ionicons name="bus-outline" size={18} color={COLORS.accent} />
+          <Text style={styles.quickPillText}>Book Ride</Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setRemindersExpanded(!remindersExpanded)}
@@ -478,20 +478,10 @@ export default function ProfileCard({
           style={styles.quickPill}
           activeOpacity={0.7}
           accessibilityRole="button"
-          accessibilityLabel="View summary of benefits"
+          accessibilityLabel="View benefits and ID card"
         >
           <Ionicons name="document-text-outline" size={18} color={COLORS.accent} />
           <Text style={styles.quickPillText}>Benefits</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onOpenSettings}
-          style={styles.quickPill}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Open setup and settings"
-        >
-          <Ionicons name="settings-outline" size={18} color={COLORS.accent} />
-          <Text style={styles.quickPillText}>Setup</Text>
         </TouchableOpacity>
       </View>
 
@@ -525,7 +515,7 @@ export default function ProfileCard({
         </View>
       ) : null}
 
-      {/* Agent + View More Benefits row — right above cards */}
+      {/* Agent + Settings gear — right above cards */}
       <View style={styles.aboveCardsRow}>
         {member.agent ? (
           <View style={styles.agentRow}>
@@ -535,6 +525,15 @@ export default function ProfileCard({
         ) : (
           <View />
         )}
+        <TouchableOpacity
+          onPress={onOpenSettings}
+          style={styles.settingsGear}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
+        >
+          <Ionicons name="settings-outline" size={22} color={COLORS.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       {/* Benefits */}
@@ -689,7 +688,17 @@ const styles = StyleSheet.create({
     marginTop: 6,
     letterSpacing: 0.2,
   },
-  agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  settingsGear: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.quickPillBg,
+    borderWidth: 1,
+    borderColor: COLORS.quickPillBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   agent: { fontSize: 16, fontWeight: '700', color: COLORS.textSecondary },
   logoBg: {
     backgroundColor: '#FFFFFF',

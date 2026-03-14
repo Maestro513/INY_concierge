@@ -63,32 +63,35 @@ const QUESTIONS = [
   },
 ];
 
+const PAGE_SIZE = 2;
+const TOTAL_PAGES = Math.ceil(QUESTIONS.length / PAGE_SIZE);
+
 export default function SDoHScreeningScreen() {
   const router = useRouter();
   const { sessionId } = getMemberSession();
   const [answers, setAnswers] = useState({});
   const [saving, setSaving] = useState(false);
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [pageIdx, setPageIdx] = useState(0);
 
-  const current = QUESTIONS[currentIdx];
-  const isLast = currentIdx === QUESTIONS.length - 1;
-  const isAnswered = answers[current.id] !== undefined;
+  const pageQuestions = QUESTIONS.slice(pageIdx * PAGE_SIZE, (pageIdx + 1) * PAGE_SIZE);
+  const isLastPage = pageIdx === TOTAL_PAGES - 1;
+  const allPageAnswered = pageQuestions.every((q) => answers[q.id] !== undefined);
 
-  const setAnswer = (value) => {
-    setAnswers((prev) => ({ ...prev, [current.id]: value }));
+  const setAnswer = (id, value) => {
+    setAnswers((prev) => ({ ...prev, [id]: value }));
   };
 
   const handleNext = () => {
-    if (isLast) {
+    if (isLastPage) {
       handleSubmit();
     } else {
-      setCurrentIdx((prev) => prev + 1);
+      setPageIdx((prev) => prev + 1);
     }
   };
 
   const handleBack = () => {
-    if (currentIdx > 0) {
-      setCurrentIdx((prev) => prev - 1);
+    if (pageIdx > 0) {
+      setPageIdx((prev) => prev - 1);
     }
   };
 
@@ -124,13 +127,13 @@ export default function SDoHScreeningScreen() {
   };
 
   // Progress
-  const progress = (currentIdx + 1) / QUESTIONS.length;
+  const progress = (pageIdx + 1) / TOTAL_PAGES;
 
   return (
     <SafeAreaView style={s.safe}>
       {/* Header */}
       <View style={s.header}>
-        {currentIdx > 0 ? (
+        {pageIdx > 0 ? (
           <TouchableOpacity onPress={handleBack} style={s.backBtn} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
@@ -153,66 +156,78 @@ export default function SDoHScreeningScreen() {
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Question card */}
-        <View style={s.questionCard}>
-          <View style={s.questionIconWrap}>
-            <Ionicons name={current.icon} size={32} color={COLORS.accent} />
-          </View>
+        {pageQuestions.map((q, idx) => {
+          const globalIdx = pageIdx * PAGE_SIZE + idx;
+          const isAnswered = answers[q.id] !== undefined;
 
-          <Text style={s.stepLabel}>
-            Question {currentIdx + 1} of {QUESTIONS.length}
-          </Text>
+          return (
+            <View key={q.id} style={s.questionCard}>
+              <View style={s.questionIconWrap}>
+                <Ionicons name={q.icon} size={32} color={COLORS.accent} />
+              </View>
 
-          <Text style={s.questionText}>{current.question}</Text>
+              <Text style={s.stepLabel}>
+                Question {globalIdx + 1} of {QUESTIONS.length}
+              </Text>
 
-          {/* Answer options */}
-          {current.type === 'yesno' ? (
-            <View style={s.optionsRow}>
-              <TouchableOpacity
-                style={[s.optionBtn, answers[current.id] === 'yes' && s.optionBtnYes]}
-                onPress={() => setAnswer('yes')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.optionText, answers[current.id] === 'yes' && s.optionTextActive]}>
-                  Yes
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.optionBtn, answers[current.id] === 'no' && s.optionBtnNo]}
-                onPress={() => setAnswer('no')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.optionText, answers[current.id] === 'no' && s.optionTextNoActive]}>
-                  No
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={s.scaleColumn}>
-              {current.options.map((opt) => {
-                const selected = answers[current.id] === opt.value;
-                return (
+              <Text style={s.questionText}>{q.question}</Text>
+
+              {/* Answer options */}
+              {q.type === 'yesno' ? (
+                <View style={s.optionsRow}>
                   <TouchableOpacity
-                    key={opt.value}
-                    style={[s.scaleBtn, selected && s.scaleBtnActive]}
-                    onPress={() => setAnswer(opt.value)}
+                    style={[s.optionBtn, answers[q.id] === 'yes' && s.optionBtnYes]}
+                    onPress={() => setAnswer(q.id, 'yes')}
                     activeOpacity={0.7}
                   >
-                    <Text style={[s.scaleText, selected && s.scaleTextActive]}>{opt.label}</Text>
+                    <Text
+                      style={[s.optionText, answers[q.id] === 'yes' && s.optionTextActive]}
+                    >
+                      Yes
+                    </Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
+                  <TouchableOpacity
+                    style={[s.optionBtn, answers[q.id] === 'no' && s.optionBtnNo]}
+                    onPress={() => setAnswer(q.id, 'no')}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[s.optionText, answers[q.id] === 'no' && s.optionTextNoActive]}
+                    >
+                      No
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={s.scaleColumn}>
+                  {q.options.map((opt) => {
+                    const selected = answers[q.id] === opt.value;
+                    return (
+                      <TouchableOpacity
+                        key={opt.value}
+                        style={[s.scaleBtn, selected && s.scaleBtnActive]}
+                        onPress={() => setAnswer(q.id, opt.value)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[s.scaleText, selected && s.scaleTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
 
-          {/* Benefit hint */}
-          {current.benefitHint && isAnswered && (
-            <View style={s.hintBox}>
-              <Ionicons name="information-circle-outline" size={16} color={COLORS.accent} />
-              <Text style={s.hintText}>{current.benefitHint}</Text>
+              {/* Benefit hint */}
+              {q.benefitHint && isAnswered && (
+                <View style={s.hintBox}>
+                  <Ionicons name="information-circle-outline" size={16} color={COLORS.accent} />
+                  <Text style={s.hintText}>{q.benefitHint}</Text>
+                </View>
+              )}
             </View>
-          )}
-        </View>
+          );
+        })}
 
         {/* Privacy note */}
         <View style={s.privacyBox}>
@@ -227,17 +242,17 @@ export default function SDoHScreeningScreen() {
       {/* Footer */}
       <View style={s.footer}>
         <TouchableOpacity
-          style={[s.nextBtn, (!isAnswered || saving) && s.nextBtnDisabled]}
+          style={[s.nextBtn, (!allPageAnswered || saving) && s.nextBtnDisabled]}
           onPress={handleNext}
           activeOpacity={0.7}
-          disabled={!isAnswered || saving}
+          disabled={!allPageAnswered || saving}
         >
           {saving ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
             <>
-              <Text style={s.nextText}>{isLast ? 'Finish' : 'Next'}</Text>
-              {!isLast && <Ionicons name="arrow-forward" size={18} color="#fff" />}
+              <Text style={s.nextText}>{isLastPage ? 'Finish' : 'Next'}</Text>
+              {!isLastPage && <Ionicons name="arrow-forward" size={18} color="#fff" />}
             </>
           )}
         </TouchableOpacity>
@@ -382,7 +397,7 @@ const s = StyleSheet.create({
   },
   privacyText: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
     color: COLORS.textTertiary,
     lineHeight: 17,
