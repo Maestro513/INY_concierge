@@ -74,7 +74,7 @@ export default function ScreeningGapsPage() {
     queryFn: () => api.get('/api/admin/screening-gap-report').then((res) => res.data),
   });
   const error = queryError
-    ? (queryError as any)?.response?.data?.detail || 'Failed to load screening data'
+    ? (queryError as Error)?.message || 'Failed to load screening data'
     : '';
 
   if (loading) {

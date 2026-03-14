@@ -76,11 +76,13 @@ class TestProductionAuthEnforcement:
         os.environ.setdefault("JWT_SECRET", "test-prod-secret")
         os.environ.setdefault("ADMIN_JWT_SECRET", "test-admin-prod-secret")
         # Re-import to pick up production APP_ENV
-        import importlib
-        import app.main as main_mod
+        import importlib  # noqa: E402
+
+        import app.main as main_mod  # noqa: E402
         importlib.reload(main_mod)
-        from app.main import app
-        from fastapi.testclient import TestClient
+        from fastapi.testclient import TestClient  # noqa: E402
+
+        from app.main import app  # noqa: E402
         with TestClient(app) as c:
             yield c
         # Restore

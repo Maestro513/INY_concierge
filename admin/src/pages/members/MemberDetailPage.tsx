@@ -71,17 +71,20 @@ export default function MemberDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    let cancelled = false;
     client
       .get(ENDPOINTS.MEMBER(id))
       .then((res) => {
-        setMember(res.data);
-        setError('');
+        if (!cancelled) {
+          setMember(res.data);
+          setError('');
+        }
       })
       .catch(() => {
-        setError('Failed to load member details.');
+        if (!cancelled) setError('Failed to load member details.');
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [id]);
 
   // Edit plan dialog
@@ -91,14 +94,14 @@ export default function MemberDetailPage() {
   const [editPlanNumber, setEditPlanNumber] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Sync edit state when member loads or plan dialog opens
-  useEffect(() => {
-    if (member && planDialogOpen) {
+  const handleOpenPlanDialog = () => {
+    if (member) {
       setEditCarrier(member.carrier);
       setEditPlanName(member.plan_name);
       setEditPlanNumber(member.plan_number);
     }
-  }, [member, planDialogOpen]);
+    handleOpenPlanDialog();
+  };
 
   // Add reminder dialog
   const [reminderDialogOpen, setReminderDialogOpen] = useState(false);
@@ -277,7 +280,7 @@ export default function MemberDetailPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold">Plan Assignment</CardTitle>
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setPlanDialogOpen(true)}>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleOpenPlanDialog()}>
                   <FileText className="mr-1.5 h-3 w-3" /> Change Plan
                 </Button>
               </div>
@@ -307,7 +310,7 @@ export default function MemberDetailPage() {
                     <FileText className="mx-auto h-8 w-8 text-warning/60" />
                     <p className="mt-2 text-sm font-semibold text-warning">No Plan Assigned</p>
                     <p className="text-xs text-muted-foreground mt-1">Assign a plan to connect this member's app to benefits data.</p>
-                    <Button size="sm" className="mt-3 text-xs" onClick={() => setPlanDialogOpen(true)}>
+                    <Button size="sm" className="mt-3 text-xs" onClick={() => handleOpenPlanDialog()}>
                       Assign Plan Now
                     </Button>
                   </div>
