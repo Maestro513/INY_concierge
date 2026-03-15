@@ -1279,6 +1279,261 @@ async def admin_delete_reminder(
     return {"deleted": True}
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  MEMBER DETAIL — GET /api/admin/members/{phone}
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/members/{phone}")
+async def admin_get_member(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """
+    Fetch full member detail: Zoho CRM data merged with local DB
+    (reminders, screenings, SDOH, activity).
+    """
+    from .user_data import UserDataDB
+
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    # 1) Try Zoho CRM for core member profile
+    zoho_data = None
+    try:
+        zoho_data = search_contact_by_phone(clean)
+    except Exception:
+        log.warning("Zoho lookup failed for ***%s, falling back to local", clean[-4:])
+
+    # 2) Check local session store for members created locally
+    session = _get_store().find_session_by_phone(clean)
+
+    if not zoho_data and not session:
+        raise HTTPException(status_code=404, detail="Member not found.")
+
+    # Merge: Zoho takes precedence, local session fills gaps
+    zoho = zoho_data or {}
+    local = session.get("data", {}) if session else {}
+
+    # 3) Pull local DB data
+    udb = UserDataDB()
+    reminders_raw = udb.get_reminders(clean)
+    reminders = [
+        {
+            "id": r["id"],
+            "drug_name": r["drug_name"],
+            "dose": r.get("dose_label", ""),
+            "time": f"{r['time_hour']:02d}:{r['time_minute']:02d}",
+            "enabled": bool(r.get("enabled", 1)),
+        }
+        for r in reminders_raw
+    ]
+
+    # 4) Activity from session timestamps
+    from datetime import datetime as _dt
+
+    activity = []
+    if session:
+        ts = session.get("ts", 0)
+        if ts:
+            activity.append({
+                "type": "login",
+                "desc": "Logged in via OTP",
+                "time": _dt.utcfromtimestamp(ts).strftime("%b %d, %Y %I:%M %p"),
+            })
+
+    # 5) Build unified response
+    member = {
+        "id": clean,
+        "first_name": zoho.get("first_name") or local.get("first_name", ""),
+        "last_name": zoho.get("last_name") or local.get("last_name", ""),
+        "phone": clean,
+        "email": zoho.get("email", local.get("email", "")),
+        "zip_code": zoho.get("zip_code") or local.get("zip_code", ""),
+        "dob": zoho.get("dob", local.get("dob", "")),
+        "address": zoho.get("address", local.get("address", "")),
+        "carrier": zoho.get("carrier", local.get("carrier", "")),
+        "plan_name": zoho.get("plan_name") or local.get("plan_name", ""),
+        "plan_number": zoho.get("plan_number") or local.get("plan_number", ""),
+        "agent": zoho.get("agent") or local.get("agent", ""),
+        "status": "active" if session else "active",
+        "created_at": _dt.utcfromtimestamp(session["ts"]).strftime("%b %d, %Y") if session else "",
+        "last_login": _dt.utcfromtimestamp(session["ts"]).strftime("%b %d, %Y %I:%M %p") if session else "",
+        "reminders": reminders,
+        "activity": activity,
+    }
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="read",
+        resource="member",
+        resource_id=f"***{clean[-4:]}",
+        ip_address="",
+        detail="admin_get_member",
+    )
+
+    return member
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  NOTIFICATIONS — agent-to-member push notifications
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class NotificationSend(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1, max_length=1000)
+    category: str = Field("general", max_length=50)
+
+
+class PushTokenRegister(BaseModel):
+    push_token: str = Field(..., min_length=10, max_length=200)
+
+
+def _ensure_notification_tables():
+    """Create notification + push_token tables if they don't exist."""
+    store = _get_store()
+    conn = store._conn()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone           TEXT NOT NULL,
+            phone_hash      TEXT NOT NULL,
+            title           TEXT NOT NULL,
+            body            TEXT NOT NULL,
+            category        TEXT NOT NULL DEFAULT 'general',
+            read            INTEGER NOT NULL DEFAULT 0,
+            sent_by         TEXT NOT NULL DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_phone_hash
+            ON notifications(phone_hash);
+
+        CREATE TABLE IF NOT EXISTS push_tokens (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone           TEXT NOT NULL,
+            phone_hash      TEXT NOT NULL,
+            push_token      TEXT NOT NULL,
+            platform        TEXT NOT NULL DEFAULT 'expo',
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_phone_hash
+            ON push_tokens(phone_hash);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_push_token_unique
+            ON push_tokens(push_token);
+    """)
+    conn.commit()
+
+
+# Ensure tables on module load
+try:
+    _ensure_notification_tables()
+except Exception:
+    pass  # Tables created lazily on first use if startup fails
+
+
+def _phone_hash(phone: str) -> str:
+    """Consistent phone hashing matching PersistentStore."""
+    import hashlib
+    import hmac as _hmac
+    key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+    return _hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
+
+
+@router.post("/members/{phone}/notifications")
+async def admin_send_notification(
+    phone: str,
+    body: NotificationSend,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Send a push notification to a member from the admin panel."""
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    _ensure_notification_tables()
+    store = _get_store()
+    conn = store._conn()
+    ph = _phone_hash(clean)
+
+    # 1) Persist notification record
+    cursor = conn.execute(
+        """INSERT INTO notifications (phone, phone_hash, title, body, category, sent_by)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (clean, ph, body.title, body.body, body.category, payload.get("sub", "admin")),
+    )
+    notif_id = cursor.lastrowid
+    conn.commit()
+
+    # 2) Try to deliver via Expo Push (best-effort)
+    push_sent = False
+    rows = conn.execute(
+        "SELECT push_token FROM push_tokens WHERE phone_hash = ?", (ph,)
+    ).fetchall()
+
+    if rows:
+        import httpx
+        tokens = [r["push_token"] for r in rows]
+        messages = [
+            {
+                "to": t,
+                "title": body.title,
+                "body": body.body,
+                "data": {"type": "admin_notification", "notification_id": notif_id, "category": body.category},
+                "sound": "default",
+            }
+            for t in tokens
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json=messages,
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+                push_sent = resp.status_code == 200
+                if not push_sent:
+                    log.warning("Expo push failed for ***%s: %s", clean[-4:], resp.text[:200])
+        except Exception as e:
+            log.warning("Expo push error for ***%s: %s", clean[-4:], type(e).__name__)
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="send_notification",
+        resource="notification",
+        resource_id=f"***{clean[-4:]}:{notif_id}",
+        ip_address=request.client.host if request.client else "",
+        detail=f"category={body.category} push_sent={push_sent}",
+    )
+
+    return {
+        "success": True,
+        "notification_id": notif_id,
+        "push_delivered": push_sent,
+        "push_tokens_found": len(rows),
+    }
+
+
+@router.get("/members/{phone}/notifications")
+async def admin_get_notifications(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get notification history for a member."""
+    clean = _normalize_phone(phone)
+    _ensure_notification_tables()
+    conn = _get_store()._conn()
+    ph = _phone_hash(clean)
+    rows = conn.execute(
+        "SELECT * FROM notifications WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 50",
+        (ph,),
+    ).fetchall()
+    return {"notifications": [dict(r) for r in rows]}
+
+
 @router.get("/members/{phone}/health-screening")
 async def admin_get_health_screening(
     phone: str,

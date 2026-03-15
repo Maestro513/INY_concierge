@@ -1116,6 +1116,115 @@ def logout(request: Request, user: dict = Depends(get_current_user)):
     return {"success": True}
 
 
+# ── Push Token Registration ──────────────────────────────────────────────
+
+
+class PushTokenRequest(BaseModel):
+    push_token: str = Field(..., min_length=10, max_length=200)
+
+
+@app.post("/push-token")
+def register_push_token(req: PushTokenRequest, user: dict = Depends(get_current_user)):
+    """Register an Expo push token for the current user (called after login)."""
+    phone = user.get("sub")
+    if not phone or phone == "dev":
+        raise HTTPException(status_code=400, detail="Invalid session.")
+
+    import hashlib
+    import hmac as _hmac
+    key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+    ph = _hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
+
+    conn = get_store()._conn()
+    # Ensure table exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS push_tokens (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone           TEXT NOT NULL,
+            phone_hash      TEXT NOT NULL,
+            push_token      TEXT NOT NULL,
+            platform        TEXT NOT NULL DEFAULT 'expo',
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_push_token_unique ON push_tokens(push_token)"
+        )
+    except Exception:
+        pass
+
+    # Upsert: update if token already exists, insert if new
+    conn.execute(
+        """INSERT INTO push_tokens (phone, phone_hash, push_token, platform, updated_at)
+           VALUES (?, ?, ?, 'expo', datetime('now'))
+           ON CONFLICT(push_token) DO UPDATE SET
+               phone = excluded.phone,
+               phone_hash = excluded.phone_hash,
+               updated_at = datetime('now')""",
+        (phone, ph, req.push_token),
+    )
+    conn.commit()
+    log.info("Push token registered for ***%s", phone[-4:])
+
+    return {"success": True}
+
+
+@app.get("/notifications")
+def get_my_notifications(user: dict = Depends(get_current_user)):
+    """Get notifications for the currently logged-in member."""
+    phone = user.get("sub")
+    if not phone or phone == "dev":
+        return {"notifications": []}
+
+    import hashlib
+    import hmac as _hmac
+    key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+    ph = _hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
+
+    conn = get_store()._conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone           TEXT NOT NULL,
+            phone_hash      TEXT NOT NULL,
+            title           TEXT NOT NULL,
+            body            TEXT NOT NULL,
+            category        TEXT NOT NULL DEFAULT 'general',
+            read            INTEGER NOT NULL DEFAULT 0,
+            sent_by         TEXT NOT NULL DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    rows = conn.execute(
+        "SELECT id, title, body, category, read, created_at FROM notifications WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 50",
+        (ph,),
+    ).fetchall()
+    return {"notifications": [dict(r) for r in rows]}
+
+
+@app.post("/notifications/{notif_id}/read")
+def mark_notification_read(notif_id: int, user: dict = Depends(get_current_user)):
+    """Mark a notification as read."""
+    phone = user.get("sub")
+    if not phone or phone == "dev":
+        raise HTTPException(status_code=400, detail="Invalid session.")
+
+    import hashlib
+    import hmac as _hmac
+    key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+    ph = _hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
+
+    conn = get_store()._conn()
+    conn.execute(
+        "UPDATE notifications SET read = 1 WHERE id = ? AND phone_hash = ?",
+        (notif_id, ph),
+    )
+    conn.commit()
+    return {"success": True}
+
+
 # Per-phone rate limiter for /ask
 _ASK_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 _ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))

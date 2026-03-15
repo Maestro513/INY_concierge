@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Phone, MapPin, Mail, Calendar, Shield,
   KeyRound, Pill, Send, FileText, Check,
-  Plus, Trash2, Activity, Eye, AlertCircle,
+  Plus, Trash2, Activity, Eye, AlertCircle, Bell,
   ClipboardCheck, Heart, Car, UtensilsCrossed, Users, Home,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -280,6 +280,70 @@ export default function MemberDetailPage() {
       .finally(() => setSdohSaving(false));
   }
 
+  // Notification dialog
+  const [notifDialogOpen, setNotifDialogOpen] = useState(false);
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifBody, setNotifBody] = useState('');
+  const [notifCategory, setNotifCategory] = useState('general');
+  const [notifSending, setNotifSending] = useState(false);
+  const [notifSent, setNotifSent] = useState(false);
+  const [notifError, setNotifError] = useState('');
+  const [notifResult, setNotifResult] = useState<{ push_delivered: boolean; push_tokens_found: number } | null>(null);
+
+  // Notification history
+  const [notifications, setNotifications] = useState<Array<{ id: number; title: string; body: string; category: string; read: number; created_at: string }>>([]);
+  const [notifHistoryLoaded, setNotifHistoryLoaded] = useState(false);
+
+  async function handleSendNotification() {
+    if (!member) return;
+    setNotifSending(true);
+    setNotifError('');
+    try {
+      const res = await client.post(ENDPOINTS.MEMBER_NOTIFICATIONS(member.phone), {
+        title: notifTitle,
+        body: notifBody,
+        category: notifCategory,
+      });
+      setNotifSent(true);
+      setNotifResult(res.data);
+      // Refresh history
+      loadNotificationHistory();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setNotifError(axiosErr.response?.data?.detail || 'Failed to send notification.');
+    } finally {
+      setNotifSending(false);
+    }
+  }
+
+  function loadNotificationHistory() {
+    if (!member) return;
+    client
+      .get(ENDPOINTS.MEMBER_NOTIFICATIONS(member.phone))
+      .then((res) => {
+        setNotifications(res.data?.notifications || []);
+        setNotifHistoryLoaded(true);
+      })
+      .catch(() => {});
+  }
+
+  function closeNotifDialog() {
+    setNotifDialogOpen(false);
+    setNotifSent(false);
+    setNotifError('');
+    setNotifResult(null);
+    setNotifTitle('');
+    setNotifBody('');
+    setNotifCategory('general');
+  }
+
+  const NOTIF_TEMPLATES = [
+    { label: 'OTC Allowance Reminder', title: 'Use Your OTC Allowance!', body: 'You still have unused OTC benefits this quarter. Visit your plan\'s OTC catalog to order health essentials at no cost.' },
+    { label: 'Appointment Confirmed', title: 'Appointment Confirmed', body: 'Your upcoming appointment has been confirmed. Please arrive 15 minutes early with your insurance card.' },
+    { label: 'Screening Reminder', title: 'Preventive Screening Due', body: 'You may be due for a preventive health screening. These are covered at $0 under your plan. Call us to schedule.' },
+    { label: 'Benefits Renewal', title: 'Your Benefits Reset Soon', body: 'Your plan benefits reset on January 1st. Make sure to use your remaining allowances before they expire.' },
+  ];
+
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderError, setReminderError] = useState('');
 
@@ -413,6 +477,9 @@ export default function MemberDetailPage() {
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setOtpDialogOpen(true)}>
             <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Send OTP
           </Button>
+          <Button variant="default" size="sm" className="h-8 text-xs" onClick={() => setNotifDialogOpen(true)}>
+            <Bell className="mr-1.5 h-3.5 w-3.5" /> Send Notification
+          </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs">
             <Phone className="mr-1.5 h-3.5 w-3.5" /> Call
           </Button>
@@ -545,6 +612,9 @@ export default function MemberDetailPage() {
               </TabsTrigger>
               <TabsTrigger value="sdoh" className="text-xs data-[state=active]:bg-background" onClick={loadSdohData}>
                 <Heart className="mr-1.5 h-3.5 w-3.5" /> Well-Being
+              </TabsTrigger>
+              <TabsTrigger value="notifications" className="text-xs data-[state=active]:bg-background" onClick={loadNotificationHistory}>
+                <Bell className="mr-1.5 h-3.5 w-3.5" /> Notifications
               </TabsTrigger>
             </TabsList>
 
@@ -845,6 +915,65 @@ export default function MemberDetailPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            {/* Notifications Tab */}
+            <TabsContent value="notifications" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Notification History</CardTitle>
+                    <Button size="sm" className="h-7 text-xs" onClick={() => setNotifDialogOpen(true)}>
+                      <Plus className="mr-1.5 h-3 w-3" /> Send New
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {!notifHistoryLoaded ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : notifications.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Bell className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">No notifications sent yet</p>
+                      <Button size="sm" className="mt-3 text-xs" onClick={() => setNotifDialogOpen(true)}>
+                        Send First Notification
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`rounded-lg border p-3 transition-colors ${
+                            n.read ? 'border-border/50 bg-muted/10 opacity-70' : 'border-border bg-background'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3 flex-1">
+                              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                                <Bell className="h-4 w-4 text-primary" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold">{n.title}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge variant="secondary" className="text-[10px]">{n.category}</Badge>
+                              <Badge variant="secondary" className={`text-[10px] ${n.read ? 'bg-success/10 text-success' : 'bg-chart-4/10 text-chart-4'}`}>
+                                {n.read ? 'Read' : 'Unread'}
+                              </Badge>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-2 pl-11">{n.created_at}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
           </Tabs>
         </div>
       </div>
@@ -985,6 +1114,122 @@ export default function MemberDetailPage() {
                   <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Sending...</>
                 ) : (
                   <><KeyRound className="mr-1.5 h-3.5 w-3.5" /> Send OTP</>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Send Notification Dialog ── */}
+      <Dialog open={notifDialogOpen} onOpenChange={(open) => { if (!open) closeNotifDialog(); else setNotifDialogOpen(true); }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Send Notification</DialogTitle>
+            <DialogDescription className="text-sm">
+              Push a notification to {member.first_name}'s device. They'll see it in the app and as a push alert.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!notifSent ? (
+            <div className="space-y-4 py-2">
+              {/* Quick templates */}
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Templates</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {NOTIF_TEMPLATES.map((t) => (
+                    <Button
+                      key={t.label}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => { setNotifTitle(t.title); setNotifBody(t.body); }}
+                    >
+                      {t.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</Label>
+                <Select value={notifCategory} onValueChange={setNotifCategory}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="general">General</SelectItem>
+                    <SelectItem value="benefits_reminder">Benefits Reminder</SelectItem>
+                    <SelectItem value="appointment">Appointment</SelectItem>
+                    <SelectItem value="screening">Screening</SelectItem>
+                    <SelectItem value="medication">Medication</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Title</Label>
+                <Input
+                  value={notifTitle}
+                  onChange={(e) => setNotifTitle(e.target.value)}
+                  placeholder="e.g. You still have $120 in OTC allowance!"
+                  className="h-9"
+                  maxLength={200}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Message</Label>
+                <textarea
+                  value={notifBody}
+                  onChange={(e) => setNotifBody(e.target.value)}
+                  placeholder="Write a message for the member..."
+                  className="flex w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                  rows={3}
+                  maxLength={1000}
+                />
+                <p className="text-[10px] text-muted-foreground text-right">{notifBody.length}/1000</p>
+              </div>
+
+              {notifError && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span className="text-xs">{notifError}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-6">
+              <div className="rounded-lg border border-success/30 bg-success/5 p-4 text-center">
+                <Check className="mx-auto h-8 w-8 text-success mb-2" />
+                <p className="text-sm font-semibold text-success">Notification Sent!</p>
+                {notifResult && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Push delivery: {notifResult.push_delivered ? (
+                        <span className="text-success font-medium">Delivered</span>
+                      ) : notifResult.push_tokens_found === 0 ? (
+                        <span className="text-warning font-medium">No push token registered (member hasn't enabled notifications)</span>
+                      ) : (
+                        <span className="text-warning font-medium">Failed — saved to inbox</span>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeNotifDialog} className="text-xs">
+              {notifSent ? 'Close' : 'Cancel'}
+            </Button>
+            {!notifSent && (
+              <Button onClick={handleSendNotification} disabled={!notifTitle || !notifBody || notifSending} className="text-xs">
+                {notifSending ? (
+                  <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Sending...</>
+                ) : (
+                  <><Bell className="mr-1.5 h-3.5 w-3.5" /> Send Notification</>
                 )}
               </Button>
             )}
