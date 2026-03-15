@@ -855,3 +855,294 @@ class UserDataDB:
             ORDER BY MAX(created_at) DESC
         """)
         return [dict(r) for r in rows]
+
+    # ── Call Notes / CRM Integration ────────────────────────────────
+
+    def _ensure_call_notes_table(self):
+        """Create call_notes table if not present (lazy migration)."""
+        conn = self._conn()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS call_notes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL,
+                subject         TEXT NOT NULL,
+                body            TEXT NOT NULL,
+                call_type       TEXT NOT NULL DEFAULT 'outbound',
+                duration_minutes INTEGER DEFAULT 0,
+                agent_name      TEXT NOT NULL DEFAULT '',
+                zoho_synced     INTEGER DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_notes_phone_hash
+                ON call_notes(phone_hash);
+        """)
+        conn.commit()
+
+    def create_call_note(self, phone: str, subject: str, body: str,
+                         call_type: str = "outbound", duration_minutes: int = 0,
+                         agent_name: str = "") -> dict:
+        """Create a call note for a member."""
+        self._ensure_call_notes_table()
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        nid = self._execute(
+            """INSERT INTO call_notes (phone, phone_hash, subject, body, call_type, duration_minutes, agent_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (enc_phone, ph, subject, body, call_type, duration_minutes, agent_name),
+        )
+        row = self._query_one("SELECT * FROM call_notes WHERE id = ?", (nid,))
+        return dict(row) if row else {"id": nid}
+
+    def get_call_notes(self, phone: str) -> list[dict]:
+        """Get all call notes for a member, most recent first."""
+        self._ensure_call_notes_table()
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            "SELECT id, subject, body, call_type, duration_minutes, agent_name, zoho_synced, created_at FROM call_notes WHERE phone_hash = ? ORDER BY created_at DESC",
+            (ph,),
+        )
+        return [dict(r) for r in rows]
+
+    def mark_note_synced(self, note_id: int) -> None:
+        """Mark a call note as synced to Zoho."""
+        self._ensure_call_notes_table()
+        self._execute(
+            "UPDATE call_notes SET zoho_synced = 1 WHERE id = ?",
+            (note_id,),
+        )
+
+    # ── Campaigns / Bulk Outreach ──────────────────────────────────
+
+    def _ensure_campaigns_table(self):
+        """Create campaigns tables if not present (lazy migration)."""
+        conn = self._conn()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS campaigns (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL,
+                cohort_type     TEXT NOT NULL,
+                cohort_filter   TEXT NOT NULL DEFAULT '{}',
+                message_template TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'draft',
+                total_recipients INTEGER DEFAULT 0,
+                sent_count      INTEGER DEFAULT 0,
+                failed_count    INTEGER DEFAULT 0,
+                created_by      TEXT NOT NULL DEFAULT '',
+                created_at      TEXT DEFAULT (datetime('now')),
+                sent_at         TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS campaign_recipients (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id     INTEGER NOT NULL,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'pending',
+                sent_at         TEXT,
+                error_message   TEXT,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_camp_recip_campaign
+                ON campaign_recipients(campaign_id);
+        """)
+        conn.commit()
+
+    def create_campaign(self, name: str, cohort_type: str, cohort_filter: dict,
+                        message_template: str, created_by: str) -> dict:
+        """Create a new campaign in draft status."""
+        import json
+        self._ensure_campaigns_table()
+        cid = self._execute(
+            """INSERT INTO campaigns (name, cohort_type, cohort_filter, message_template, created_by)
+               VALUES (?, ?, ?, ?, ?)""",
+            (name, cohort_type, json.dumps(cohort_filter), message_template, created_by),
+        )
+        row = self._query_one("SELECT * FROM campaigns WHERE id = ?", (cid,))
+        return dict(row) if row else {"id": cid}
+
+    def get_campaigns(self, limit: int = 50) -> list[dict]:
+        """Get all campaigns, most recent first."""
+        import json
+        self._ensure_campaigns_table()
+        rows = self._query_all(
+            "SELECT * FROM campaigns ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        for r in rows:
+            r["cohort_filter"] = json.loads(r["cohort_filter"]) if r["cohort_filter"] else {}
+        return rows
+
+    def get_campaign(self, campaign_id: int) -> dict | None:
+        """Get a single campaign by ID."""
+        import json
+        self._ensure_campaigns_table()
+        row = self._query_one("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
+        if row:
+            row = dict(row)
+            row["cohort_filter"] = json.loads(row["cohort_filter"]) if row["cohort_filter"] else {}
+        return row
+
+    def get_cohort_screening_gaps(self, gap_type: str = None) -> list[dict]:
+        """Get members with screening gaps for campaign targeting."""
+        import json
+        rows = self._query_all(
+            "SELECT phone, phone_hash, answers_json, created_at FROM health_screenings ORDER BY created_at DESC"
+        )
+        seen = set()
+        results = []
+        for r in rows:
+            ph = r["phone_hash"]
+            if ph in seen:
+                continue
+            seen.add(ph)
+            answers = json.loads(r["answers_json"])
+            gaps = [k for k, v in answers.items() if v is False or v == "no"]
+            if gap_type and gap_type not in gaps:
+                continue
+            if gaps:
+                results.append({
+                    "phone": self._decrypt_phone(r["phone"]),
+                    "phone_hash": ph,
+                    "gaps": gaps,
+                })
+        return results
+
+    def get_cohort_otc_underuse(self, min_unused: float = 100.0) -> list[dict]:
+        """Get members with unused OTC allowance above threshold."""
+        # Get all members with usage data
+        rows = self._query_all(
+            """SELECT phone, phone_hash, SUM(amount) as total_spent
+               FROM benefits_usage
+               WHERE category = 'otc'
+               GROUP BY phone_hash"""
+        )
+        # For simplicity, we compare against a typical $150/month or $450/quarter OTC cap
+        # This would ideally be joined with plan data
+        results = []
+        for r in rows:
+            phone = self._decrypt_phone(r["phone"])
+            spent = r["total_spent"] or 0
+            # Assume a typical quarterly OTC allowance — real implementation would check the plan
+            results.append({
+                "phone": phone,
+                "phone_hash": r["phone_hash"],
+                "total_spent": round(spent, 2),
+            })
+        return results
+
+    def get_cohort_sdoh_flags(self, flag_type: str = None) -> list[dict]:
+        """Get members with SDOH risk flags for campaign targeting."""
+        rows = self._query_all(
+            "SELECT * FROM sdoh_screenings ORDER BY created_at DESC"
+        )
+        seen = set()
+        results = []
+        for r in rows:
+            ph = r["phone_hash"]
+            if ph in seen:
+                continue
+            seen.add(ph)
+            flags = []
+            if r["transportation"] == "yes":
+                flags.append("transportation")
+            if r["food_insecurity"] == "yes":
+                flags.append("food_insecurity")
+            if r["social_isolation"] in ("sometimes", "often", "always"):
+                flags.append("social_isolation")
+            if r["housing_stability"] == "yes":
+                flags.append("housing_stability")
+            if flag_type and flag_type not in flags:
+                continue
+            if flags:
+                results.append({
+                    "phone": self._decrypt_phone(r["phone"]),
+                    "phone_hash": ph,
+                    "flags": flags,
+                })
+        return results
+
+    def set_campaign_recipients(self, campaign_id: int, phones: list[str]) -> int:
+        """Set the recipient list for a campaign. Returns count."""
+        self._ensure_campaigns_table()
+        conn = self._conn()
+        for phone in phones:
+            enc = self._encrypt_phone(phone)
+            ph = self._hash_phone(phone)
+            conn.execute(
+                "INSERT INTO campaign_recipients (campaign_id, phone, phone_hash) VALUES (?, ?, ?)",
+                (campaign_id, enc, ph),
+            )
+        conn.execute(
+            "UPDATE campaigns SET total_recipients = ? WHERE id = ?",
+            (len(phones), campaign_id),
+        )
+        conn.commit()
+        return len(phones)
+
+    def update_campaign_status(self, campaign_id: int, status: str,
+                                sent_count: int = 0, failed_count: int = 0) -> None:
+        """Update campaign status and counts."""
+        self._ensure_campaigns_table()
+        if status == "sent":
+            self._execute(
+                "UPDATE campaigns SET status = ?, sent_count = ?, failed_count = ?, sent_at = datetime('now') WHERE id = ?",
+                (status, sent_count, failed_count, campaign_id),
+            )
+        else:
+            self._execute(
+                "UPDATE campaigns SET status = ?, sent_count = ?, failed_count = ? WHERE id = ?",
+                (status, sent_count, failed_count, campaign_id),
+            )
+
+    def get_campaign_recipients(self, campaign_id: int) -> list[dict]:
+        """Get all recipients for a campaign."""
+        self._ensure_campaigns_table()
+        rows = self._query_all(
+            "SELECT * FROM campaign_recipients WHERE campaign_id = ? ORDER BY id",
+            (campaign_id,),
+        )
+        for r in rows:
+            r["phone"] = self._decrypt_phone(r["phone"])
+        return rows
+
+    def get_all_conversations_detailed(self) -> list[dict]:
+        """Get conversations with member name, phone last4, and last message preview."""
+        self._ensure_messages_table()
+        rows = self._query_all("""
+            SELECT m.phone_hash,
+                   m.phone,
+                   MAX(m.created_at) as last_message_at,
+                   COUNT(*) as total_messages,
+                   SUM(CASE WHEN m.sender_type = 'member' AND m.read = 0 THEN 1 ELSE 0 END) as unread_from_member
+            FROM messages m
+            GROUP BY m.phone_hash
+            ORDER BY MAX(m.created_at) DESC
+        """)
+        results = []
+        for r in rows:
+            phone = self._decrypt_phone(r["phone"])
+            # Get the latest message for preview
+            latest = self._query_one(
+                "SELECT body, sender_type, sender_name FROM messages WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 1",
+                (r["phone_hash"],),
+            )
+            # Get member name from the latest member-sent message
+            member_msg = self._query_one(
+                "SELECT sender_name FROM messages WHERE phone_hash = ? AND sender_type = 'member' ORDER BY created_at DESC LIMIT 1",
+                (r["phone_hash"],),
+            )
+            preview = ""
+            if latest:
+                prefix = "You: " if latest["sender_type"] == "agent" else ""
+                preview = prefix + (latest["body"][:80] if latest["body"] else "")
+            results.append({
+                "phone_hash": r["phone_hash"],
+                "phone_last4": phone[-4:] if len(phone) >= 4 else phone,
+                "phone": phone,
+                "member_name": member_msg["sender_name"] if member_msg and member_msg["sender_name"] else "",
+                "last_message_at": r["last_message_at"],
+                "last_message_preview": preview,
+                "total_messages": r["total_messages"],
+                "unread_from_member": r["unread_from_member"],
+            })
+        return results

@@ -9,6 +9,8 @@ import {
   Shield,
   HeartPulse,
   ShieldAlert,
+  MessageSquare,
+  Megaphone,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAdminAuth } from '@/auth/AdminAuthProvider';
@@ -16,6 +18,8 @@ import { useAdminAuth } from '@/auth/AdminAuthProvider';
 const NAV_ITEMS = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/admin/members', icon: Users, label: 'Members' },
+  { to: '/admin/messages', icon: MessageSquare, label: 'Messages' },
+  { to: '/admin/campaigns', icon: Megaphone, label: 'Campaigns' },
   { to: '/admin/plans', icon: FileText, label: 'Plans' },
   { to: '/admin/screening-gaps', icon: HeartPulse, label: 'Screening Gaps' },
   { to: '/admin/sdoh-report', icon: ShieldAlert, label: 'SDoH Risks' },

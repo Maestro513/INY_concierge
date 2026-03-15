@@ -1840,8 +1840,309 @@ async def admin_send_message(
 async def admin_messages_inbox(
     payload: dict = Depends(require_admin),
 ):
-    """Get all active conversations for the admin inbox."""
+    """Get all active conversations for the admin inbox with member details."""
     from .user_data import UserDataDB
     udb = UserDataDB()
-    conversations = udb.get_all_conversations()
+    conversations = udb.get_all_conversations_detailed()
     return {"conversations": conversations}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  K: BULK OUTREACH / CAMPAIGN MANAGEMENT
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class CampaignCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    cohort_type: str = Field(..., pattern=r"^(screening_gap|otc_underuse|sdoh_flag|custom)$")
+    cohort_filter: dict = Field(default_factory=dict)
+    message_template: str = Field(..., min_length=1, max_length=1600)
+
+
+@router.get("/campaigns")
+async def list_campaigns(
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """List all campaigns."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaigns = udb.get_campaigns()
+    return {"campaigns": campaigns}
+
+
+@router.post("/campaigns")
+async def create_campaign(
+    body: CampaignCreate,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Create a new campaign (draft status)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.create_campaign(
+        name=body.name,
+        cohort_type=body.cohort_type,
+        cohort_filter=body.cohort_filter,
+        message_template=body.message_template,
+        created_by=payload.get("sub", "unknown"),
+    )
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create_campaign",
+        resource="campaign",
+        resource_id=str(campaign.get("id", "")),
+        ip_address=request.client.host if request.client else "",
+        detail=f"cohort={body.cohort_type}",
+    )
+    return {"campaign": campaign}
+
+
+@router.get("/campaigns/{campaign_id}")
+async def get_campaign(
+    campaign_id: int,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Get campaign details."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    return {"campaign": campaign}
+
+
+@router.get("/campaigns/{campaign_id}/preview")
+async def preview_campaign_cohort(
+    campaign_id: int,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Preview the cohort that will receive the campaign. Returns count and sample."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+
+    cohort = _resolve_cohort(udb, campaign["cohort_type"], campaign["cohort_filter"])
+    return {
+        "total": len(cohort),
+        "sample": [{"phone_last4": p[-4:]} for p in cohort[:10]],
+    }
+
+
+@router.post("/campaigns/{campaign_id}/send")
+async def send_campaign(
+    campaign_id: int,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Send the campaign SMS to all cohort members."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    if campaign["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Campaign already sent.")
+
+    # Resolve cohort
+    cohort = _resolve_cohort(udb, campaign["cohort_type"], campaign["cohort_filter"])
+    if not cohort:
+        raise HTTPException(status_code=400, detail="No recipients match the cohort criteria.")
+
+    # Store recipients
+    udb.set_campaign_recipients(campaign_id, cohort)
+
+    # Send SMS via Twilio
+    sms = create_sms_provider()
+    sent = 0
+    failed = 0
+    for phone in cohort:
+        try:
+            success = _send_campaign_sms(sms, phone, campaign["message_template"])
+            if success:
+                sent += 1
+            else:
+                failed += 1
+        except Exception as e:
+            log.warning("Campaign SMS failed for ...%s: %s", phone[-4:], e)
+            failed += 1
+
+    udb.update_campaign_status(campaign_id, "sent", sent, failed)
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="send_campaign",
+        resource="campaign",
+        resource_id=str(campaign_id),
+        ip_address=request.client.host if request.client else "",
+        detail=f"sent={sent} failed={failed} total={len(cohort)}",
+    )
+
+    return {
+        "status": "sent",
+        "total_recipients": len(cohort),
+        "sent": sent,
+        "failed": failed,
+    }
+
+
+def _resolve_cohort(udb, cohort_type: str, cohort_filter: dict) -> list[str]:
+    """Resolve a cohort type + filter to a list of phone numbers."""
+    if cohort_type == "screening_gap":
+        gap_type = cohort_filter.get("gap_type")
+        members = udb.get_cohort_screening_gaps(gap_type)
+        return [m["phone"] for m in members]
+    elif cohort_type == "otc_underuse":
+        min_unused = cohort_filter.get("min_unused", 100.0)
+        members = udb.get_cohort_otc_underuse(min_unused)
+        return [m["phone"] for m in members]
+    elif cohort_type == "sdoh_flag":
+        flag_type = cohort_filter.get("flag_type")
+        members = udb.get_cohort_sdoh_flags(flag_type)
+        return [m["phone"] for m in members]
+    elif cohort_type == "custom":
+        # Custom phone list provided directly
+        return cohort_filter.get("phones", [])
+    return []
+
+
+def _send_campaign_sms(sms, phone: str, message: str) -> bool:
+    """Send a campaign SMS message (not OTP — uses general messaging)."""
+    try:
+        from twilio.rest import Client
+        if hasattr(sms, 'client') and isinstance(sms.client, Client):
+            msg = sms.client.messages.create(
+                body=message,
+                from_=sms.from_number,
+                to=f"+1{phone}",
+            )
+            log.info("Campaign SMS sent to ...%s: sid=%s", phone[-4:], msg.sid)
+            return True
+        else:
+            # Console provider — just log
+            log.info("[DEV CAMPAIGN SMS] To: ...%s Message: %s", phone[-4:], message[:50])
+            return True
+    except Exception as e:
+        log.error("Campaign SMS failed for ...%s: %s", phone[-4:], e)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  L: AGENT CALL NOTES / CRM INTEGRATION
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class CallNoteCreate(BaseModel):
+    subject: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1, max_length=5000)
+    call_type: str = Field("outbound", pattern=r"^(inbound|outbound|follow_up)$")
+    duration_minutes: int = Field(0, ge=0, le=999)
+    sync_to_zoho: bool = True
+
+
+@router.get("/members/{phone}/call-notes")
+async def get_call_notes(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get all call notes for a member."""
+    from .user_data import UserDataDB
+    clean = _normalize_phone(phone)
+    udb = UserDataDB()
+    notes = udb.get_call_notes(clean)
+    return {"notes": notes}
+
+
+@router.post("/members/{phone}/call-notes")
+async def create_call_note(
+    phone: str,
+    body: CallNoteCreate,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Create a call note for a member, optionally syncing to Zoho CRM."""
+    from .user_data import UserDataDB
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    udb = UserDataDB()
+    agent_name = payload.get("sub", "Agent")
+    note = udb.create_call_note(
+        phone=clean,
+        subject=body.subject,
+        body=body.body,
+        call_type=body.call_type,
+        duration_minutes=body.duration_minutes,
+        agent_name=agent_name,
+    )
+
+    # Sync to Zoho if requested
+    zoho_synced = False
+    zoho_error = ""
+    if body.sync_to_zoho:
+        try:
+            zoho_synced = _sync_note_to_zoho(clean, body.subject, body.body, agent_name)
+        except Exception as e:
+            zoho_error = str(e)
+            log.warning("Zoho note sync failed for ...%s: %s", clean[-4:], e)
+
+    if zoho_synced:
+        udb.mark_note_synced(note["id"])
+
+    get_audit_log().record(
+        actor=agent_name,
+        action="create_call_note",
+        resource="call_note",
+        resource_id=f"***{clean[-4:]}:{note.get('id', '')}",
+        ip_address=request.client.host if request.client else "",
+        detail=f"type={body.call_type} zoho_synced={zoho_synced}",
+    )
+
+    return {
+        "note": note,
+        "zoho_synced": zoho_synced,
+        "zoho_error": zoho_error,
+    }
+
+
+def _sync_note_to_zoho(phone: str, subject: str, body: str, agent_name: str) -> bool:
+    """Push a call note to the Zoho CRM contact record."""
+    from .zoho_client import get_access_token, _http, API_BASE
+
+    # First find the contact
+    contact = search_contact_by_phone(phone)
+    if not contact or not contact.get("id"):
+        log.warning("Zoho sync: no contact found for ...%s", phone[-4:])
+        return False
+
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+
+    # Create a note on the contact
+    note_data = {
+        "data": [{
+            "Note_Title": subject,
+            "Note_Content": f"[{agent_name}] {body}",
+            "Parent_Id": contact["id"],
+            "se_module": "Contacts",
+        }]
+    }
+
+    resp = _http.post(
+        f"{API_BASE}/Notes",
+        headers=headers,
+        json=note_data,
+        timeout=15,
+    )
+
+    if resp.status_code in (200, 201):
+        log.info("Zoho note synced for contact %s", contact["id"])
+        return True
+    else:
+        log.warning("Zoho note sync returned %s: %s", resp.status_code, resp.text[:200])
+        return False

@@ -56,4 +56,13 @@ export const ENDPOINTS = {
   // Secure messaging
   MEMBER_MESSAGES: (phone: string) => `/api/admin/members/${phone}/messages`,
   MESSAGES_INBOX: '/api/admin/messages/inbox',
+
+  // Campaigns
+  CAMPAIGNS: '/api/admin/campaigns',
+  CAMPAIGN: (id: number) => `/api/admin/campaigns/${id}`,
+  CAMPAIGN_PREVIEW: (id: number) => `/api/admin/campaigns/${id}/preview`,
+  CAMPAIGN_SEND: (id: number) => `/api/admin/campaigns/${id}/send`,
+
+  // Call Notes
+  MEMBER_CALL_NOTES: (phone: string) => `/api/admin/members/${phone}/call-notes`,
 } as const;

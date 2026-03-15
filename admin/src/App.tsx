@@ -13,6 +13,8 @@ import SystemPage from '@/pages/system/SystemPage';
 import SettingsPage from '@/pages/settings/SettingsPage';
 import ScreeningGapsPage from '@/pages/screening-gaps/ScreeningGapsPage';
 import SDoHReportPage from '@/pages/sdoh-report/SDoHReportPage';
+import MessagesInboxPage from '@/pages/messages/MessagesInboxPage';
+import CampaignsPage from '@/pages/campaigns/CampaignsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +50,8 @@ export default function App() {
               <Route element={<AdminLayout />}>
                 <Route path="/admin/members" element={<MembersPage />} />
                 <Route path="/admin/members/:id" element={<MemberDetailPage />} />
+                <Route path="/admin/messages" element={<MessagesInboxPage />} />
+                <Route path="/admin/campaigns" element={<CampaignsPage />} />
                 <Route path="/admin/plans" element={<PlansPage />} />
                 <Route path="/admin/system" element={<SystemPage />} />
                 <Route path="/admin/settings" element={<SettingsPage />} />

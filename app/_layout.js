@@ -164,6 +164,10 @@ export default function RootLayout() {
             options={{ animation: 'slide_from_right', gestureEnabled: false }}
           />
           <Stack.Screen
+            name="messages"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
+          <Stack.Screen
             name="settings"
             options={{ animation: 'slide_from_right', gestureEnabled: true }}
           />

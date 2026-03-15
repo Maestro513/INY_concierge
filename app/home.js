@@ -136,6 +136,10 @@ export default function HomeScreen() {
     router.push('/book-transportation');
   };
 
+  const handleOpenMessages = () => {
+    router.push('/messages');
+  };
+
   // ── Benefits ────────────────────────────────────────────────────
 
   const loadAllBenefits = async () => {
@@ -435,6 +439,7 @@ export default function HomeScreen() {
           onLogout={handleLogout}
           onOpenSettings={handleOpenSettings}
           onBookTransportation={handleBookTransportation}
+          onOpenMessages={handleOpenMessages}
         />
         <MedAdherence
           summary={adherenceSummary}
