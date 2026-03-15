@@ -163,9 +163,21 @@ export default function RootLayout() {
             name="sdoh-screening"
             options={{ animation: 'slide_from_right', gestureEnabled: false }}
           />
-          <Stack.Screen
+<Stack.Screen
             name="settings"
             options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
+          <Stack.Screen
+            name="family-access"
+            options={{ animation: 'slide_from_right', gestureEnabled: true }}
+          />
+          <Stack.Screen
+            name="caregiver-home"
+            options={{ animation: 'fade', gestureEnabled: false }}
+          />
+          <Stack.Screen
+            name="caregiver-accept"
+            options={{ animation: 'slide_from_right', gestureEnabled: false }}
           />
         </Stack>
       </SafeAreaProvider>

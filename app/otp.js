@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RADII, MOTION } from '../constants/theme';
 import { API_URL, fetchWithTimeout, setTokens } from '../constants/api';
-import { setMemberSession, getPendingOtp, clearPendingOtp } from '../constants/session';
+import { setMemberSession, getPendingOtp, clearPendingOtp, setCaregiverInfo } from '../constants/session';
 import { CALL_NUMBER } from '../constants/data';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { markDeviceTrusted } from '../utils/deviceAuth';
@@ -134,6 +134,32 @@ export default function OTPScreen() {
 
           // Mark device as trusted so future logins use device auth
           await markDeviceTrusted(phone);
+
+          // Check for caregiver-only user (not a member, just an invited caregiver)
+          if (data.is_caregiver_only) {
+            setCaregiverInfo({
+              isCaregiverOnly: true,
+              pendingInvite: data.pending_caregiver_invite,
+            });
+            router.replace('/caregiver-accept');
+            return;
+          }
+
+          // Check if member also has a pending caregiver invite
+          if (data.pending_caregiver_invite) {
+            setCaregiverInfo({
+              isCaregiverOnly: false,
+              pendingInvite: true,
+            });
+          }
+
+          // Check if member is also a caregiver for someone
+          if (data.is_caregiver_for) {
+            setCaregiverInfo({
+              isCaregiverOnly: false,
+              isCaregiverFor: data.is_caregiver_for,
+            });
+          }
 
           const isDev = code === '123456';
           const screeningDone = await AsyncStorage.getItem('@health_screening_complete');

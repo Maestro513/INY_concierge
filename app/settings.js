@@ -50,11 +50,7 @@ export default function SettingsScreen() {
   };
 
   const handleFamilyAccess = () => {
-    Alert.alert(
-      'Family Access',
-      'Family Access lets a trusted family member or caregiver view your plan details and help manage your benefits.\n\nThis feature is coming soon!',
-      [{ text: 'OK' }],
-    );
+    router.push('/family-access');
   };
 
   return (

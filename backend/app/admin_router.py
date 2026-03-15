@@ -33,6 +33,7 @@ from .admin_auth import (
     set_auth_cookies,
 )
 from .audit import get_audit_log
+from .caregiver import CaregiverDB
 from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
@@ -1279,6 +1280,266 @@ async def admin_delete_reminder(
     return {"deleted": True}
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  MEMBER DETAIL — GET /api/admin/members/{phone}
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/members/{phone}")
+async def admin_get_member(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """
+    Fetch full member detail: Zoho CRM data merged with local DB
+    (reminders, screenings, SDOH, activity).
+    """
+    from .user_data import UserDataDB
+
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    # 1) Try Zoho CRM for core member profile
+    zoho_data = None
+    try:
+        zoho_data = search_contact_by_phone(clean)
+    except Exception:
+        log.warning("Zoho lookup failed for ***%s, falling back to local", clean[-4:])
+
+    # 2) Check local session store for members created locally
+    session = _get_store().find_session_by_phone(clean)
+
+    if not zoho_data and not session:
+        raise HTTPException(status_code=404, detail="Member not found.")
+
+    # Merge: Zoho takes precedence, local session fills gaps
+    zoho = zoho_data or {}
+    local = session.get("data", {}) if session else {}
+
+    # 3) Pull local DB data
+    udb = UserDataDB()
+    reminders_raw = udb.get_reminders(clean)
+    reminders = [
+        {
+            "id": r["id"],
+            "drug_name": r["drug_name"],
+            "dose": r.get("dose_label", ""),
+            "time": f"{r['time_hour']:02d}:{r['time_minute']:02d}",
+            "enabled": bool(r.get("enabled", 1)),
+        }
+        for r in reminders_raw
+    ]
+
+    # 4) Activity from session timestamps
+    from datetime import datetime as _dt
+
+    activity = []
+    if session:
+        ts = session.get("ts", 0)
+        if ts:
+            activity.append({
+                "type": "login",
+                "desc": "Logged in via OTP",
+                "time": _dt.utcfromtimestamp(ts).strftime("%b %d, %Y %I:%M %p"),
+            })
+
+    # 5) Build unified response
+    member = {
+        "id": clean,
+        "first_name": zoho.get("first_name") or local.get("first_name", ""),
+        "last_name": zoho.get("last_name") or local.get("last_name", ""),
+        "phone": clean,
+        "email": zoho.get("email", local.get("email", "")),
+        "zip_code": zoho.get("zip_code") or local.get("zip_code", ""),
+        "dob": zoho.get("dob", local.get("dob", "")),
+        "address": zoho.get("address", local.get("address", "")),
+        "carrier": zoho.get("carrier", local.get("carrier", "")),
+        "plan_name": zoho.get("plan_name") or local.get("plan_name", ""),
+        "plan_number": zoho.get("plan_number") or local.get("plan_number", ""),
+        "agent": zoho.get("agent") or local.get("agent", ""),
+        "status": "active" if session else "active",
+        "created_at": _dt.utcfromtimestamp(session["ts"]).strftime("%b %d, %Y") if session else "",
+        "last_login": _dt.utcfromtimestamp(session["ts"]).strftime("%b %d, %Y %I:%M %p") if session else "",
+        "reminders": reminders,
+        "activity": activity,
+    }
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="read",
+        resource="member",
+        resource_id=f"***{clean[-4:]}",
+        ip_address="",
+        detail="admin_get_member",
+    )
+
+    return member
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  NOTIFICATIONS — agent-to-member push notifications
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class NotificationSend(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1, max_length=1000)
+    category: str = Field("general", max_length=50)
+
+
+class PushTokenRegister(BaseModel):
+    push_token: str = Field(..., min_length=10, max_length=200)
+
+
+def _ensure_notification_tables():
+    """Create notification + push_token tables if they don't exist."""
+    store = _get_store()
+    conn = store._conn()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone           TEXT NOT NULL,
+            phone_hash      TEXT NOT NULL,
+            title           TEXT NOT NULL,
+            body            TEXT NOT NULL,
+            category        TEXT NOT NULL DEFAULT 'general',
+            read            INTEGER NOT NULL DEFAULT 0,
+            sent_by         TEXT NOT NULL DEFAULT '',
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_phone_hash
+            ON notifications(phone_hash);
+
+        CREATE TABLE IF NOT EXISTS push_tokens (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone           TEXT NOT NULL,
+            phone_hash      TEXT NOT NULL,
+            push_token      TEXT NOT NULL,
+            platform        TEXT NOT NULL DEFAULT 'expo',
+            created_at      TEXT DEFAULT (datetime('now')),
+            updated_at      TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_phone_hash
+            ON push_tokens(phone_hash);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_push_token_unique
+            ON push_tokens(push_token);
+    """)
+    conn.commit()
+
+
+# Ensure tables on module load
+try:
+    _ensure_notification_tables()
+except Exception:
+    pass  # Tables created lazily on first use if startup fails
+
+
+def _phone_hash(phone: str) -> str:
+    """Consistent phone hashing matching PersistentStore."""
+    import hashlib
+    import hmac as _hmac
+    key = os.environ.get("FIELD_ENCRYPTION_KEY", "dev-key").encode()
+    return _hmac.new(key, phone.encode(), hashlib.sha256).hexdigest()
+
+
+@router.post("/members/{phone}/notifications")
+async def admin_send_notification(
+    phone: str,
+    body: NotificationSend,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Send a push notification to a member from the admin panel."""
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    _ensure_notification_tables()
+    store = _get_store()
+    conn = store._conn()
+    ph = _phone_hash(clean)
+
+    # 1) Persist notification record
+    cursor = conn.execute(
+        """INSERT INTO notifications (phone, phone_hash, title, body, category, sent_by)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (clean, ph, body.title, body.body, body.category, payload.get("sub", "admin")),
+    )
+    notif_id = cursor.lastrowid
+    conn.commit()
+
+    # 2) Try to deliver via Expo Push (best-effort)
+    push_sent = False
+    rows = conn.execute(
+        "SELECT push_token FROM push_tokens WHERE phone_hash = ?", (ph,)
+    ).fetchall()
+
+    if rows:
+        import httpx
+        tokens = [r["push_token"] for r in rows]
+        messages = [
+            {
+                "to": t,
+                "title": body.title,
+                "body": body.body,
+                "data": {"type": "admin_notification", "notification_id": notif_id, "category": body.category},
+                "sound": "default",
+            }
+            for t in tokens
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json=messages,
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+                push_sent = resp.status_code == 200
+                if not push_sent:
+                    log.warning("Expo push failed for ***%s: %s", clean[-4:], resp.text[:200])
+        except Exception as e:
+            log.warning("Expo push error for ***%s: %s", clean[-4:], type(e).__name__)
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="send_notification",
+        resource="notification",
+        resource_id=f"***{clean[-4:]}:{notif_id}",
+        ip_address=request.client.host if request.client else "",
+        detail=f"category={body.category} push_sent={push_sent}",
+    )
+
+    return {
+        "success": True,
+        "notification_id": notif_id,
+        "push_delivered": push_sent,
+        "push_tokens_found": len(rows),
+    }
+
+
+@router.get("/members/{phone}/notifications")
+async def admin_get_notifications(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get notification history for a member."""
+    clean = _normalize_phone(phone)
+    _ensure_notification_tables()
+    conn = _get_store()._conn()
+    ph = _phone_hash(clean)
+    rows = conn.execute(
+        "SELECT * FROM notifications WHERE phone_hash = ? ORDER BY created_at DESC LIMIT 50",
+        (ph,),
+    ).fetchall()
+    return {"notifications": [dict(r) for r in rows]}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  C: SCREENING / SDOH HISTORY
+# ════════════════════════════════════════════════════════════════════════════
+
+
 @router.get("/members/{phone}/health-screening")
 async def admin_get_health_screening(
     phone: str,
@@ -1301,3 +1562,558 @@ async def admin_get_sdoh_screening(
     udb = UserDataDB()
     result = udb.get_sdoh_screening(phone)
     return {"screening": result}
+
+
+@router.get("/members/{phone}/screening-history")
+async def admin_get_screening_history(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get full screening + SDOH history timeline for a member."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    clean = _normalize_phone(phone)
+    screenings = udb.get_health_screening_history(clean)
+    sdoh = udb.get_sdoh_screening_history(clean)
+    return {
+        "screenings": screenings,
+        "sdoh": sdoh,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  E: BENEFITS UTILIZATION ALERTS
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/members/{phone}/utilization-alerts")
+async def admin_get_utilization_alerts(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """
+    Check a member's benefits utilization and return alerts for:
+    - OTC/flex allowance expiring unused
+    - Screening gaps approaching deadlines
+    - Medication refill alerts
+    """
+    from datetime import date as _date
+
+    from .user_data import UserDataDB
+
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    udb = UserDataDB()
+    alerts = []
+
+    # 1) Screening gaps — check latest health screening
+    latest_screening = udb.get_health_screenings(clean)
+    if latest_screening:
+        answers = latest_screening.get("answers", {})
+        SCREENING_LABELS = {
+            "awv": "Annual Wellness Visit",
+            "flu": "Flu Shot",
+            "colonoscopy": "Colonoscopy",
+            "cholesterol": "Cholesterol / Blood Work",
+            "a1c": "Diabetes Screening (A1C)",
+            "fall_risk": "Fall Risk Assessment",
+            "mammogram": "Mammogram",
+            "bone_density": "Bone Density Scan",
+            "prostate": "Prostate (PSA) Screening",
+        }
+        gaps = [
+            SCREENING_LABELS.get(k, k)
+            for k, v in answers.items()
+            if v is False or v == "no"
+        ]
+        if gaps:
+            alerts.append({
+                "type": "screening_gap",
+                "severity": "warning",
+                "title": f"{len(gaps)} screening gap{'s' if len(gaps) != 1 else ''}",
+                "body": f"Missing: {', '.join(gaps[:4])}{'...' if len(gaps) > 4 else ''}",
+                "gaps": gaps,
+                "screened_at": latest_screening.get("created_at", ""),
+            })
+    else:
+        alerts.append({
+            "type": "screening_gap",
+            "severity": "info",
+            "title": "No screening on file",
+            "body": "This member has never completed a health screening.",
+            "gaps": [],
+        })
+
+    # 2) SDOH risk flags
+    latest_sdoh = udb.get_sdoh_screening(clean)
+    if latest_sdoh:
+        sdoh_flags = []
+        if latest_sdoh.get("transportation") == "yes":
+            sdoh_flags.append("Transportation barrier")
+        if latest_sdoh.get("food_insecurity") == "yes":
+            sdoh_flags.append("Food insecurity")
+        if latest_sdoh.get("social_isolation") in ("sometimes", "often", "always"):
+            sdoh_flags.append("Social isolation")
+        if latest_sdoh.get("housing_stability") == "yes":
+            sdoh_flags.append("Housing instability")
+        if sdoh_flags:
+            alerts.append({
+                "type": "sdoh_risk",
+                "severity": "warning",
+                "title": f"{len(sdoh_flags)} SDOH risk factor{'s' if len(sdoh_flags) != 1 else ''}",
+                "body": ", ".join(sdoh_flags),
+                "flags": sdoh_flags,
+            })
+
+    # 3) Benefits usage — check if member has plan, then check utilization
+    zoho_data = None
+    try:
+        zoho_data = search_contact_by_phone(clean)
+    except Exception:
+        pass
+
+    plan_number = None
+    if zoho_data:
+        plan_number = zoho_data.get("plan_number")
+    if not plan_number:
+        session = _get_store().find_session_by_phone(clean)
+        if session:
+            plan_number = session.get("data", {}).get("plan_number")
+
+    if plan_number:
+        try:
+            from .cms_lookup import CMSLookup
+            cms = CMSLookup()
+            today = _date.today()
+
+            # OTC allowance check
+            otc = cms.get_otc_allowance(plan_number)
+            if otc and otc.get("has_otc") and otc.get("amount"):
+                amount_str = otc["amount"].replace("$", "").replace(",", "")
+                try:
+                    otc_cap = float(amount_str)
+                    period = otc.get("period", "Monthly")
+                    totals = udb.get_current_period_totals(clean, {"otc": period})
+                    spent = totals.get("otc", 0)
+                    remaining = otc_cap - spent
+                    pct_used = round(spent / otc_cap * 100) if otc_cap > 0 else 0
+
+                    if pct_used < 25:
+                        alerts.append({
+                            "type": "otc_underuse",
+                            "severity": "info",
+                            "title": f"${remaining:.0f} OTC allowance unused",
+                            "body": f"Only {pct_used}% of ${otc_cap:.0f}/{period.lower()} OTC benefit used. Remind member to order health essentials.",
+                            "cap": otc_cap,
+                            "spent": spent,
+                            "remaining": remaining,
+                            "period": period,
+                        })
+                except (ValueError, TypeError):
+                    pass
+
+            # Flu shot season check (Sept-Mar)
+            if today.month >= 9 or today.month <= 3:
+                if latest_screening:
+                    flu_done = latest_screening.get("answers", {}).get("flu")
+                    if not flu_done:
+                        alerts.append({
+                            "type": "flu_season",
+                            "severity": "warning",
+                            "title": "Flu season — no flu shot recorded",
+                            "body": "It's flu season and this member hasn't reported getting their flu shot. Covered at $0 under most plans.",
+                        })
+        except Exception as e:
+            log.warning("Utilization alert check failed for ***%s: %s", clean[-4:], type(e).__name__)
+
+    # 4) Medication refill alerts
+    refill_alerts = udb.get_refill_alerts(clean)
+    for ra in refill_alerts:
+        alerts.append({
+            "type": "refill_due",
+            "severity": "warning",
+            "title": f"{ra['drug_name']} refill due",
+            "body": f"Due in {ra.get('days_until_refill', '?')} days ({ra.get('refill_due_date', 'unknown')})",
+        })
+
+    return {"alerts": alerts}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  F: SECURE MESSAGING (agent ↔ member)
+# ════════════════════════════════════════════════════════════════════════════
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  K: BULK OUTREACH / CAMPAIGN MANAGEMENT
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class CampaignCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    cohort_type: str = Field(..., pattern=r"^(screening_gap|otc_underuse|sdoh_flag|custom)$")
+    cohort_filter: dict = Field(default_factory=dict)
+    message_template: str = Field(..., min_length=1, max_length=1600)
+
+
+@router.get("/campaigns")
+async def list_campaigns(
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """List all campaigns."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaigns = udb.get_campaigns()
+    return {"campaigns": campaigns}
+
+
+@router.post("/campaigns")
+async def create_campaign(
+    body: CampaignCreate,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Create a new campaign (draft status)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.create_campaign(
+        name=body.name,
+        cohort_type=body.cohort_type,
+        cohort_filter=body.cohort_filter,
+        message_template=body.message_template,
+        created_by=payload.get("sub", "unknown"),
+    )
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create_campaign",
+        resource="campaign",
+        resource_id=str(campaign.get("id", "")),
+        ip_address=request.client.host if request.client else "",
+        detail=f"cohort={body.cohort_type}",
+    )
+    return {"campaign": campaign}
+
+
+@router.get("/campaigns/{campaign_id}")
+async def get_campaign(
+    campaign_id: int,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Get campaign details."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    return {"campaign": campaign}
+
+
+@router.get("/campaigns/{campaign_id}/preview")
+async def preview_campaign_cohort(
+    campaign_id: int,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Preview the cohort that will receive the campaign. Returns count and sample."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+
+    cohort = _resolve_cohort(udb, campaign["cohort_type"], campaign["cohort_filter"])
+    return {
+        "total": len(cohort),
+        "sample": [{"phone_last4": p[-4:]} for p in cohort[:10]],
+    }
+
+
+@router.post("/campaigns/{campaign_id}/send")
+async def send_campaign(
+    campaign_id: int,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Send the campaign SMS to all cohort members."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    campaign = udb.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    if campaign["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Campaign already sent.")
+
+    # Resolve cohort
+    cohort = _resolve_cohort(udb, campaign["cohort_type"], campaign["cohort_filter"])
+    if not cohort:
+        raise HTTPException(status_code=400, detail="No recipients match the cohort criteria.")
+
+    # Store recipients
+    udb.set_campaign_recipients(campaign_id, cohort)
+
+    # Send SMS via Twilio
+    sms = create_sms_provider()
+    sent = 0
+    failed = 0
+    for phone in cohort:
+        try:
+            success = _send_campaign_sms(sms, phone, campaign["message_template"])
+            if success:
+                sent += 1
+            else:
+                failed += 1
+        except Exception as e:
+            log.warning("Campaign SMS failed for ...%s: %s", phone[-4:], e)
+            failed += 1
+
+    udb.update_campaign_status(campaign_id, "sent", sent, failed)
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="send_campaign",
+        resource="campaign",
+        resource_id=str(campaign_id),
+        ip_address=request.client.host if request.client else "",
+        detail=f"sent={sent} failed={failed} total={len(cohort)}",
+    )
+
+    return {
+        "status": "sent",
+        "total_recipients": len(cohort),
+        "sent": sent,
+        "failed": failed,
+    }
+
+
+def _resolve_cohort(udb, cohort_type: str, cohort_filter: dict) -> list[str]:
+    """Resolve a cohort type + filter to a list of phone numbers."""
+    if cohort_type == "screening_gap":
+        gap_type = cohort_filter.get("gap_type")
+        members = udb.get_cohort_screening_gaps(gap_type)
+        return [m["phone"] for m in members]
+    elif cohort_type == "otc_underuse":
+        min_unused = cohort_filter.get("min_unused", 100.0)
+        members = udb.get_cohort_otc_underuse(min_unused)
+        return [m["phone"] for m in members]
+    elif cohort_type == "sdoh_flag":
+        flag_type = cohort_filter.get("flag_type")
+        members = udb.get_cohort_sdoh_flags(flag_type)
+        return [m["phone"] for m in members]
+    elif cohort_type == "custom":
+        # Custom phone list provided directly
+        return cohort_filter.get("phones", [])
+    return []
+
+
+def _send_campaign_sms(sms, phone: str, message: str) -> bool:
+    """Send a campaign SMS message (not OTP — uses general messaging)."""
+    try:
+        from twilio.rest import Client
+        if hasattr(sms, 'client') and isinstance(sms.client, Client):
+            msg = sms.client.messages.create(
+                body=message,
+                from_=sms.from_number,
+                to=f"+1{phone}",
+            )
+            log.info("Campaign SMS sent to ...%s: sid=%s", phone[-4:], msg.sid)
+            return True
+        else:
+            # Console provider — just log
+            log.info("[DEV CAMPAIGN SMS] To: ...%s Message: %s", phone[-4:], message[:50])
+            return True
+    except Exception as e:
+        log.error("Campaign SMS failed for ...%s: %s", phone[-4:], e)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  L: AGENT CALL NOTES / CRM INTEGRATION
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class CallNoteCreate(BaseModel):
+    subject: str = Field(..., min_length=1, max_length=200)
+    body: str = Field(..., min_length=1, max_length=5000)
+    call_type: str = Field("outbound", pattern=r"^(inbound|outbound|follow_up)$")
+    duration_minutes: int = Field(0, ge=0, le=999)
+    sync_to_zoho: bool = True
+
+
+@router.get("/members/{phone}/call-notes")
+async def get_call_notes(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get all call notes for a member."""
+    from .user_data import UserDataDB
+    clean = _normalize_phone(phone)
+    udb = UserDataDB()
+    notes = udb.get_call_notes(clean)
+    return {"notes": notes}
+
+
+@router.post("/members/{phone}/call-notes")
+async def create_call_note(
+    phone: str,
+    body: CallNoteCreate,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Create a call note for a member, optionally syncing to Zoho CRM."""
+    from .user_data import UserDataDB
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    udb = UserDataDB()
+    agent_name = payload.get("sub", "Agent")
+    note = udb.create_call_note(
+        phone=clean,
+        subject=body.subject,
+        body=body.body,
+        call_type=body.call_type,
+        duration_minutes=body.duration_minutes,
+        agent_name=agent_name,
+    )
+
+    # Sync to Zoho if requested
+    zoho_synced = False
+    zoho_error = ""
+    if body.sync_to_zoho:
+        try:
+            zoho_synced = _sync_note_to_zoho(clean, body.subject, body.body, agent_name)
+        except Exception as e:
+            zoho_error = str(e)
+            log.warning("Zoho note sync failed for ...%s: %s", clean[-4:], e)
+
+    if zoho_synced:
+        udb.mark_note_synced(note["id"])
+
+    get_audit_log().record(
+        actor=agent_name,
+        action="create_call_note",
+        resource="call_note",
+        resource_id=f"***{clean[-4:]}:{note.get('id', '')}",
+        ip_address=request.client.host if request.client else "",
+        detail=f"type={body.call_type} zoho_synced={zoho_synced}",
+    )
+
+    return {
+        "note": note,
+        "zoho_synced": zoho_synced,
+        "zoho_error": zoho_error,
+    }
+
+
+def _sync_note_to_zoho(phone: str, subject: str, body: str, agent_name: str) -> bool:
+    """Push a call note to the Zoho CRM contact record."""
+    from .zoho_client import API_BASE, _http, get_access_token
+
+    # First find the contact
+    contact = search_contact_by_phone(phone)
+    if not contact or not contact.get("id"):
+        log.warning("Zoho sync: no contact found for ...%s", phone[-4:])
+        return False
+
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json",
+    }
+
+    # Create a note on the contact
+    note_data = {
+        "data": [{
+            "Note_Title": subject,
+            "Note_Content": f"[{agent_name}] {body}",
+            "Parent_Id": contact["id"],
+            "se_module": "Contacts",
+        }]
+    }
+
+    resp = _http.post(
+        f"{API_BASE}/Notes",
+        headers=headers,
+        json=note_data,
+        timeout=15,
+    )
+
+    if resp.status_code in (200, 201):
+        log.info("Zoho note synced for contact %s", contact["id"])
+        return True
+    else:
+        log.warning("Zoho note sync returned %s: %s", resp.status_code, resp.text[:200])
+        return False
+
+
+# ── Caregiver Management (Admin) ────────────────────────────────────────────
+
+_caregiver_db = None
+
+
+def _get_caregiver_db() -> CaregiverDB:
+    global _caregiver_db
+    if _caregiver_db is None:
+        _caregiver_db = CaregiverDB()
+    return _caregiver_db
+
+
+@router.get("/caregivers")
+def admin_list_caregivers(
+    status: Optional[str] = None,
+    limit: int = 100,
+    admin: dict = Depends(require_admin),
+):
+    """List all caregiver links, optionally filtered by status."""
+    db = _get_caregiver_db()
+    links = db.admin_get_all_links(status=status, limit=limit)
+
+    get_audit_log().record(
+        actor=admin.get("email", "admin"),
+        action="admin_list_caregivers",
+        resource="caregiver",
+        detail=f"status={status}, count={len(links)}",
+    )
+
+    return {"caregivers": links, "total": len(links)}
+
+
+@router.post("/caregivers/{invite_id}/revoke")
+def admin_revoke_caregiver(
+    invite_id: int,
+    request: Request,
+    admin: dict = Depends(require_admin),
+):
+    """Admin revokes a caregiver link."""
+    db = _get_caregiver_db()
+    success = db.admin_revoke(invite_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Invite not found or already revoked.")
+
+    get_audit_log().record(
+        actor=admin.get("email", "admin"),
+        action="admin_revoke_caregiver",
+        resource="caregiver",
+        detail=f"invite_{invite_id}_revoked",
+        ip_address=request.client.host if request.client else "",
+    )
+
+    return {"success": True}
+
+
+@router.get("/caregivers/access-log")
+def admin_caregiver_access_log(
+    member_phone: str = "",
+    limit: int = 50,
+    admin: dict = Depends(require_admin),
+):
+    """View caregiver access logs for a specific member."""
+    if not member_phone:
+        return {"logs": [], "message": "Provide member_phone query parameter."}
+
+    db = _get_caregiver_db()
+    logs = db.get_access_log(member_phone, limit=limit)
+
+    return {"logs": logs, "total": len(logs)}

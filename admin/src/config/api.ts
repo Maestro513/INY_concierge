@@ -43,4 +43,22 @@ export const ENDPOINTS = {
   // Screening & SDOH phone intake
   MEMBER_HEALTH_SCREENING: (phone: string) => `/api/admin/members/${phone}/health-screening`,
   MEMBER_SDOH_SCREENING: (phone: string) => `/api/admin/members/${phone}/sdoh-screening`,
+
+  // Notifications
+  MEMBER_NOTIFICATIONS: (phone: string) => `/api/admin/members/${phone}/notifications`,
+
+  // Screening / SDOH history
+  MEMBER_SCREENING_HISTORY: (phone: string) => `/api/admin/members/${phone}/screening-history`,
+
+  // Utilization alerts
+  MEMBER_UTILIZATION_ALERTS: (phone: string) => `/api/admin/members/${phone}/utilization-alerts`,
+
+  // Campaigns
+  CAMPAIGNS: '/api/admin/campaigns',
+  CAMPAIGN: (id: number) => `/api/admin/campaigns/${id}`,
+  CAMPAIGN_PREVIEW: (id: number) => `/api/admin/campaigns/${id}/preview`,
+  CAMPAIGN_SEND: (id: number) => `/api/admin/campaigns/${id}/send`,
+
+  // Call Notes
+  MEMBER_CALL_NOTES: (phone: string) => `/api/admin/members/${phone}/call-notes`,
 } as const;

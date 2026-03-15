@@ -3,8 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Phone, MapPin, Mail, Calendar, Shield,
   KeyRound, Pill, Send, FileText, Check,
-  Plus, Trash2, Activity, Eye, AlertCircle,
+  Plus, Trash2, Activity, Eye, AlertCircle, Bell,
   ClipboardCheck, Heart, Car, UtensilsCrossed, Users, Home,
+  AlertTriangle, Clock, History, NotebookPen,
+  PhoneIncoming, PhoneOutgoing, PhoneForwarded, RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -280,6 +282,201 @@ export default function MemberDetailPage() {
       .finally(() => setSdohSaving(false));
   }
 
+  // Notification dialog
+  const [notifDialogOpen, setNotifDialogOpen] = useState(false);
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifBody, setNotifBody] = useState('');
+  const [notifCategory, setNotifCategory] = useState('general');
+  const [notifSending, setNotifSending] = useState(false);
+  const [notifSent, setNotifSent] = useState(false);
+  const [notifError, setNotifError] = useState('');
+  const [notifResult, setNotifResult] = useState<{ push_delivered: boolean; push_tokens_found: number } | null>(null);
+
+  // Notification history
+  const [notifications, setNotifications] = useState<Array<{ id: number; title: string; body: string; category: string; read: number; created_at: string }>>([]);
+  const [notifHistoryLoaded, setNotifHistoryLoaded] = useState(false);
+
+  async function handleSendNotification() {
+    if (!member) return;
+    setNotifSending(true);
+    setNotifError('');
+    try {
+      const res = await client.post(ENDPOINTS.MEMBER_NOTIFICATIONS(member.phone), {
+        title: notifTitle,
+        body: notifBody,
+        category: notifCategory,
+      });
+      setNotifSent(true);
+      setNotifResult(res.data);
+      // Refresh history
+      loadNotificationHistory();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      setNotifError(axiosErr.response?.data?.detail || 'Failed to send notification.');
+    } finally {
+      setNotifSending(false);
+    }
+  }
+
+  function loadNotificationHistory() {
+    if (!member) return;
+    client
+      .get(ENDPOINTS.MEMBER_NOTIFICATIONS(member.phone))
+      .then((res) => {
+        setNotifications(res.data?.notifications || []);
+        setNotifHistoryLoaded(true);
+      })
+      .catch(() => {});
+  }
+
+  function closeNotifDialog() {
+    setNotifDialogOpen(false);
+    setNotifSent(false);
+    setNotifError('');
+    setNotifResult(null);
+    setNotifTitle('');
+    setNotifBody('');
+    setNotifCategory('general');
+  }
+
+  const NOTIF_TEMPLATES = [
+    { label: 'OTC Allowance Reminder', title: 'Use Your OTC Allowance!', body: 'You still have unused OTC benefits this quarter. Visit your plan\'s OTC catalog to order health essentials at no cost.' },
+    { label: 'Appointment Confirmed', title: 'Appointment Confirmed', body: 'Your upcoming appointment has been confirmed. Please arrive 15 minutes early with your insurance card.' },
+    { label: 'Screening Reminder', title: 'Preventive Screening Due', body: 'You may be due for a preventive health screening. These are covered at $0 under your plan. Call us to schedule.' },
+    { label: 'Benefits Renewal', title: 'Your Benefits Reset Soon', body: 'Your plan benefits reset on January 1st. Make sure to use your remaining allowances before they expire.' },
+  ];
+
+  // ── C: Screening/SDOH History ──
+  interface ScreeningEntry {
+    id: number;
+    gender: string;
+    answers: Record<string, boolean>;
+    gaps: string[];
+    completed: string[];
+    gap_count: number;
+    completed_count: number;
+    total_count: number;
+    created_at: string;
+  }
+  interface SdohEntry {
+    id: number;
+    transportation: string;
+    food_insecurity: string;
+    social_isolation: string;
+    housing_stability: string;
+    flags: string[];
+    flag_count: number;
+    created_at: string;
+  }
+  const [screeningHistory, setScreeningHistory] = useState<ScreeningEntry[]>([]);
+  const [sdohHistory, setSdohHistory] = useState<SdohEntry[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  function loadHistory() {
+    if (!member || historyLoaded) return;
+    client
+      .get(ENDPOINTS.MEMBER_SCREENING_HISTORY(member.phone))
+      .then((res) => {
+        setScreeningHistory(res.data?.screenings || []);
+        setSdohHistory(res.data?.sdoh || []);
+        setHistoryLoaded(true);
+      })
+      .catch(() => {});
+  }
+
+  // ── E: Utilization Alerts ──
+  interface UtilAlert {
+    type: string;
+    severity: string;
+    title: string;
+    body: string;
+    gaps?: string[];
+    flags?: string[];
+    cap?: number;
+    spent?: number;
+    remaining?: number;
+    period?: string;
+  }
+  const [utilAlerts, setUtilAlerts] = useState<UtilAlert[]>([]);
+  const [alertsLoaded, setAlertsLoaded] = useState(false);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+
+  function loadAlerts() {
+    if (!member || alertsLoaded) return;
+    setAlertsLoading(true);
+    client
+      .get(ENDPOINTS.MEMBER_UTILIZATION_ALERTS(member.phone))
+      .then((res) => {
+        setUtilAlerts(res.data?.alerts || []);
+        setAlertsLoaded(true);
+      })
+      .catch(() => {})
+      .finally(() => setAlertsLoading(false));
+  }
+
+  // ── L: Call Notes ──
+  interface CallNote {
+    id: number;
+    subject: string;
+    body: string;
+    call_type: string;
+    duration_minutes: number;
+    agent_name: string;
+    zoho_synced: number;
+    created_at: string;
+  }
+  const [callNotes, setCallNotes] = useState<CallNote[]>([]);
+  const [callNotesLoaded, setCallNotesLoaded] = useState(false);
+  const [callNoteDialogOpen, setCallNoteDialogOpen] = useState(false);
+  const [noteSubject, setNoteSubject] = useState('');
+  const [noteBody, setNoteBody] = useState('');
+  const [noteCallType, setNoteCallType] = useState('outbound');
+  const [noteDuration, setNoteDuration] = useState('');
+  const [noteSyncToZoho, setNoteSyncToZoho] = useState(true);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState('');
+  const [noteResult, setNoteResult] = useState<{ zoho_synced: boolean; zoho_error: string } | null>(null);
+
+  function loadCallNotes() {
+    if (!member) return;
+    client
+      .get(ENDPOINTS.MEMBER_CALL_NOTES(member.phone))
+      .then((res) => {
+        setCallNotes(res.data?.notes || []);
+        setCallNotesLoaded(true);
+      })
+      .catch(() => {});
+  }
+
+  async function handleCreateCallNote() {
+    if (!member || !noteSubject.trim() || !noteBody.trim()) return;
+    setNoteSaving(true);
+    setNoteError('');
+    setNoteResult(null);
+    try {
+      const res = await client.post(ENDPOINTS.MEMBER_CALL_NOTES(member.phone), {
+        subject: noteSubject.trim(),
+        body: noteBody.trim(),
+        call_type: noteCallType,
+        duration_minutes: parseInt(noteDuration) || 0,
+        sync_to_zoho: noteSyncToZoho,
+      });
+      setCallNotes([res.data.note, ...callNotes]);
+      setNoteResult({
+        zoho_synced: res.data.zoho_synced,
+        zoho_error: res.data.zoho_error || '',
+      });
+      setNoteSubject('');
+      setNoteBody('');
+      setNoteDuration('');
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to save note';
+      setNoteError(detail);
+    } finally {
+      setNoteSaving(false);
+    }
+  }
+
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderError, setReminderError] = useState('');
 
@@ -413,6 +610,9 @@ export default function MemberDetailPage() {
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setOtpDialogOpen(true)}>
             <KeyRound className="mr-1.5 h-3.5 w-3.5" /> Send OTP
           </Button>
+          <Button variant="default" size="sm" className="h-8 text-xs" onClick={() => setNotifDialogOpen(true)}>
+            <Bell className="mr-1.5 h-3.5 w-3.5" /> Send Notification
+          </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs">
             <Phone className="mr-1.5 h-3.5 w-3.5" /> Call
           </Button>
@@ -545,6 +745,18 @@ export default function MemberDetailPage() {
               </TabsTrigger>
               <TabsTrigger value="sdoh" className="text-xs data-[state=active]:bg-background" onClick={loadSdohData}>
                 <Heart className="mr-1.5 h-3.5 w-3.5" /> Well-Being
+              </TabsTrigger>
+              <TabsTrigger value="history" className="text-xs data-[state=active]:bg-background" onClick={loadHistory}>
+                <History className="mr-1.5 h-3.5 w-3.5" /> History
+              </TabsTrigger>
+              <TabsTrigger value="alerts" className="text-xs data-[state=active]:bg-background" onClick={loadAlerts}>
+                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" /> Alerts
+              </TabsTrigger>
+<TabsTrigger value="call-notes" className="text-xs data-[state=active]:bg-background" onClick={loadCallNotes}>
+                <NotebookPen className="mr-1.5 h-3.5 w-3.5" /> Call Notes
+              </TabsTrigger>
+              <TabsTrigger value="notifications" className="text-xs data-[state=active]:bg-background" onClick={loadNotificationHistory}>
+                <Bell className="mr-1.5 h-3.5 w-3.5" /> Notifications
               </TabsTrigger>
             </TabsList>
 
@@ -845,6 +1057,356 @@ export default function MemberDetailPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            {/* C: Screening/SDOH History Tab */}
+            <TabsContent value="history" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Screening & SDOH History</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Timeline of all completed screenings and social determinant assessments.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {!historyLoaded ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : screeningHistory.length === 0 && sdohHistory.length === 0 ? (
+                    <div className="text-center py-8">
+                      <ClipboardCheck className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">No screenings or SDOH assessments on file</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Merge and sort by date */}
+                      {[
+                        ...screeningHistory.map((s) => ({ ...s, _type: 'screening' as const })),
+                        ...sdohHistory.map((s) => ({ ...s, _type: 'sdoh' as const })),
+                      ]
+                        .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+                        .map((entry, i) => (
+                          <div key={`${entry._type}-${entry.id}`} className="relative flex gap-4">
+                            {/* Timeline line */}
+                            {i > 0 && (
+                              <div className="absolute left-[15px] -top-4 w-px h-4 bg-border" />
+                            )}
+                            <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                              entry._type === 'screening' ? 'bg-chart-2/10' : 'bg-chart-4/10'
+                            }`}>
+                              {entry._type === 'screening' ? (
+                                <ClipboardCheck className="h-4 w-4 text-chart-2" />
+                              ) : (
+                                <Heart className="h-4 w-4 text-chart-4" />
+                              )}
+                            </div>
+                            <div className="flex-1 rounded-lg border border-border p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-semibold">
+                                    {entry._type === 'screening' ? 'Health Screening' : 'SDOH Assessment'}
+                                  </p>
+                                  {entry._type === 'screening' && 'gender' in entry && (
+                                    <Badge variant="secondary" className="text-[10px]">{(entry as ScreeningEntry).gender}</Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  <Clock className="h-3 w-3" />
+                                  {entry.created_at}
+                                </div>
+                              </div>
+
+                              {entry._type === 'screening' ? (() => {
+                                const s = entry as ScreeningEntry;
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-4 text-xs">
+                                      <span className="text-success font-medium">{s.completed_count} completed</span>
+                                      <span className="text-warning font-medium">{s.gap_count} gap{s.gap_count !== 1 ? 's' : ''}</span>
+                                      <span className="text-muted-foreground">{s.total_count} total</span>
+                                    </div>
+                                    {s.gaps.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {s.gaps.map((g) => (
+                                          <Badge key={g} variant="secondary" className="text-[10px] bg-warning/10 text-warning">
+                                            {g}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })() : (() => {
+                                const s = entry as SdohEntry;
+                                return (
+                                  <div className="space-y-2">
+                                    {s.flag_count > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {s.flags.map((f) => (
+                                          <Badge key={f} variant="secondary" className="text-[10px] bg-destructive/10 text-destructive">
+                                            {f}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-success font-medium">No risk factors identified</p>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* E: Utilization Alerts Tab */}
+            <TabsContent value="alerts" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Benefits Utilization Alerts</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Automated checks for unused benefits, screening gaps, and upcoming deadlines.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {alertsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : !alertsLoaded ? (
+                    <div className="text-center py-8">
+                      <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">Click to load alerts</p>
+                    </div>
+                  ) : utilAlerts.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Check className="mx-auto h-8 w-8 text-success/60" />
+                      <p className="mt-2 text-sm text-success font-medium">No alerts — member is on track!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {utilAlerts.map((alert, i) => (
+                        <div
+                          key={i}
+                          className={`rounded-lg border p-4 ${
+                            alert.severity === 'warning'
+                              ? 'border-warning/30 bg-warning/5'
+                              : alert.severity === 'info'
+                                ? 'border-primary/30 bg-primary/5'
+                                : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
+                              alert.severity === 'warning' ? 'bg-warning/10' : 'bg-primary/10'
+                            }`}>
+                              {alert.type === 'screening_gap' ? (
+                                <ClipboardCheck className={`h-4 w-4 ${alert.severity === 'warning' ? 'text-warning' : 'text-primary'}`} />
+                              ) : alert.type === 'sdoh_risk' ? (
+                                <Heart className="h-4 w-4 text-warning" />
+                              ) : alert.type === 'otc_underuse' ? (
+                                <FileText className="h-4 w-4 text-primary" />
+                              ) : alert.type === 'flu_season' ? (
+                                <AlertTriangle className="h-4 w-4 text-warning" />
+                              ) : alert.type === 'refill_due' ? (
+                                <Pill className="h-4 w-4 text-warning" />
+                              ) : (
+                                <AlertCircle className="h-4 w-4 text-primary" />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold">{alert.title}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{alert.body}</p>
+                              {alert.type === 'otc_underuse' && alert.cap && (
+                                <div className="mt-2">
+                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                                    <span>${alert.spent?.toFixed(0)} spent</span>
+                                    <span>${alert.cap.toFixed(0)} / {alert.period?.toLowerCase()}</span>
+                                  </div>
+                                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-primary/60 transition-all"
+                                      style={{ width: `${Math.min(100, ((alert.spent || 0) / alert.cap) * 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                              {alert.type === 'screening_gap' && alert.gaps && alert.gaps.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {alert.gaps.map((g) => (
+                                    <Badge key={g} variant="secondary" className="text-[10px] bg-warning/10 text-warning">{g}</Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            {/* Quick action: send notification about this alert */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] shrink-0"
+                              onClick={() => {
+                                setNotifTitle(alert.title);
+                                setNotifBody(alert.body);
+                                setNotifCategory(
+                                  alert.type === 'screening_gap' ? 'screening' :
+                                  alert.type === 'otc_underuse' ? 'benefits_reminder' :
+                                  alert.type === 'refill_due' ? 'medication' : 'general'
+                                );
+                                setNotifDialogOpen(true);
+                              }}
+                            >
+                              <Bell className="mr-1 h-3 w-3" /> Notify
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* L: Call Notes Tab */}
+            <TabsContent value="call-notes" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-sm font-semibold">Call Notes</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Log call interactions with {member.first_name}. Notes sync to Zoho CRM for a complete member record.
+                      </p>
+                    </div>
+                    <Button size="sm" className="h-7 text-xs" onClick={() => { setCallNoteDialogOpen(true); setNoteResult(null); setNoteError(''); }}>
+                      <Plus className="mr-1.5 h-3 w-3" /> Log Call
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {!callNotesLoaded ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : callNotes.length === 0 ? (
+                    <div className="text-center py-8">
+                      <NotebookPen className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">No call notes yet</p>
+                      <Button size="sm" className="mt-3 text-xs" onClick={() => { setCallNoteDialogOpen(true); setNoteResult(null); }}>
+                        Log First Call
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {callNotes.map((note) => (
+                        <div key={note.id} className="rounded-lg border border-border/50 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3 flex-1">
+                              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                                {note.call_type === 'inbound' ? (
+                                  <PhoneIncoming className="h-4 w-4 text-primary" />
+                                ) : note.call_type === 'follow_up' ? (
+                                  <PhoneForwarded className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <PhoneOutgoing className="h-4 w-4 text-primary" />
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold">{note.subject}</p>
+                                <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{note.body}</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              <Badge variant="secondary" className="text-[10px]">
+                                {note.call_type === 'inbound' ? 'Inbound' : note.call_type === 'follow_up' ? 'Follow-up' : 'Outbound'}
+                              </Badge>
+                              {note.zoho_synced ? (
+                                <Badge className="text-[10px] bg-success/10 text-success border-success/20">
+                                  <RefreshCw className="mr-1 h-2.5 w-2.5" /> Zoho Synced
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-[10px] text-muted-foreground">
+                                  Local Only
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 mt-2 pl-11">
+                            <span className="text-[10px] text-muted-foreground">{note.agent_name}</span>
+                            {note.duration_minutes > 0 && (
+                              <span className="text-[10px] text-muted-foreground">{note.duration_minutes} min</span>
+                            )}
+                            <span className="text-[10px] text-muted-foreground">{note.created_at}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Notifications Tab */}
+            <TabsContent value="notifications" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold">Notification History</CardTitle>
+                    <Button size="sm" className="h-7 text-xs" onClick={() => setNotifDialogOpen(true)}>
+                      <Plus className="mr-1.5 h-3 w-3" /> Send New
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {!notifHistoryLoaded ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : notifications.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Bell className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">No notifications sent yet</p>
+                      <Button size="sm" className="mt-3 text-xs" onClick={() => setNotifDialogOpen(true)}>
+                        Send First Notification
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`rounded-lg border p-3 transition-colors ${
+                            n.read ? 'border-border/50 bg-muted/10 opacity-70' : 'border-border bg-background'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3 flex-1">
+                              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                                <Bell className="h-4 w-4 text-primary" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold">{n.title}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge variant="secondary" className="text-[10px]">{n.category}</Badge>
+                              <Badge variant="secondary" className={`text-[10px] ${n.read ? 'bg-success/10 text-success' : 'bg-chart-4/10 text-chart-4'}`}>
+                                {n.read ? 'Read' : 'Unread'}
+                              </Badge>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-2 pl-11">{n.created_at}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
           </Tabs>
         </div>
       </div>
@@ -985,6 +1547,230 @@ export default function MemberDetailPage() {
                   <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Sending...</>
                 ) : (
                   <><KeyRound className="mr-1.5 h-3.5 w-3.5" /> Send OTP</>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Send Notification Dialog ── */}
+      <Dialog open={notifDialogOpen} onOpenChange={(open) => { if (!open) closeNotifDialog(); else setNotifDialogOpen(true); }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Send Notification</DialogTitle>
+            <DialogDescription className="text-sm">
+              Push a notification to {member.first_name}'s device. They'll see it in the app and as a push alert.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!notifSent ? (
+            <div className="space-y-4 py-2">
+              {/* Quick templates */}
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Templates</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {NOTIF_TEMPLATES.map((t) => (
+                    <Button
+                      key={t.label}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => { setNotifTitle(t.title); setNotifBody(t.body); }}
+                    >
+                      {t.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</Label>
+                <Select value={notifCategory} onValueChange={setNotifCategory}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="general">General</SelectItem>
+                    <SelectItem value="benefits_reminder">Benefits Reminder</SelectItem>
+                    <SelectItem value="appointment">Appointment</SelectItem>
+                    <SelectItem value="screening">Screening</SelectItem>
+                    <SelectItem value="medication">Medication</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Title</Label>
+                <Input
+                  value={notifTitle}
+                  onChange={(e) => setNotifTitle(e.target.value)}
+                  placeholder="e.g. You still have $120 in OTC allowance!"
+                  className="h-9"
+                  maxLength={200}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Message</Label>
+                <textarea
+                  value={notifBody}
+                  onChange={(e) => setNotifBody(e.target.value)}
+                  placeholder="Write a message for the member..."
+                  className="flex w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                  rows={3}
+                  maxLength={1000}
+                />
+                <p className="text-[10px] text-muted-foreground text-right">{notifBody.length}/1000</p>
+              </div>
+
+              {notifError && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span className="text-xs">{notifError}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-6">
+              <div className="rounded-lg border border-success/30 bg-success/5 p-4 text-center">
+                <Check className="mx-auto h-8 w-8 text-success mb-2" />
+                <p className="text-sm font-semibold text-success">Notification Sent!</p>
+                {notifResult && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Push delivery: {notifResult.push_delivered ? (
+                        <span className="text-success font-medium">Delivered</span>
+                      ) : notifResult.push_tokens_found === 0 ? (
+                        <span className="text-warning font-medium">No push token registered (member hasn't enabled notifications)</span>
+                      ) : (
+                        <span className="text-warning font-medium">Failed — saved to inbox</span>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeNotifDialog} className="text-xs">
+              {notifSent ? 'Close' : 'Cancel'}
+            </Button>
+            {!notifSent && (
+              <Button onClick={handleSendNotification} disabled={!notifTitle || !notifBody || notifSending} className="text-xs">
+                {notifSending ? (
+                  <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Sending...</>
+                ) : (
+                  <><Bell className="mr-1.5 h-3.5 w-3.5" /> Send Notification</>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ── Call Note Dialog ── */}
+      <Dialog open={callNoteDialogOpen} onOpenChange={(open) => { setCallNoteDialogOpen(open); if (!open) { setNoteError(''); setNoteResult(null); } }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Log Call Note</DialogTitle>
+            <DialogDescription className="text-sm">
+              Record a call interaction with {member.first_name}. Notes will be saved locally and optionally synced to Zoho CRM.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!noteResult ? (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Call Type</Label>
+                  <Select value={noteCallType} onValueChange={setNoteCallType}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="outbound">Outbound</SelectItem>
+                      <SelectItem value="inbound">Inbound</SelectItem>
+                      <SelectItem value="follow_up">Follow-up</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Duration (minutes)</Label>
+                  <Input type="number" value={noteDuration} onChange={(e) => setNoteDuration(e.target.value)} placeholder="e.g. 15" className="h-9" />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subject</Label>
+                <Input value={noteSubject} onChange={(e) => setNoteSubject(e.target.value)} placeholder="e.g. Benefits review, Appointment scheduling" className="h-9" maxLength={200} />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</Label>
+                <textarea
+                  value={noteBody}
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  placeholder="Describe the call interaction, topics discussed, action items..."
+                  className="flex w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                  rows={4}
+                  maxLength={5000}
+                />
+                <p className="text-[10px] text-muted-foreground text-right">{noteBody.length}/5000</p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="syncZoho"
+                  checked={noteSyncToZoho}
+                  onChange={(e) => setNoteSyncToZoho(e.target.checked)}
+                  className="h-4 w-4 rounded border-input"
+                />
+                <label htmlFor="syncZoho" className="text-xs text-muted-foreground">
+                  Sync to Zoho CRM (add as note on contact record)
+                </label>
+              </div>
+
+              {noteError && (
+                <div className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span className="text-xs">{noteError}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-6">
+              <div className="rounded-lg border border-success/30 bg-success/5 p-4 text-center">
+                <Check className="mx-auto h-8 w-8 text-success mb-2" />
+                <p className="text-sm font-semibold text-success">Call Note Saved</p>
+                <div className="mt-2">
+                  {noteResult.zoho_synced ? (
+                    <p className="text-xs text-success flex items-center justify-center gap-1">
+                      <RefreshCw className="h-3 w-3" /> Synced to Zoho CRM
+                    </p>
+                  ) : noteResult.zoho_error ? (
+                    <p className="text-xs text-warning">
+                      Zoho sync failed: {noteResult.zoho_error} (saved locally)
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Saved locally (Zoho sync not requested)</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCallNoteDialogOpen(false); setNoteResult(null); setNoteError(''); }} className="text-xs">
+              {noteResult ? 'Close' : 'Cancel'}
+            </Button>
+            {!noteResult && (
+              <Button onClick={handleCreateCallNote} disabled={!noteSubject || !noteBody || noteSaving} className="text-xs">
+                {noteSaving ? (
+                  <><div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Saving...</>
+                ) : (
+                  <><NotebookPen className="mr-1.5 h-3.5 w-3.5" /> Save Note</>
                 )}
               </Button>
             )}

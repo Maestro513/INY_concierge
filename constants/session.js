@@ -9,6 +9,10 @@
 let _member = null;
 let _sessionId = null;
 
+// Caregiver state
+let _caregiverInfo = null; // { isCaregiverOnly, pendingInvite, isCaregiverFor, viewingMember }
+let _viewingAsMember = null; // When caregiver is viewing a member's data
+
 // Pending OTP context — avoids passing phone via URL params
 let _pendingOtp = null;
 
@@ -36,6 +40,34 @@ export function getMemberSession() {
 export function clearMemberSession() {
   _member = null;
   _sessionId = null;
+  _caregiverInfo = null;
+  _viewingAsMember = null;
+}
+
+// ── Caregiver state ─────────────────────────────────────────
+
+export function setCaregiverInfo(info) {
+  _caregiverInfo = info ? { ...info } : null;
+}
+
+export function getCaregiverInfo() {
+  return _caregiverInfo;
+}
+
+export function setViewingAsMember(memberData) {
+  _viewingAsMember = memberData ? { ...memberData } : null;
+}
+
+export function getViewingAsMember() {
+  return _viewingAsMember;
+}
+
+export function isViewingAsCaregiver() {
+  return _viewingAsMember !== null;
+}
+
+export function clearCaregiverView() {
+  _viewingAsMember = null;
 }
 
 /**
