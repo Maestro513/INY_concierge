@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RADII, MOTION } from '../constants/theme';
@@ -29,6 +29,7 @@ export default function PhoneScreen() {
   const [focused, setFocused] = useState(false);
   const [checkingTrust, setCheckingTrust] = useState(true);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   // On mount, check if device is trusted → redirect to lock screen
   useEffect(() => {
@@ -166,7 +167,7 @@ export default function PhoneScreen() {
       {/* ── Bottom Section: Purple gradient card ── */}
       <KeyboardAvoidingView
         style={styles.cardSection}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <LinearGradient
           colors={['#9B6BD4', '#7B3FBF', '#6B2FAF']}
@@ -275,7 +276,7 @@ export default function PhoneScreen() {
           </View>
         </Animated.View>
         {/* Footer */}
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
           <Text style={styles.footerText}>Need help? </Text>
           <TouchableOpacity
             onPress={() => Linking.openURL('tel:' + CALL_NUMBER)}
@@ -430,7 +431,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 56,
     paddingTop: 12,
     marginTop: 'auto',
   },

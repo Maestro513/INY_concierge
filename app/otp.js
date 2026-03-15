@@ -12,7 +12,7 @@ import {
   Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RADII, MOTION } from '../constants/theme';
@@ -31,6 +31,7 @@ export default function OTPScreen() {
   const [resending, setResending] = useState(false);
   const refs = useRef([]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   // Entrance animations
   const iconOpacity = useRef(new Animated.Value(0)).current;
@@ -234,7 +235,7 @@ export default function OTPScreen() {
       {/* ── Bottom Section: Purple gradient ── */}
       <KeyboardAvoidingView
         style={s.cardSection}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <LinearGradient
           colors={['#9B6BD4', '#7B3FBF', '#6B2FAF']}
@@ -345,7 +346,7 @@ export default function OTPScreen() {
         </Animated.View>
 
         {/* Footer */}
-        <View style={s.footer}>
+        <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
           <Text style={s.footerText}>Need help? </Text>
           <TouchableOpacity
             onPress={() => Linking.openURL('tel:' + CALL_NUMBER)}
@@ -523,7 +524,6 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 56,
     paddingTop: 12,
     marginTop: 'auto',
   },

@@ -1213,7 +1213,7 @@ export default function VoiceHelp({
       )}
 
       {/* Bottom bar: text input left, Need help? + Call Us right */}
-      <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[s.inputBar, { paddingBottom: Math.max(insets.bottom, 24) }]}>
         <TextInput
           style={s.textInput}
           placeholder="Type your question..."
