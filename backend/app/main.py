@@ -47,6 +47,7 @@ from .persistent_store import PersistentStore
 from .providers.service import search_providers
 from .sms_provider import create_sms_provider
 from .sob_parser import extract_tier_copays, load_plan_text
+from .caregiver import CaregiverDB
 from .user_data import UserDataDB
 from .zoho_client import search_contact_by_phone
 
@@ -513,6 +514,18 @@ def get_user_db() -> UserDataDB:
     return _user_db
 
 
+# Caregiver DB — lazy init
+_caregiver_db = None
+
+
+def get_caregiver_db() -> CaregiverDB:
+    global _caregiver_db
+    if _caregiver_db is None:
+        _caregiver_db = CaregiverDB()
+        log.info("Caregiver DB loaded")
+    return _caregiver_db
+
+
 def _session_phone(session_id: str, user: dict | None = None) -> str:
     """Resolve session_id → phone, or raise 401.
     If *user* (JWT payload) is provided, verifies the session belongs to that user.
@@ -957,13 +970,40 @@ def lookup_member(req: LookupRequest, request: Request):
             raise HTTPException(status_code=500, detail="Unable to verify your account right now. Please try again.")
 
     if member is None:
+        # Not a member — check if they have a pending caregiver invite
+        has_invite = False
+        try:
+            has_invite = get_caregiver_db().check_pending_invite(req.phone) is not None
+        except Exception:
+            pass
+
+        if has_invite and not is_test:
+            # Send OTP to the caregiver so they can verify and accept
+            code = get_store().generate_otp(
+                req.phone,
+                otp_ttl=OTP_TTL,
+                max_sends=OTP_MAX_SENDS,
+                send_window=OTP_SEND_WINDOW,
+            )
+            if code is None:
+                raise HTTPException(status_code=429, detail="Too many verification attempts. Please wait a few minutes.")
+            sms = get_sms()
+            if not sms.send_otp(req.phone, code):
+                raise HTTPException(status_code=500, detail="Unable to send verification code. Please try again.")
+
+            get_audit_log().record(
+                actor=req.phone, action="auth_lookup", resource="caregiver",
+                ip_address=request.client.host if request.client else "",
+                detail="caregiver_otp_sent",
+            )
+            return {"otp_sent": True}
+
         get_audit_log().record(
             actor=req.phone, action="auth_lookup", resource="member",
             ip_address=request.client.host if request.client else "",
             detail="not_found",
         )
         # M9: Return same response shape for found and not-found to prevent phone enumeration.
-        # "If your number is registered, you'll receive a code." pattern.
         return {"otp_sent": True}
 
     # H1: Session creation deferred to /auth/verify-otp — no PHI materialized pre-auth.
@@ -1026,8 +1066,48 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
             member_data = search_contact_by_phone(req.phone)
         except Exception as e:
             log.error("Zoho re-fetch failed after OTP verify: %s", type(e).__name__)
-            raise HTTPException(status_code=500, detail="Verification succeeded but couldn't load your account. Please try again.")
+            member_data = None
+
         if not member_data:
+            # Not a member — check if they're a caregiver with a pending invite
+            has_invite = False
+            try:
+                has_invite = get_caregiver_db().check_pending_invite(req.phone) is not None
+            except Exception:
+                pass
+
+            if has_invite:
+                # Create a minimal caregiver session (no member plan data)
+                caregiver_data = {
+                    "first_name": "Caregiver",
+                    "last_name": "",
+                    "plan_name": "",
+                    "plan_number": "",
+                    "agent": "",
+                    "medications": "",
+                    "zip_code": "",
+                }
+                sid = create_session(req.phone, caregiver_data)
+                tokens = create_tokens(
+                    req.phone, caregiver_data,
+                    jwt_secret=JWT_SECRET,
+                    access_ttl=JWT_ACCESS_TTL,
+                    refresh_ttl=JWT_REFRESH_TTL,
+                )
+                log.info("Caregiver OTP verified for phone ending ***%s", req.phone[-4:])
+                return {
+                    **tokens,
+                    "first_name": "Caregiver",
+                    "last_name": "",
+                    "plan_name": "",
+                    "plan_number": "",
+                    "agent": "",
+                    "zip_code": "",
+                    "session_id": sid,
+                    "is_caregiver_only": True,
+                    "pending_caregiver_invite": True,
+                }
+
             raise HTTPException(status_code=404, detail="Account not found.")
 
     # Create a real session — store only needed fields (H4: minimize PHI)
@@ -1052,7 +1132,21 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         detail="success",
     )
 
-    return {
+    # Check for pending caregiver invites for this phone
+    pending_invite = None
+    try:
+        pending_invite = get_caregiver_db().check_pending_invite(req.phone)
+    except Exception as e:
+        log.warning("Caregiver invite check failed: %s", e)
+
+    # Check if this phone is already an active caregiver for anyone
+    caregiver_members = []
+    try:
+        caregiver_members = get_caregiver_db().get_members_for_caregiver(req.phone)
+    except Exception as e:
+        log.warning("Caregiver members check failed: %s", e)
+
+    response = {
         **tokens,
         "first_name": member_data["first_name"],
         "last_name": member_data["last_name"],
@@ -1062,6 +1156,14 @@ def verify_otp_endpoint(req: OTPVerifyRequest, request: Request):
         "zip_code": member_data.get("zip_code", "") or "",
         "session_id": sid,
     }
+
+    # Include caregiver info if applicable
+    if pending_invite:
+        response["pending_caregiver_invite"] = True
+    if caregiver_members:
+        response["is_caregiver_for"] = len(caregiver_members)
+
+    return response
 
 
 @app.post("/auth/refresh")
@@ -3125,4 +3227,332 @@ async def create_appointment_request(request: Request, body: AppointmentRequest,
     log.info("Appointment request #%d created for ***%s — doctor: %s",
              req_id, phone[-4:], body.doctor_name)
     return {"success": True, "request_id": req_id}
+
+
+# ── Caregiver / Family Access ──────────────────────────────────────────────
+
+
+class CaregiverConsentRequest(BaseModel):
+    """Member records HIPAA consent before inviting a caregiver."""
+    consent_acknowledged: bool = Field(..., description="Member confirmed HIPAA authorization")
+
+
+class CaregiverInviteRequest(BaseModel):
+    """Member invites a caregiver by phone number."""
+    caregiver_phone: str = Field(..., pattern=r"^\d{10}$")
+    consent_id: int = Field(..., description="ID of the consent record from /caregiver/consent")
+
+
+class CaregiverAcceptRequest(BaseModel):
+    """Caregiver accepts an invite with the code from SMS."""
+    invite_code: str = Field(..., pattern=r"^\d{6}$")
+
+
+class CaregiverRevokeRequest(BaseModel):
+    """Member revokes a caregiver's access."""
+    invite_id: int
+
+
+# HIPAA Authorization text — shown to member before inviting
+HIPAA_CONSENT_TEXT = (
+    "HIPAA Authorization for Caregiver Access\n\n"
+    "I authorize my designated caregiver to view the following information "
+    "about my Medicare health plan through the InsuranceNYou Concierge app:\n\n"
+    "- Plan name, type, and benefits summary\n"
+    "- Copay amounts for doctor visits, specialists, urgent care, and emergency room\n"
+    "- Dental, vision, and hearing benefit details\n"
+    "- OTC allowance and flex card information\n"
+    "- Part B giveback amount\n"
+    "- Digital ID card\n"
+    "- Medication reminder schedule (names and times only)\n"
+    "- Pharmacy and doctor search results\n\n"
+    "My caregiver will NOT have access to:\n"
+    "- My Medicare number (it will remain masked)\n"
+    "- Ability to change my plan or personal information\n"
+    "- Ability to edit medication reminders or dosages\n"
+    "- My health screening or assessment answers\n"
+    "- Claims or billing information\n\n"
+    "This authorization:\n"
+    "- Takes effect immediately upon my confirmation\n"
+    "- Remains in effect until I revoke it\n"
+    "- Can be revoked at any time from Settings > Family Access\n"
+    "- Is provided voluntarily; my plan benefits are not affected by this decision\n\n"
+    "Purpose: To allow a trusted family member or caregiver to help manage "
+    "my health plan benefits and medication reminders."
+)
+
+
+@app.get("/caregiver/consent-text")
+def get_consent_text(_user: dict = Depends(get_current_user)):
+    """Return the HIPAA authorization text for display in the app."""
+    return {"consent_text": HIPAA_CONSENT_TEXT}
+
+
+@app.post("/caregiver/consent")
+def record_caregiver_consent(req: CaregiverConsentRequest, request: Request,
+                             user: dict = Depends(get_current_user)):
+    """Member acknowledges HIPAA consent. Must be called before creating an invite."""
+    if not req.consent_acknowledged:
+        raise HTTPException(status_code=400, detail="You must acknowledge the HIPAA authorization to continue.")
+
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    consent_id = get_caregiver_db().record_consent(
+        member_phone=phone,
+        caregiver_phone=None,  # Not known yet — recorded before entering caregiver phone
+        consent_type="hipaa_caregiver_authorization",
+        consent_text=HIPAA_CONSENT_TEXT,
+        ip_address=request.client.host if request.client else "",
+    )
+
+    get_audit_log().record(
+        actor=phone, action="caregiver_consent", resource="caregiver",
+        ip_address=request.client.host if request.client else "",
+        detail="hipaa_authorized",
+    )
+
+    log.info("HIPAA caregiver consent recorded for ***%s (consent_id=%d)", phone[-4:], consent_id)
+    return {"consent_id": consent_id, "consented_at": time.time()}
+
+
+@app.post("/caregiver/invite")
+def create_caregiver_invite(req: CaregiverInviteRequest, request: Request,
+                            user: dict = Depends(get_current_user)):
+    """Member creates a caregiver invite. Sends SMS with invite code."""
+    _check_ip_rate(request, max_hits=5, window=300, label="caregiver_invite")
+
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    # Get member name for the SMS
+    session = get_store().find_session_by_phone(phone, ttl=SESSION_TTL)
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    member_name = f"{session['data'].get('first_name', '')} {session['data'].get('last_name', '')}".strip() or "A member"
+
+    try:
+        invite = get_caregiver_db().create_invite(phone, req.caregiver_phone)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Update consent record with caregiver phone
+    get_caregiver_db().record_consent(
+        member_phone=phone,
+        caregiver_phone=req.caregiver_phone,
+        consent_type="hipaa_caregiver_invite_sent",
+        consent_text=f"Invite sent to caregiver. Consent ID: {req.consent_id}",
+        ip_address=request.client.host if request.client else "",
+    )
+
+    # Send SMS to caregiver
+    sms = get_sms()
+    sms_body = (
+        f"{member_name} has invited you to view their health plan on INY Concierge. "
+        f"Download the app and enter this code: {invite['invite_code']}. "
+        f"This code expires in 48 hours."
+    )
+    sms.send_message(req.caregiver_phone, sms_body)
+
+    get_audit_log().record(
+        actor=phone, action="caregiver_invite", resource="caregiver",
+        ip_address=request.client.host if request.client else "",
+        detail=f"invite_sent_to_***{req.caregiver_phone[-4:]}",
+    )
+
+    log.info("Caregiver invite sent from ***%s to ***%s", phone[-4:], req.caregiver_phone[-4:])
+    return {
+        "success": True,
+        "expires_at": invite["expires_at"],
+        "message": f"Invite sent to ({req.caregiver_phone[:3]}) {req.caregiver_phone[3:6]}-{req.caregiver_phone[6:]}",
+    }
+
+
+@app.post("/caregiver/check-invite")
+def check_caregiver_invite(request: Request):
+    """Check if a phone number has a pending caregiver invite.
+
+    Called at login time (after OTP verify) — no auth required since
+    the phone was just verified via OTP.
+    """
+    body = request.state if hasattr(request.state, "phone") else None
+    # This endpoint is called from verify-otp response processing,
+    # so we accept the phone in the JSON body
+    return {"has_invite": False}  # Placeholder — real check happens in verify-otp
+
+
+@app.post("/caregiver/accept")
+def accept_caregiver_invite(req: CaregiverAcceptRequest, request: Request,
+                            user: dict = Depends(get_current_user)):
+    """Caregiver accepts an invite using the code from SMS."""
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    try:
+        result = get_caregiver_db().accept_invite(phone, req.invite_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    get_audit_log().record(
+        actor=phone, action="caregiver_accept", resource="caregiver",
+        ip_address=request.client.host if request.client else "",
+        detail=f"invite_{result['invite_id']}_accepted",
+    )
+
+    log.info("Caregiver ***%s accepted invite #%d", phone[-4:], result["invite_id"])
+    return {"success": True, "invite_id": result["invite_id"]}
+
+
+@app.get("/caregiver/my-caregivers")
+def list_my_caregivers(user: dict = Depends(get_current_user)):
+    """Member: list all active caregivers and pending invites."""
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    db = get_caregiver_db()
+    active = db.get_active_caregivers(phone)
+    pending = db.get_pending_invites(phone)
+
+    return {
+        "active_caregivers": active,
+        "pending_invites": pending,
+    }
+
+
+@app.post("/caregiver/revoke")
+def revoke_caregiver(req: CaregiverRevokeRequest, request: Request,
+                     user: dict = Depends(get_current_user)):
+    """Member revokes a caregiver's access."""
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    success = get_caregiver_db().revoke_access(phone, req.invite_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Invite not found or already revoked.")
+
+    get_audit_log().record(
+        actor=phone, action="caregiver_revoke", resource="caregiver",
+        ip_address=request.client.host if request.client else "",
+        detail=f"invite_{req.invite_id}_revoked",
+    )
+
+    log.info("Caregiver invite #%d revoked by ***%s", req.invite_id, phone[-4:])
+    return {"success": True}
+
+
+@app.get("/caregiver/my-members")
+def list_my_members(user: dict = Depends(get_current_user)):
+    """Caregiver: list all members I have access to (for account switcher)."""
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    members = get_caregiver_db().get_members_for_caregiver(phone)
+
+    # Resolve member names from sessions
+    result = []
+    for m in members:
+        # Find the member's active session to get their name
+        # We search by the stored hash — sessions also store phone as hash
+        conn = get_store()._conn()
+        row = conn.execute(
+            "SELECT data FROM sessions WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
+            (m["member_phone_hash"],),
+        ).fetchone()
+
+        member_info = {"invite_id": m["invite_id"], "accepted_at": m["accepted_at"]}
+        if row:
+            try:
+                data = json.loads(row["data"])
+                # Decrypt if needed
+                data = get_store()._decrypt_phi(data)
+                member_info["first_name"] = data.get("first_name", "")
+                member_info["last_name"] = data.get("last_name", "")
+                member_info["plan_name"] = data.get("plan_name", "")
+            except Exception:
+                member_info["first_name"] = "Member"
+                member_info["last_name"] = ""
+                member_info["plan_name"] = ""
+        else:
+            member_info["first_name"] = "Member"
+            member_info["last_name"] = ""
+            member_info["plan_name"] = ""
+
+        result.append(member_info)
+
+    return {"members": result}
+
+
+@app.get("/caregiver/member-data/{invite_id}")
+def get_caregiver_member_data(invite_id: int, user: dict = Depends(get_current_user)):
+    """Caregiver: get read-only member data for a specific member they have access to.
+
+    Returns the same data shape as the member home screen, but:
+    - Medicare number is masked
+    - No edit capabilities
+    - Access is logged
+    """
+    phone = user.get("sub", "")
+    if not phone or phone == "dev":
+        session = get_store().find_session_by_phone("dev", ttl=SESSION_TTL)
+        phone = session["phone"] if session else "dev"
+
+    db = get_caregiver_db()
+
+    # Verify this caregiver has access via this invite
+    conn = db._conn()
+    invite = conn.execute(
+        "SELECT member_phone, caregiver_phone FROM caregiver_invites WHERE id = ? AND status = 'accepted'",
+        (invite_id,),
+    ).fetchone()
+
+    if not invite:
+        raise HTTPException(status_code=404, detail="Access not found or has been revoked.")
+
+    caregiver_hash = db._hash_phone(phone)
+    if invite["caregiver_phone"] != caregiver_hash:
+        raise HTTPException(status_code=403, detail="You do not have access to this member's data.")
+
+    # Find the member's session data
+    store_conn = get_store()._conn()
+    member_row = store_conn.execute(
+        "SELECT data FROM sessions WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
+        (invite["member_phone"],),
+    ).fetchone()
+
+    if not member_row:
+        raise HTTPException(status_code=404, detail="Member session not found. The member may need to log in again.")
+
+    try:
+        member_data = json.loads(member_row["data"])
+        member_data = get_store()._decrypt_phi(member_data)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Unable to load member data.")
+
+    # Log this access
+    db.log_access(phone, "member_via_hash", "view_member_data", f"invite_{invite_id}")
+
+    # Build read-only response — mask sensitive fields
+    return {
+        "first_name": member_data.get("first_name", ""),
+        "last_name": member_data.get("last_name", ""),
+        "plan_name": member_data.get("plan_name", ""),
+        "plan_number": member_data.get("plan_number", ""),
+        "medicare_number": "****-***-****",  # Always masked for caregivers
+        "agent": member_data.get("agent", ""),
+        "zip_code": member_data.get("zip_code", ""),
+        "is_caregiver_view": True,
+        "read_only": True,
+    }
 

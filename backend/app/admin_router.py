@@ -34,6 +34,7 @@ from .admin_auth import (
 )
 from .audit import get_audit_log
 from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
+from .caregiver import CaregiverDB
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
@@ -2043,3 +2044,75 @@ def _sync_note_to_zoho(phone: str, subject: str, body: str, agent_name: str) -> 
     else:
         log.warning("Zoho note sync returned %s: %s", resp.status_code, resp.text[:200])
         return False
+
+
+# ── Caregiver Management (Admin) ────────────────────────────────────────────
+
+_caregiver_db = None
+
+
+def _get_caregiver_db() -> CaregiverDB:
+    global _caregiver_db
+    if _caregiver_db is None:
+        _caregiver_db = CaregiverDB()
+    return _caregiver_db
+
+
+@router.get("/caregivers")
+def admin_list_caregivers(
+    status: Optional[str] = None,
+    limit: int = 100,
+    admin: dict = Depends(require_admin),
+):
+    """List all caregiver links, optionally filtered by status."""
+    db = _get_caregiver_db()
+    links = db.admin_get_all_links(status=status, limit=limit)
+
+    get_audit_log().record(
+        actor=admin.get("email", "admin"),
+        action="admin_list_caregivers",
+        resource="caregiver",
+        detail=f"status={status}, count={len(links)}",
+    )
+
+    return {"caregivers": links, "total": len(links)}
+
+
+@router.post("/caregivers/{invite_id}/revoke")
+def admin_revoke_caregiver(
+    invite_id: int,
+    request: Request,
+    admin: dict = Depends(require_admin),
+):
+    """Admin revokes a caregiver link."""
+    db = _get_caregiver_db()
+    success = db.admin_revoke(invite_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Invite not found or already revoked.")
+
+    get_audit_log().record(
+        actor=admin.get("email", "admin"),
+        action="admin_revoke_caregiver",
+        resource="caregiver",
+        detail=f"invite_{invite_id}_revoked",
+        ip_address=request.client.host if request.client else "",
+    )
+
+    return {"success": True}
+
+
+@router.get("/caregivers/access-log")
+def admin_caregiver_access_log(
+    member_phone: str = "",
+    limit: int = 50,
+    admin: dict = Depends(require_admin),
+):
+    """View caregiver access logs for a specific member."""
+    if not member_phone:
+        return {"logs": [], "message": "Provide member_phone query parameter."}
+
+    db = _get_caregiver_db()
+    logs = db.get_access_log(member_phone, limit=limit)
+
+    return {"logs": logs, "total": len(logs)}

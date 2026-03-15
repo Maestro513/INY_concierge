@@ -20,6 +20,10 @@ class SMSProvider(ABC):
         """Send a 6-digit OTP to the given phone number. Returns True on success."""
         ...
 
+    def send_message(self, phone: str, body: str) -> bool:
+        """Send a custom SMS message. Defaults to send_otp for backward compat."""
+        return self.send_otp(phone, body)
+
 
 class TwilioProvider(SMSProvider):
     """Production SMS via Twilio."""
@@ -42,12 +46,29 @@ class TwilioProvider(SMSProvider):
             log.error(f"Twilio send failed for +1{phone[-4:]}: {e}")
             return False
 
+    def send_message(self, phone: str, body: str) -> bool:
+        try:
+            msg = self.client.messages.create(
+                body=body,
+                from_=self.from_number,
+                to=f"+1{phone}",
+            )
+            log.info(f"Twilio SMS (custom) sent to +1{phone[-4:]}: sid={msg.sid}")
+            return True
+        except Exception as e:
+            log.error(f"Twilio send_message failed for +1{phone[-4:]}: {e}")
+            return False
+
 
 class ConsoleProvider(SMSProvider):
     """Dev-only — prints OTP to server logs instead of sending SMS."""
 
     def send_otp(self, phone: str, code: str) -> bool:
         log.info("[DEV OTP] Phone: ***-***-%s → Code sent (not logged)", phone[-4:])
+        return True
+
+    def send_message(self, phone: str, body: str) -> bool:
+        log.info("[DEV SMS] Phone: ***-***-%s → Message: %s", phone[-4:], body[:50])
         return True
 
 
