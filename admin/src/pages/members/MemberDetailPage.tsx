@@ -5,7 +5,7 @@ import {
   KeyRound, Pill, Send, FileText, Check,
   Plus, Trash2, Activity, Eye, AlertCircle, Bell,
   ClipboardCheck, Heart, Car, UtensilsCrossed, Users, Home,
-  MessageSquare, AlertTriangle, Clock, History, NotebookPen,
+  AlertTriangle, Clock, History, NotebookPen,
   PhoneIncoming, PhoneOutgoing, PhoneForwarded, RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

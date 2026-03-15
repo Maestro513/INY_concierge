@@ -23,6 +23,7 @@ from starlette.responses import JSONResponse, Response
 from .admin_router import router as admin_router
 from .audit import get_audit_log, mask_phone, mask_pii_in_string
 from .auth import create_tokens, decode_token, require_auth
+from .caregiver import CaregiverDB
 from .claude_client import _find_extracted_file, ask_claude, find_relevant_chunks, load_plan_chunks
 from .config import (
     ANTHROPIC_API_KEY,
@@ -47,7 +48,6 @@ from .persistent_store import PersistentStore
 from .providers.service import search_providers
 from .sms_provider import create_sms_provider
 from .sob_parser import extract_tier_copays, load_plan_text
-from .caregiver import CaregiverDB
 from .user_data import UserDataDB
 from .zoho_client import search_contact_by_phone
 
@@ -3379,7 +3379,6 @@ def check_caregiver_invite(request: Request):
     Called at login time (after OTP verify) — no auth required since
     the phone was just verified via OTP.
     """
-    body = request.state if hasattr(request.state, "phone") else None
     # This endpoint is called from verify-otp response processing,
     # so we accept the phone in the JSON body
     return {"has_invite": False}  # Placeholder — real check happens in verify-otp

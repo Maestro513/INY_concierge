@@ -33,8 +33,8 @@ from .admin_auth import (
     set_auth_cookies,
 )
 from .audit import get_audit_log
-from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .caregiver import CaregiverDB
+from .config import ADMIN_SECRET, APP_ENV, EXTRACTED_DIR, PDFS_DIR
 from .persistent_store import PersistentStore
 from .sms_provider import create_sms_provider
 from .zoho_client import search_contact_by_phone
@@ -1598,6 +1598,7 @@ async def admin_get_utilization_alerts(
     - Medication refill alerts
     """
     from datetime import date as _date
+
     from .user_data import UserDataDB
 
     clean = _normalize_phone(phone)
@@ -2007,7 +2008,7 @@ async def create_call_note(
 
 def _sync_note_to_zoho(phone: str, subject: str, body: str, agent_name: str) -> bool:
     """Push a call note to the Zoho CRM contact record."""
-    from .zoho_client import get_access_token, _http, API_BASE
+    from .zoho_client import API_BASE, _http, get_access_token
 
     # First find the contact
     contact = search_contact_by_phone(phone)
