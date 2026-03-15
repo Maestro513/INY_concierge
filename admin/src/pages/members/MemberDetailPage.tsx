@@ -414,47 +414,6 @@ export default function MemberDetailPage() {
       .finally(() => setAlertsLoading(false));
   }
 
-  // ── F: Secure Messaging ──
-  interface Message {
-    id: number;
-    sender_type: string;
-    sender_name: string;
-    body: string;
-    read: number;
-    created_at: string;
-  }
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [messagesLoaded, setMessagesLoaded] = useState(false);
-  const [newMessage, setNewMessage] = useState('');
-  const [sendingMessage, setSendingMessage] = useState(false);
-
-  function loadMessages() {
-    if (!member) return;
-    client
-      .get(ENDPOINTS.MEMBER_MESSAGES(member.phone))
-      .then((res) => {
-        setMessages(res.data?.messages || []);
-        setMessagesLoaded(true);
-      })
-      .catch(() => {});
-  }
-
-  async function handleSendMessage() {
-    if (!member || !newMessage.trim()) return;
-    setSendingMessage(true);
-    try {
-      const res = await client.post(ENDPOINTS.MEMBER_MESSAGES(member.phone), {
-        body: newMessage.trim(),
-      });
-      setMessages([...messages, res.data.message]);
-      setNewMessage('');
-    } catch {
-      // Could add error handling
-    } finally {
-      setSendingMessage(false);
-    }
-  }
-
   // ── L: Call Notes ──
   interface CallNote {
     id: number;
@@ -793,10 +752,7 @@ export default function MemberDetailPage() {
               <TabsTrigger value="alerts" className="text-xs data-[state=active]:bg-background" onClick={loadAlerts}>
                 <AlertTriangle className="mr-1.5 h-3.5 w-3.5" /> Alerts
               </TabsTrigger>
-              <TabsTrigger value="messaging" className="text-xs data-[state=active]:bg-background" onClick={loadMessages}>
-                <MessageSquare className="mr-1.5 h-3.5 w-3.5" /> Messages
-              </TabsTrigger>
-              <TabsTrigger value="call-notes" className="text-xs data-[state=active]:bg-background" onClick={loadCallNotes}>
+<TabsTrigger value="call-notes" className="text-xs data-[state=active]:bg-background" onClick={loadCallNotes}>
                 <NotebookPen className="mr-1.5 h-3.5 w-3.5" /> Call Notes
               </TabsTrigger>
               <TabsTrigger value="notifications" className="text-xs data-[state=active]:bg-background" onClick={loadNotificationHistory}>
@@ -1309,94 +1265,6 @@ export default function MemberDetailPage() {
                         </div>
                       ))}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* F: Secure Messaging Tab */}
-            <TabsContent value="messaging" className="mt-4">
-              <Card className="border-border/50 shadow-sm">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Secure Messages</CardTitle>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Threaded conversation with {member.first_name}. Messages are delivered in-app with push notification.
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  {!messagesLoaded ? (
-                    <div className="flex items-center justify-center py-8">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                    </div>
-                  ) : (
-                    <>
-                      {/* Message thread */}
-                      <div className="space-y-3 max-h-[400px] overflow-y-auto mb-4 pr-1">
-                        {messages.length === 0 ? (
-                          <div className="text-center py-8">
-                            <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground/40" />
-                            <p className="mt-2 text-sm text-muted-foreground">No messages yet. Start the conversation below.</p>
-                          </div>
-                        ) : (
-                          messages.map((m) => (
-                            <div
-                              key={m.id}
-                              className={`flex ${m.sender_type === 'agent' ? 'justify-end' : 'justify-start'}`}
-                            >
-                              <div className={`max-w-[75%] rounded-lg p-3 ${
-                                m.sender_type === 'agent'
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-muted'
-                              }`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className={`text-[10px] font-semibold ${
-                                    m.sender_type === 'agent' ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                                  }`}>
-                                    {m.sender_name || (m.sender_type === 'agent' ? 'Agent' : 'Member')}
-                                  </span>
-                                  <span className={`text-[10px] ${
-                                    m.sender_type === 'agent' ? 'text-primary-foreground/50' : 'text-muted-foreground/60'
-                                  }`}>
-                                    {m.created_at}
-                                  </span>
-                                </div>
-                                <p className="text-sm whitespace-pre-wrap">{m.body}</p>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-
-                      {/* Compose */}
-                      <div className="flex gap-2 border-t border-border pt-3">
-                        <textarea
-                          value={newMessage}
-                          onChange={(e) => setNewMessage(e.target.value)}
-                          placeholder="Type a message..."
-                          className="flex-1 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-                          rows={2}
-                          maxLength={2000}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSendMessage();
-                            }
-                          }}
-                        />
-                        <Button
-                          size="sm"
-                          className="h-auto self-end"
-                          onClick={handleSendMessage}
-                          disabled={!newMessage.trim() || sendingMessage}
-                        >
-                          {sendingMessage ? (
-                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                          ) : (
-                            <Send className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </div>
-                    </>
                   )}
                 </CardContent>
               </Card>

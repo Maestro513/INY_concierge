@@ -53,10 +53,6 @@ export const ENDPOINTS = {
   // Utilization alerts
   MEMBER_UTILIZATION_ALERTS: (phone: string) => `/api/admin/members/${phone}/utilization-alerts`,
 
-  // Secure messaging
-  MEMBER_MESSAGES: (phone: string) => `/api/admin/members/${phone}/messages`,
-  MESSAGES_INBOX: '/api/admin/messages/inbox',
-
   // Campaigns
   CAMPAIGNS: '/api/admin/campaigns',
   CAMPAIGN: (id: number) => `/api/admin/campaigns/${id}`,
