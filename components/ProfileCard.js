@@ -13,6 +13,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { getCaregiverInfo } from '../constants/session';
 import {
   COLORS,
   RADII,
@@ -328,6 +330,10 @@ export default function ProfileCard({
   onOpenSettings,
   onBookTransportation,
 }) {
+  const router = useRouter();
+  const caregiverInfo = getCaregiverInfo();
+  const isCaregiverToo = caregiverInfo && caregiverInfo.isCaregiverFor > 0;
+
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showMedsModal, setShowMedsModal] = useState(false);
@@ -525,15 +531,28 @@ export default function ProfileCard({
         ) : (
           <View />
         )}
-        <TouchableOpacity
-          onPress={onOpenSettings}
-          style={styles.settingsGear}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Open settings"
-        >
-          <Ionicons name="settings-outline" size={22} color={COLORS.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.gearRow}>
+          {isCaregiverToo ? (
+            <TouchableOpacity
+              onPress={() => router.push('/caregiver-home')}
+              style={styles.caregiverToggle}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Switch to caregiver view"
+            >
+              <Ionicons name="people-outline" size={18} color={COLORS.accent} />
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            onPress={onOpenSettings}
+            style={styles.settingsGear}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+          >
+            <Ionicons name="settings-outline" size={22} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Benefits */}
@@ -689,6 +708,21 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   agentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  gearRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  caregiverToggle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.quickPillBg,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   settingsGear: {
     width: 36,
     height: 36,
