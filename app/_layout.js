@@ -163,11 +163,7 @@ export default function RootLayout() {
             name="sdoh-screening"
             options={{ animation: 'slide_from_right', gestureEnabled: false }}
           />
-          <Stack.Screen
-            name="messages"
-            options={{ animation: 'slide_from_right', gestureEnabled: true }}
-          />
-          <Stack.Screen
+<Stack.Screen
             name="settings"
             options={{ animation: 'slide_from_right', gestureEnabled: true }}
           />

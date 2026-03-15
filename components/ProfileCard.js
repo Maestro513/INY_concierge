@@ -327,7 +327,6 @@ export default function ProfileCard({
   _onLogout,
   onOpenSettings,
   onBookTransportation,
-  onOpenMessages,
 }) {
   const [remindersExpanded, setRemindersExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -474,17 +473,7 @@ export default function ProfileCard({
             </View>
           ) : null}
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onOpenMessages}
-          style={styles.quickPill}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Send a message to your agent"
-        >
-          <Ionicons name="chatbubble-outline" size={18} color={COLORS.accent} />
-          <Text style={styles.quickPillText}>Messages</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
+<TouchableOpacity
           onPress={onViewSOB}
           style={styles.quickPill}
           activeOpacity={0.7}

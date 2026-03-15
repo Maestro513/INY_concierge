@@ -1225,57 +1225,6 @@ def mark_notification_read(notif_id: int, user: dict = Depends(get_current_user)
     return {"success": True}
 
 
-# ── Secure Messaging (member side) ──────────────────────────────────────
-
-
-class MemberMessageSend(BaseModel):
-    body: str = Field(..., min_length=1, max_length=2000)
-
-
-@app.get("/messages")
-def get_my_messages(user: dict = Depends(get_current_user)):
-    """Get the member's conversation thread with their agent."""
-    phone = user.get("sub")
-    if not phone or phone == "dev":
-        return {"messages": []}
-    from .user_data import UserDataDB
-    udb = UserDataDB()
-    messages = udb.get_messages(phone, limit=100)
-    # Mark agent messages as read (member is viewing)
-    udb.mark_messages_read(phone, "agent")
-    return {"messages": messages}
-
-
-@app.post("/messages")
-def send_member_message(req: MemberMessageSend, user: dict = Depends(get_current_user)):
-    """Send a message from the member to their agent."""
-    phone = user.get("sub")
-    if not phone or phone == "dev":
-        raise HTTPException(status_code=400, detail="Invalid session.")
-    first_name = user.get("first_name", "Member")
-    from .user_data import UserDataDB
-    udb = UserDataDB()
-    msg = udb.send_message(
-        phone=phone,
-        sender_type="member",
-        sender_name=first_name,
-        body=req.body,
-    )
-    return {"message": msg}
-
-
-@app.get("/messages/unread")
-def get_unread_count(user: dict = Depends(get_current_user)):
-    """Get count of unread messages from agent."""
-    phone = user.get("sub")
-    if not phone or phone == "dev":
-        return {"unread": 0}
-    from .user_data import UserDataDB
-    udb = UserDataDB()
-    count = udb.get_unread_count(phone, "agent")
-    return {"unread": count}
-
-
 # Per-phone rate limiter for /ask
 _ASK_MAX = int(os.getenv("ASK_RATE_MAX", "10"))
 _ASK_WINDOW = int(os.getenv("ASK_RATE_WINDOW", "60"))
