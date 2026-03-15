@@ -5,6 +5,7 @@ import {
   KeyRound, Pill, Send, FileText, Check,
   Plus, Trash2, Activity, Eye, AlertCircle, Bell,
   ClipboardCheck, Heart, Car, UtensilsCrossed, Users, Home,
+  MessageSquare, AlertTriangle, Clock, History,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -344,6 +345,115 @@ export default function MemberDetailPage() {
     { label: 'Benefits Renewal', title: 'Your Benefits Reset Soon', body: 'Your plan benefits reset on January 1st. Make sure to use your remaining allowances before they expire.' },
   ];
 
+  // ── C: Screening/SDOH History ──
+  interface ScreeningEntry {
+    id: number;
+    gender: string;
+    answers: Record<string, boolean>;
+    gaps: string[];
+    completed: string[];
+    gap_count: number;
+    completed_count: number;
+    total_count: number;
+    created_at: string;
+  }
+  interface SdohEntry {
+    id: number;
+    transportation: string;
+    food_insecurity: string;
+    social_isolation: string;
+    housing_stability: string;
+    flags: string[];
+    flag_count: number;
+    created_at: string;
+  }
+  const [screeningHistory, setScreeningHistory] = useState<ScreeningEntry[]>([]);
+  const [sdohHistory, setSdohHistory] = useState<SdohEntry[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  function loadHistory() {
+    if (!member || historyLoaded) return;
+    client
+      .get(ENDPOINTS.MEMBER_SCREENING_HISTORY(member.phone))
+      .then((res) => {
+        setScreeningHistory(res.data?.screenings || []);
+        setSdohHistory(res.data?.sdoh || []);
+        setHistoryLoaded(true);
+      })
+      .catch(() => {});
+  }
+
+  // ── E: Utilization Alerts ──
+  interface UtilAlert {
+    type: string;
+    severity: string;
+    title: string;
+    body: string;
+    gaps?: string[];
+    flags?: string[];
+    cap?: number;
+    spent?: number;
+    remaining?: number;
+    period?: string;
+  }
+  const [utilAlerts, setUtilAlerts] = useState<UtilAlert[]>([]);
+  const [alertsLoaded, setAlertsLoaded] = useState(false);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+
+  function loadAlerts() {
+    if (!member || alertsLoaded) return;
+    setAlertsLoading(true);
+    client
+      .get(ENDPOINTS.MEMBER_UTILIZATION_ALERTS(member.phone))
+      .then((res) => {
+        setUtilAlerts(res.data?.alerts || []);
+        setAlertsLoaded(true);
+      })
+      .catch(() => {})
+      .finally(() => setAlertsLoading(false));
+  }
+
+  // ── F: Secure Messaging ──
+  interface Message {
+    id: number;
+    sender_type: string;
+    sender_name: string;
+    body: string;
+    read: number;
+    created_at: string;
+  }
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+
+  function loadMessages() {
+    if (!member) return;
+    client
+      .get(ENDPOINTS.MEMBER_MESSAGES(member.phone))
+      .then((res) => {
+        setMessages(res.data?.messages || []);
+        setMessagesLoaded(true);
+      })
+      .catch(() => {});
+  }
+
+  async function handleSendMessage() {
+    if (!member || !newMessage.trim()) return;
+    setSendingMessage(true);
+    try {
+      const res = await client.post(ENDPOINTS.MEMBER_MESSAGES(member.phone), {
+        body: newMessage.trim(),
+      });
+      setMessages([...messages, res.data.message]);
+      setNewMessage('');
+    } catch {
+      // Could add error handling
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderError, setReminderError] = useState('');
 
@@ -612,6 +722,15 @@ export default function MemberDetailPage() {
               </TabsTrigger>
               <TabsTrigger value="sdoh" className="text-xs data-[state=active]:bg-background" onClick={loadSdohData}>
                 <Heart className="mr-1.5 h-3.5 w-3.5" /> Well-Being
+              </TabsTrigger>
+              <TabsTrigger value="history" className="text-xs data-[state=active]:bg-background" onClick={loadHistory}>
+                <History className="mr-1.5 h-3.5 w-3.5" /> History
+              </TabsTrigger>
+              <TabsTrigger value="alerts" className="text-xs data-[state=active]:bg-background" onClick={loadAlerts}>
+                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" /> Alerts
+              </TabsTrigger>
+              <TabsTrigger value="messaging" className="text-xs data-[state=active]:bg-background" onClick={loadMessages}>
+                <MessageSquare className="mr-1.5 h-3.5 w-3.5" /> Messages
               </TabsTrigger>
               <TabsTrigger value="notifications" className="text-xs data-[state=active]:bg-background" onClick={loadNotificationHistory}>
                 <Bell className="mr-1.5 h-3.5 w-3.5" /> Notifications
@@ -909,6 +1028,306 @@ export default function MemberDetailPage() {
                             )}
                           </Button>
                         </div>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* C: Screening/SDOH History Tab */}
+            <TabsContent value="history" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Screening & SDOH History</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Timeline of all completed screenings and social determinant assessments.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {!historyLoaded ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : screeningHistory.length === 0 && sdohHistory.length === 0 ? (
+                    <div className="text-center py-8">
+                      <ClipboardCheck className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">No screenings or SDOH assessments on file</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Merge and sort by date */}
+                      {[
+                        ...screeningHistory.map((s) => ({ ...s, _type: 'screening' as const })),
+                        ...sdohHistory.map((s) => ({ ...s, _type: 'sdoh' as const })),
+                      ]
+                        .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+                        .map((entry, i) => (
+                          <div key={`${entry._type}-${entry.id}`} className="relative flex gap-4">
+                            {/* Timeline line */}
+                            {i > 0 && (
+                              <div className="absolute left-[15px] -top-4 w-px h-4 bg-border" />
+                            )}
+                            <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                              entry._type === 'screening' ? 'bg-chart-2/10' : 'bg-chart-4/10'
+                            }`}>
+                              {entry._type === 'screening' ? (
+                                <ClipboardCheck className="h-4 w-4 text-chart-2" />
+                              ) : (
+                                <Heart className="h-4 w-4 text-chart-4" />
+                              )}
+                            </div>
+                            <div className="flex-1 rounded-lg border border-border p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-semibold">
+                                    {entry._type === 'screening' ? 'Health Screening' : 'SDOH Assessment'}
+                                  </p>
+                                  {entry._type === 'screening' && 'gender' in entry && (
+                                    <Badge variant="secondary" className="text-[10px]">{(entry as ScreeningEntry).gender}</Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  <Clock className="h-3 w-3" />
+                                  {entry.created_at}
+                                </div>
+                              </div>
+
+                              {entry._type === 'screening' ? (() => {
+                                const s = entry as ScreeningEntry;
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-4 text-xs">
+                                      <span className="text-success font-medium">{s.completed_count} completed</span>
+                                      <span className="text-warning font-medium">{s.gap_count} gap{s.gap_count !== 1 ? 's' : ''}</span>
+                                      <span className="text-muted-foreground">{s.total_count} total</span>
+                                    </div>
+                                    {s.gaps.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {s.gaps.map((g) => (
+                                          <Badge key={g} variant="secondary" className="text-[10px] bg-warning/10 text-warning">
+                                            {g}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })() : (() => {
+                                const s = entry as SdohEntry;
+                                return (
+                                  <div className="space-y-2">
+                                    {s.flag_count > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {s.flags.map((f) => (
+                                          <Badge key={f} variant="secondary" className="text-[10px] bg-destructive/10 text-destructive">
+                                            {f}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-success font-medium">No risk factors identified</p>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* E: Utilization Alerts Tab */}
+            <TabsContent value="alerts" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Benefits Utilization Alerts</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Automated checks for unused benefits, screening gaps, and upcoming deadlines.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {alertsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : !alertsLoaded ? (
+                    <div className="text-center py-8">
+                      <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                      <p className="mt-2 text-sm text-muted-foreground">Click to load alerts</p>
+                    </div>
+                  ) : utilAlerts.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Check className="mx-auto h-8 w-8 text-success/60" />
+                      <p className="mt-2 text-sm text-success font-medium">No alerts — member is on track!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {utilAlerts.map((alert, i) => (
+                        <div
+                          key={i}
+                          className={`rounded-lg border p-4 ${
+                            alert.severity === 'warning'
+                              ? 'border-warning/30 bg-warning/5'
+                              : alert.severity === 'info'
+                                ? 'border-primary/30 bg-primary/5'
+                                : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
+                              alert.severity === 'warning' ? 'bg-warning/10' : 'bg-primary/10'
+                            }`}>
+                              {alert.type === 'screening_gap' ? (
+                                <ClipboardCheck className={`h-4 w-4 ${alert.severity === 'warning' ? 'text-warning' : 'text-primary'}`} />
+                              ) : alert.type === 'sdoh_risk' ? (
+                                <Heart className="h-4 w-4 text-warning" />
+                              ) : alert.type === 'otc_underuse' ? (
+                                <FileText className="h-4 w-4 text-primary" />
+                              ) : alert.type === 'flu_season' ? (
+                                <AlertTriangle className="h-4 w-4 text-warning" />
+                              ) : alert.type === 'refill_due' ? (
+                                <Pill className="h-4 w-4 text-warning" />
+                              ) : (
+                                <AlertCircle className="h-4 w-4 text-primary" />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold">{alert.title}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{alert.body}</p>
+                              {alert.type === 'otc_underuse' && alert.cap && (
+                                <div className="mt-2">
+                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                                    <span>${alert.spent?.toFixed(0)} spent</span>
+                                    <span>${alert.cap.toFixed(0)} / {alert.period?.toLowerCase()}</span>
+                                  </div>
+                                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-primary/60 transition-all"
+                                      style={{ width: `${Math.min(100, ((alert.spent || 0) / alert.cap) * 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                              {alert.type === 'screening_gap' && alert.gaps && alert.gaps.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {alert.gaps.map((g) => (
+                                    <Badge key={g} variant="secondary" className="text-[10px] bg-warning/10 text-warning">{g}</Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            {/* Quick action: send notification about this alert */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] shrink-0"
+                              onClick={() => {
+                                setNotifTitle(alert.title);
+                                setNotifBody(alert.body);
+                                setNotifCategory(
+                                  alert.type === 'screening_gap' ? 'screening' :
+                                  alert.type === 'otc_underuse' ? 'benefits_reminder' :
+                                  alert.type === 'refill_due' ? 'medication' : 'general'
+                                );
+                                setNotifDialogOpen(true);
+                              }}
+                            >
+                              <Bell className="mr-1 h-3 w-3" /> Notify
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* F: Secure Messaging Tab */}
+            <TabsContent value="messaging" className="mt-4">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold">Secure Messages</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Threaded conversation with {member.first_name}. Messages are delivered in-app with push notification.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {!messagesLoaded ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Message thread */}
+                      <div className="space-y-3 max-h-[400px] overflow-y-auto mb-4 pr-1">
+                        {messages.length === 0 ? (
+                          <div className="text-center py-8">
+                            <MessageSquare className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                            <p className="mt-2 text-sm text-muted-foreground">No messages yet. Start the conversation below.</p>
+                          </div>
+                        ) : (
+                          messages.map((m) => (
+                            <div
+                              key={m.id}
+                              className={`flex ${m.sender_type === 'agent' ? 'justify-end' : 'justify-start'}`}
+                            >
+                              <div className={`max-w-[75%] rounded-lg p-3 ${
+                                m.sender_type === 'agent'
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'bg-muted'
+                              }`}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className={`text-[10px] font-semibold ${
+                                    m.sender_type === 'agent' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                                  }`}>
+                                    {m.sender_name || (m.sender_type === 'agent' ? 'Agent' : 'Member')}
+                                  </span>
+                                  <span className={`text-[10px] ${
+                                    m.sender_type === 'agent' ? 'text-primary-foreground/50' : 'text-muted-foreground/60'
+                                  }`}>
+                                    {m.created_at}
+                                  </span>
+                                </div>
+                                <p className="text-sm whitespace-pre-wrap">{m.body}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Compose */}
+                      <div className="flex gap-2 border-t border-border pt-3">
+                        <textarea
+                          value={newMessage}
+                          onChange={(e) => setNewMessage(e.target.value)}
+                          placeholder="Type a message..."
+                          className="flex-1 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                          rows={2}
+                          maxLength={2000}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendMessage();
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          className="h-auto self-end"
+                          onClick={handleSendMessage}
+                          disabled={!newMessage.trim() || sendingMessage}
+                        >
+                          {sendingMessage ? (
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                        </Button>
                       </div>
                     </>
                   )}

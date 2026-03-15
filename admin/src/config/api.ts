@@ -46,4 +46,14 @@ export const ENDPOINTS = {
 
   // Notifications
   MEMBER_NOTIFICATIONS: (phone: string) => `/api/admin/members/${phone}/notifications`,
+
+  // Screening / SDOH history
+  MEMBER_SCREENING_HISTORY: (phone: string) => `/api/admin/members/${phone}/screening-history`,
+
+  // Utilization alerts
+  MEMBER_UTILIZATION_ALERTS: (phone: string) => `/api/admin/members/${phone}/utilization-alerts`,
+
+  // Secure messaging
+  MEMBER_MESSAGES: (phone: string) => `/api/admin/members/${phone}/messages`,
+  MESSAGES_INBOX: '/api/admin/messages/inbox',
 } as const;

@@ -1534,6 +1534,11 @@ async def admin_get_notifications(
     return {"notifications": [dict(r) for r in rows]}
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  C: SCREENING / SDOH HISTORY
+# ════════════════════════════════════════════════════════════════════════════
+
+
 @router.get("/members/{phone}/health-screening")
 async def admin_get_health_screening(
     phone: str,
@@ -1556,3 +1561,287 @@ async def admin_get_sdoh_screening(
     udb = UserDataDB()
     result = udb.get_sdoh_screening(phone)
     return {"screening": result}
+
+
+@router.get("/members/{phone}/screening-history")
+async def admin_get_screening_history(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get full screening + SDOH history timeline for a member."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    clean = _normalize_phone(phone)
+    screenings = udb.get_health_screening_history(clean)
+    sdoh = udb.get_sdoh_screening_history(clean)
+    return {
+        "screenings": screenings,
+        "sdoh": sdoh,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  E: BENEFITS UTILIZATION ALERTS
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/members/{phone}/utilization-alerts")
+async def admin_get_utilization_alerts(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """
+    Check a member's benefits utilization and return alerts for:
+    - OTC/flex allowance expiring unused
+    - Screening gaps approaching deadlines
+    - Medication refill alerts
+    """
+    from datetime import date as _date
+    from .user_data import UserDataDB
+
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    udb = UserDataDB()
+    alerts = []
+
+    # 1) Screening gaps — check latest health screening
+    latest_screening = udb.get_health_screenings(clean)
+    if latest_screening:
+        answers = latest_screening.get("answers", {})
+        SCREENING_LABELS = {
+            "awv": "Annual Wellness Visit",
+            "flu": "Flu Shot",
+            "colonoscopy": "Colonoscopy",
+            "cholesterol": "Cholesterol / Blood Work",
+            "a1c": "Diabetes Screening (A1C)",
+            "fall_risk": "Fall Risk Assessment",
+            "mammogram": "Mammogram",
+            "bone_density": "Bone Density Scan",
+            "prostate": "Prostate (PSA) Screening",
+        }
+        gaps = [
+            SCREENING_LABELS.get(k, k)
+            for k, v in answers.items()
+            if v is False or v == "no"
+        ]
+        if gaps:
+            alerts.append({
+                "type": "screening_gap",
+                "severity": "warning",
+                "title": f"{len(gaps)} screening gap{'s' if len(gaps) != 1 else ''}",
+                "body": f"Missing: {', '.join(gaps[:4])}{'...' if len(gaps) > 4 else ''}",
+                "gaps": gaps,
+                "screened_at": latest_screening.get("created_at", ""),
+            })
+    else:
+        alerts.append({
+            "type": "screening_gap",
+            "severity": "info",
+            "title": "No screening on file",
+            "body": "This member has never completed a health screening.",
+            "gaps": [],
+        })
+
+    # 2) SDOH risk flags
+    latest_sdoh = udb.get_sdoh_screening(clean)
+    if latest_sdoh:
+        sdoh_flags = []
+        if latest_sdoh.get("transportation") == "yes":
+            sdoh_flags.append("Transportation barrier")
+        if latest_sdoh.get("food_insecurity") == "yes":
+            sdoh_flags.append("Food insecurity")
+        if latest_sdoh.get("social_isolation") in ("sometimes", "often", "always"):
+            sdoh_flags.append("Social isolation")
+        if latest_sdoh.get("housing_stability") == "yes":
+            sdoh_flags.append("Housing instability")
+        if sdoh_flags:
+            alerts.append({
+                "type": "sdoh_risk",
+                "severity": "warning",
+                "title": f"{len(sdoh_flags)} SDOH risk factor{'s' if len(sdoh_flags) != 1 else ''}",
+                "body": ", ".join(sdoh_flags),
+                "flags": sdoh_flags,
+            })
+
+    # 3) Benefits usage — check if member has plan, then check utilization
+    zoho_data = None
+    try:
+        zoho_data = search_contact_by_phone(clean)
+    except Exception:
+        pass
+
+    plan_number = None
+    if zoho_data:
+        plan_number = zoho_data.get("plan_number")
+    if not plan_number:
+        session = _get_store().find_session_by_phone(clean)
+        if session:
+            plan_number = session.get("data", {}).get("plan_number")
+
+    if plan_number:
+        try:
+            from .cms_lookup import CMSLookup
+            cms = CMSLookup()
+            today = _date.today()
+
+            # OTC allowance check
+            otc = cms.get_otc_allowance(plan_number)
+            if otc and otc.get("has_otc") and otc.get("amount"):
+                amount_str = otc["amount"].replace("$", "").replace(",", "")
+                try:
+                    otc_cap = float(amount_str)
+                    period = otc.get("period", "Monthly")
+                    totals = udb.get_current_period_totals(clean, {"otc": period})
+                    spent = totals.get("otc", 0)
+                    remaining = otc_cap - spent
+                    pct_used = round(spent / otc_cap * 100) if otc_cap > 0 else 0
+
+                    if pct_used < 25:
+                        alerts.append({
+                            "type": "otc_underuse",
+                            "severity": "info",
+                            "title": f"${remaining:.0f} OTC allowance unused",
+                            "body": f"Only {pct_used}% of ${otc_cap:.0f}/{period.lower()} OTC benefit used. Remind member to order health essentials.",
+                            "cap": otc_cap,
+                            "spent": spent,
+                            "remaining": remaining,
+                            "period": period,
+                        })
+                except (ValueError, TypeError):
+                    pass
+
+            # Flu shot season check (Sept-Mar)
+            if today.month >= 9 or today.month <= 3:
+                if latest_screening:
+                    flu_done = latest_screening.get("answers", {}).get("flu")
+                    if not flu_done:
+                        alerts.append({
+                            "type": "flu_season",
+                            "severity": "warning",
+                            "title": "Flu season — no flu shot recorded",
+                            "body": "It's flu season and this member hasn't reported getting their flu shot. Covered at $0 under most plans.",
+                        })
+        except Exception as e:
+            log.warning("Utilization alert check failed for ***%s: %s", clean[-4:], type(e).__name__)
+
+    # 4) Medication refill alerts
+    refill_alerts = udb.get_refill_alerts(clean)
+    for ra in refill_alerts:
+        alerts.append({
+            "type": "refill_due",
+            "severity": "warning",
+            "title": f"{ra['drug_name']} refill due",
+            "body": f"Due in {ra.get('days_until_refill', '?')} days ({ra.get('refill_due_date', 'unknown')})",
+        })
+
+    return {"alerts": alerts}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  F: SECURE MESSAGING (agent ↔ member)
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class AdminMessageSend(BaseModel):
+    body: str = Field(..., min_length=1, max_length=2000)
+
+
+@router.get("/members/{phone}/messages")
+async def admin_get_messages(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get the conversation thread between agent(s) and a member."""
+    from .user_data import UserDataDB
+    clean = _normalize_phone(phone)
+    udb = UserDataDB()
+    messages = udb.get_messages(clean, limit=100)
+    # Mark member messages as read (agent is viewing)
+    udb.mark_messages_read(clean, "member")
+    return {"messages": messages}
+
+
+@router.post("/members/{phone}/messages")
+async def admin_send_message(
+    phone: str,
+    body: AdminMessageSend,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Send a message to a member from the admin panel."""
+    from .user_data import UserDataDB
+    clean = _normalize_phone(phone)
+    if len(clean) != 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number.")
+
+    udb = UserDataDB()
+    sender_name = payload.get("sub", "Agent")
+    msg = udb.send_message(
+        phone=clean,
+        sender_type="agent",
+        sender_name=sender_name,
+        body=body.body,
+    )
+
+    # Also push a notification so the member sees it
+    _ensure_notification_tables()
+    conn = _get_store()._conn()
+    ph = _phone_hash(clean)
+    conn.execute(
+        """INSERT INTO notifications (phone, phone_hash, title, body, category, sent_by)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (clean, ph, f"New message from {sender_name}", body.body[:200], "message", sender_name),
+    )
+    conn.commit()
+
+    # Best-effort push
+    rows = conn.execute(
+        "SELECT push_token FROM push_tokens WHERE phone_hash = ?", (ph,)
+    ).fetchall()
+    if rows:
+        import httpx
+        tokens = [r["push_token"] for r in rows]
+        messages_payload = [
+            {
+                "to": t,
+                "title": f"Message from {sender_name}",
+                "body": body.body[:200],
+                "data": {"type": "secure_message"},
+                "sound": "default",
+            }
+            for t in tokens
+        ]
+        try:
+            import asyncio
+            async with httpx.AsyncClient(timeout=10) as http_client:
+                await http_client.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json=messages_payload,
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+        except Exception:
+            pass
+
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="send_message",
+        resource="message",
+        resource_id=f"***{clean[-4:]}:{msg.get('id', '')}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_send_message",
+    )
+
+    return {"message": msg}
+
+
+@router.get("/messages/inbox")
+async def admin_messages_inbox(
+    payload: dict = Depends(require_admin),
+):
+    """Get all active conversations for the admin inbox."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    conversations = udb.get_all_conversations()
+    return {"conversations": conversations}

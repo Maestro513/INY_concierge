@@ -451,6 +451,63 @@ class UserDataDB:
             "created_at": row["created_at"],
         }
 
+    def get_health_screening_history(self, phone: str) -> list[dict]:
+        """Get all screening submissions for a member, most recent first."""
+        import json
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            "SELECT * FROM health_screenings WHERE phone_hash = ? ORDER BY created_at DESC",
+            (ph,),
+        )
+        results = []
+        for r in rows:
+            answers = json.loads(r["answers_json"])
+            # Compute gaps (screenings answered 'no' or False)
+            gaps = [k for k, v in answers.items() if v is False or v == "no"]
+            completed = [k for k, v in answers.items() if v is True or v == "yes"]
+            results.append({
+                "id": r["id"],
+                "gender": r["gender"],
+                "answers": answers,
+                "gaps": gaps,
+                "completed": completed,
+                "gap_count": len(gaps),
+                "completed_count": len(completed),
+                "total_count": len(answers),
+                "created_at": r["created_at"],
+            })
+        return results
+
+    def get_sdoh_screening_history(self, phone: str) -> list[dict]:
+        """Get all SDOH screening submissions for a member, most recent first."""
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            "SELECT * FROM sdoh_screenings WHERE phone_hash = ? ORDER BY created_at DESC",
+            (ph,),
+        )
+        results = []
+        for r in rows:
+            flags = []
+            if r["transportation"] == "yes":
+                flags.append("Transportation")
+            if r["food_insecurity"] == "yes":
+                flags.append("Food Access")
+            if r["social_isolation"] in ("sometimes", "often", "always"):
+                flags.append("Social Isolation")
+            if r["housing_stability"] == "yes":
+                flags.append("Housing")
+            results.append({
+                "id": r["id"],
+                "transportation": r["transportation"],
+                "food_insecurity": r["food_insecurity"],
+                "social_isolation": r["social_isolation"],
+                "housing_stability": r["housing_stability"],
+                "flags": flags,
+                "flag_count": len(flags),
+                "created_at": r["created_at"],
+            })
+        return results
+
     # ── Appointment Requests ───────────────────────────────────────────
 
     def create_appointment_request(self, phone: str, member_name: str,
@@ -717,3 +774,84 @@ class UserDataDB:
         else:
             row = self._query_one("SELECT COUNT(*) as cnt FROM appointment_requests")
         return row["cnt"] if row else 0
+
+    # ── Secure Messaging ──────────────────────────────────────────────
+
+    def _ensure_messages_table(self):
+        """Create messages table if not present (lazy migration)."""
+        conn = self._conn()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone           TEXT NOT NULL,
+                phone_hash      TEXT NOT NULL,
+                sender_type     TEXT NOT NULL DEFAULT 'agent',
+                sender_name     TEXT NOT NULL DEFAULT '',
+                body            TEXT NOT NULL,
+                read            INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_msg_phone_hash
+                ON messages(phone_hash);
+        """)
+        conn.commit()
+
+    def send_message(self, phone: str, sender_type: str, sender_name: str,
+                     body: str) -> dict:
+        """Insert a message in the thread. sender_type: 'agent' or 'member'."""
+        self._ensure_messages_table()
+        enc_phone = self._encrypt_phone(phone)
+        ph = self._hash_phone(phone)
+        mid = self._execute(
+            """INSERT INTO messages (phone, phone_hash, sender_type, sender_name, body)
+               VALUES (?, ?, ?, ?, ?)""",
+            (enc_phone, ph, sender_type, sender_name, body),
+        )
+        row = self._query_one("SELECT * FROM messages WHERE id = ?", (mid,))
+        return dict(row) if row else {"id": mid}
+
+    def get_messages(self, phone: str, limit: int = 50) -> list[dict]:
+        """Get conversation thread for a member, most recent last."""
+        self._ensure_messages_table()
+        ph = self._hash_phone(phone)
+        rows = self._query_all(
+            "SELECT id, sender_type, sender_name, body, read, created_at FROM messages WHERE phone_hash = ? ORDER BY created_at ASC LIMIT ?",
+            (ph, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def mark_messages_read(self, phone: str, sender_type: str) -> int:
+        """Mark all messages from a given sender_type as read. Returns count."""
+        self._ensure_messages_table()
+        ph = self._hash_phone(phone)
+        conn = self._conn()
+        cursor = conn.execute(
+            "UPDATE messages SET read = 1 WHERE phone_hash = ? AND sender_type = ? AND read = 0",
+            (ph, sender_type),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    def get_unread_count(self, phone: str, sender_type: str) -> int:
+        """Count unread messages from a given sender type."""
+        self._ensure_messages_table()
+        ph = self._hash_phone(phone)
+        row = self._query_one(
+            "SELECT COUNT(*) as cnt FROM messages WHERE phone_hash = ? AND sender_type = ? AND read = 0",
+            (ph, sender_type),
+        )
+        return row["cnt"] if row else 0
+
+    def get_all_conversations(self) -> list[dict]:
+        """Get summary of all conversations for admin inbox view."""
+        self._ensure_messages_table()
+        rows = self._query_all("""
+            SELECT phone_hash,
+                   MAX(created_at) as last_message_at,
+                   COUNT(*) as total_messages,
+                   SUM(CASE WHEN sender_type = 'member' AND read = 0 THEN 1 ELSE 0 END) as unread_from_member
+            FROM messages
+            GROUP BY phone_hash
+            ORDER BY MAX(created_at) DESC
+        """)
+        return [dict(r) for r in rows]
