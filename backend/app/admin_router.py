@@ -1089,3 +1089,215 @@ async def update_appointment_request(
         detail=f"status={body.status or 'unchanged'}",
     )
     return {"success": True, "request": updated}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  AGENT PHONE INTAKE — submit screening / SDOH on behalf of a member
+# ════════════════════════════════════════════════════════════════════════════
+
+class AgentHealthScreeningRequest(BaseModel):
+    gender: str = Field("", max_length=20)
+    answers: dict = Field(default_factory=dict)
+    reminders: list = Field(default_factory=list)
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: str) -> str:
+        allowed = {"male", "female", "other", ""}
+        if v.lower() not in allowed:
+            raise ValueError(f"gender must be one of {allowed}")
+        return v.lower()
+
+    @field_validator("reminders")
+    @classmethod
+    def limit_reminders(cls, v: list) -> list:
+        if len(v) > 100:
+            raise ValueError("Too many reminders (max 100).")
+        return v
+
+
+@router.post("/members/{phone}/health-screening")
+async def admin_submit_health_screening(
+    phone: str,
+    body: AgentHealthScreeningRequest,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Agent submits a health-screening on behalf of a member (phone intake)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    data = body.model_dump()
+    data["submitted_by"] = "agent"
+    data["agent_username"] = payload.get("sub", "unknown")
+    udb.save_health_screenings(phone, data)
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="health_screening",
+        resource_id=phone[-4:],
+        ip_address=request.client.host if request.client else "",
+        detail=f"agent_phone_intake gender={body.gender} answers={len(body.answers)}",
+    )
+    log.info("Agent %s submitted health screening for member ***%s", payload.get("sub"), phone[-4:])
+    return {"success": True}
+
+
+class AgentSDoHScreeningRequest(BaseModel):
+    transportation: str = Field("no", pattern=r"^(yes|no)$")
+    food_insecurity: str = Field("no", pattern=r"^(yes|no)$")
+    social_isolation: str = Field("never", pattern=r"^(never|rarely|sometimes|often|always)$")
+    housing_stability: str = Field("no", pattern=r"^(yes|no)$")
+
+
+@router.post("/members/{phone}/sdoh-screening")
+async def admin_submit_sdoh_screening(
+    phone: str,
+    body: AgentSDoHScreeningRequest,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Agent submits an SDOH screening on behalf of a member (phone intake)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    udb.save_sdoh_screening(phone, body.model_dump())
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="sdoh_screening",
+        resource_id=phone[-4:],
+        ip_address=request.client.host if request.client else "",
+        detail="agent_phone_intake",
+    )
+    log.info("Agent %s submitted SDOH screening for member ***%s", payload.get("sub"), phone[-4:])
+    return {"success": True}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  ADMIN REMINDER CRUD (manage reminders on behalf of a member)
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class AdminReminderCreate(BaseModel):
+    drug_name: str = Field(..., min_length=1, max_length=200)
+    dose_label: str = Field("", max_length=200)
+    time_hour: int = Field(..., ge=0, le=23)
+    time_minute: int = Field(0, ge=0, le=59)
+
+
+class AdminReminderUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    time_hour: Optional[int] = Field(None, ge=0, le=23)
+    time_minute: Optional[int] = Field(None, ge=0, le=59)
+    dose_label: Optional[str] = Field(None, max_length=200)
+
+
+@router.get("/members/{phone}/reminders")
+async def admin_list_reminders(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """List all medication reminders for a member."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    return {"reminders": udb.get_reminders(phone)}
+
+
+@router.post("/members/{phone}/reminders")
+async def admin_create_reminder(
+    phone: str,
+    body: AdminReminderCreate,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Create a medication reminder for a member."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    reminder = udb.create_reminder(
+        phone=phone,
+        drug_name=body.drug_name,
+        time_hour=body.time_hour,
+        time_minute=body.time_minute,
+        dose_label=body.dose_label,
+    )
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="create",
+        resource="reminder",
+        resource_id=f"***{phone[-4:]}:{reminder.get('id', '')}",
+        ip_address=request.client.host if request.client else "",
+        detail=f"admin_create_reminder drug={body.drug_name}",
+    )
+    return {"reminder": reminder}
+
+
+@router.put("/members/{phone}/reminders/{reminder_id}")
+async def admin_update_reminder(
+    phone: str,
+    reminder_id: int,
+    body: AdminReminderUpdate,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Update a medication reminder (toggle enabled, change time, etc.)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    reminder = udb.update_reminder(phone, reminder_id, **body.model_dump(exclude_none=True))
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="update",
+        resource="reminder",
+        resource_id=f"***{phone[-4:]}:{reminder_id}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_update_reminder",
+    )
+    return {"reminder": reminder}
+
+
+@router.delete("/members/{phone}/reminders/{reminder_id}")
+async def admin_delete_reminder(
+    phone: str,
+    reminder_id: int,
+    request: Request,
+    payload: dict = Depends(require_role("admin", "super_admin")),
+):
+    """Delete a medication reminder."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    deleted = udb.delete_reminder(phone, reminder_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    get_audit_log().record(
+        actor=payload.get("sub", "unknown"),
+        action="delete",
+        resource="reminder",
+        resource_id=f"***{phone[-4:]}:{reminder_id}",
+        ip_address=request.client.host if request.client else "",
+        detail="admin_delete_reminder",
+    )
+    return {"deleted": True}
+
+
+@router.get("/members/{phone}/health-screening")
+async def admin_get_health_screening(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get a member's most recent health screening (for pre-populating the form)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    result = udb.get_health_screenings(phone)
+    return {"screening": result}
+
+
+@router.get("/members/{phone}/sdoh-screening")
+async def admin_get_sdoh_screening(
+    phone: str,
+    payload: dict = Depends(require_admin),
+):
+    """Get a member's most recent SDOH screening (for pre-populating the form)."""
+    from .user_data import UserDataDB
+    udb = UserDataDB()
+    result = udb.get_sdoh_screening(phone)
+    return {"screening": result}
